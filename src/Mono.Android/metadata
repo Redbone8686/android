@@ -1893,6 +1893,7 @@
   <attr api-since="35" path="/api/package[@name='android.adservices.ondevicepersonalization']" name="managedName">Android.AdServices.OnDevicePersonalization</attr>
   <attr api-since="35" path="/api/package[@name='android.adservices.signals']" name="managedName">Android.AdServices.Signals</attr>
   <attr api-since="35" path="/api/package[@name='java.util.random']" name="managedName">Java.Util.RandomGenerators</attr>
+  <attr api-since="35" path="/api/package[@name='android.service.persistentdata']" name="managedName">Android.Service.PersistentData</attr>
 
   <!-- API-35 adds new java.util.Sequenced[Collection|Map] interfaces that existing interfaces/classes now implement. -->
   <!-- Fix covariant return types for new 'reversed ()' method. -->	
