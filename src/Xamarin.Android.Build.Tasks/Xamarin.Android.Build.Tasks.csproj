@@ -92,6 +92,12 @@
     <Compile Include="..\Mono.Android\\Android.App\MetaDataAttribute.Partial.cs">
       <Link>Mono.Android\MetaDataAttribute.Partial.cs</Link>
     </Compile>
+    <Compile Include="..\Mono.Android\\Android.App\PropertyAttribute.cs">
+      <Link>Mono.Android\PropertyAttribute.cs</Link>
+    </Compile>
+    <Compile Include="..\Mono.Android\\Android.App\PropertyAttribute.Partial.cs">
+      <Link>Mono.Android\PropertyAttribute.Partial.cs</Link>
+    </Compile>
     <Compile Include="..\Mono.Android\\Android.Content\GrantUriPermissionAttribute.cs">
       <Link>Mono.Android\GrantUriPermissionAttribute.cs</Link>
     </Compile>
@@ -155,6 +161,8 @@
     <Compile Include="..\..\build-tools\xa-prep-tasks\Xamarin.Android.BuildTools.PrepTasks\Sleep.cs">
       <Link>Xamarin.Android.BuildTools.PrepTasks\Sleep.cs</Link>
     </Compile>
+    <_MonoAndroidEnum Include="$(AndroidGeneratedClassDirectory)\Android.Content.PM.ApplicationCategories.cs" />
+    <_MonoAndroidEnum Include="$(AndroidGeneratedClassDirectory)\Android.Content.PM.GwpAsan.cs" />
     <_MonoAndroidEnum Include="$(AndroidGeneratedClassDirectory)\Android.Content.PM.LaunchMode.cs" />
     <_MonoAndroidEnum Include="$(AndroidGeneratedClassDirectory)\Android.Content.PM.ScreenOrientation.cs" />
     <_MonoAndroidEnum Include="$(AndroidGeneratedClassDirectory)\Android.Content.PM.ConfigChanges.cs" />
@@ -166,6 +174,7 @@
     <_MonoAndroidEnum Include="$(AndroidGeneratedClassDirectory)\Android.Content.PM.ActivityPersistableMode.cs" />
     <_MonoAndroidEnum Include="$(AndroidGeneratedClassDirectory)\Android.Content.PM.DocumentLaunchMode.cs" />
     <_MonoAndroidEnum Include="$(AndroidGeneratedClassDirectory)\Android.Views.WindowRotationAnimation.cs" />
+    <_MonoAndroidEnum Include="..\Mono.Android\Android.App\RequiredContentUriPermission.cs" />
     <Compile Include="@(_MonoAndroidEnum)">
       <Link>Mono.Android\%(Filename)%(Extension)</Link>
     </Compile>

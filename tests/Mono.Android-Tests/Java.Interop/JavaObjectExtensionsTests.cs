@@ -41,6 +41,32 @@ namespace Java.InteropTests {
 		}
 
 		[Test]
+		public void JavaCast_BadInterfaceCast ()
+		{
+			using var n = new Java.Lang.Integer (42);
+			var e = Assert.Catch<Exception>(() => JavaObjectExtensions.JavaCast<Java.Lang.IAppendable> (n));
+			if (e is System.Reflection.TargetInvocationException tie) {
+				// .NET 8 behavior
+				Assert.IsTrue (tie.InnerException is InvalidCastException);
+			} else if (e is InvalidCastException ice) {
+				// Yay
+			} else {
+				Assert.Fail ($"Unexpected exception type: {e.GetType ()}: {e.ToString ()}");
+			}
+		}
+
+		[Test]
+		public void JavaCast_ObtainOriginalInstance ()
+		{
+			using var list = new Java.Util.ArrayList ();
+			using var copy = new Java.Lang.Object (list.Handle, JniHandleOwnership.DoNotTransfer);
+			using var al   = JavaObjectExtensions.JavaCast<Java.Util.AbstractList> (copy);
+
+			// Semantic change: in .NET 8, `al` is a new `AbstractListInvoker` instance, not `list`
+			Assert.AreSame (list, al);
+		}
+
+		[Test]
 		public void JavaCast_InvalidTypeCastThrows ()
 		{
 			using (var s = new Java.Lang.String ("value")) {
@@ -54,6 +80,14 @@ namespace Java.InteropTests {
 			using (var o = CreateObject ()) {
 				Assert.Throws<InvalidCastException> (() => JavaObjectExtensions.JavaCast<MyObject> (o));
 			}
+		}
+
+		[Test]
+		public void JavaAs ()
+		{
+			using var v     = new Java.InteropTests.MyJavaInterfaceImpl ();
+			using var c     = v.JavaAs<Java.Lang.ICloneable>();
+			Assert.IsNotNull (c);
 		}
 
 		static Java.Lang.Object CreateObject ()

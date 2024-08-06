@@ -47,7 +47,7 @@
     <AdditionalFiles Include="PublicAPI\API-$(AndroidApiLevel)\PublicAPI.Shipped.txt" />
     <AdditionalFiles Include="PublicAPI\API-$(AndroidApiLevel)\PublicAPI.Unshipped.txt" />
   </ItemGroup>
-  
+
   <PropertyGroup>
     <JavaCallableWrapperAbsAssembly>$([System.IO.Path]::GetFullPath ('$(OutputPath)$(AssemblyName).dll'))</JavaCallableWrapperAbsAssembly>
   </PropertyGroup>
@@ -81,6 +81,8 @@
     </Compile>
     <Compile Include="Android.App\IntentFilterAttribute.Partial.cs" />
     <Compile Include="Android.App\MetaDataAttribute.Partial.cs" />
+    <Compile Include="Android.App\PropertyAttribute.Partial.cs" />
+    <Compile Include="Android.App\RequiredContentUriPermission.cs" />
     <Compile Include="Android.App\UsesFeatureAttribute.Partial.cs" />
     <Compile Include="Android.App\UsesLibraryAttribute.Partial.cs" />
     <Compile Include="Android.App\UsesPermissionAttribute.Partial.cs" />
@@ -91,6 +93,7 @@
     <Compile Include="Android.Icu\ListFormatter.cs" />
     <Compile Include="Android.Icu\RelativeDateTimeFormatter.cs" />
     <Compile Include="Android.Icu\DateIntervalFormat.cs" />
+    <Compile Include="Android.Net.Wifi.P2p\WifiP2pManager.cs" />
     <Compile Include="Android.Runtime\DynamicMethodNameCounter.cs" />
     <Compile Include="Android.Runtime\IJavaObjectValueMarshaler.cs" />
     <Compile Include="Android.Telecom\InCallService.cs" />
@@ -151,6 +154,7 @@
     <Compile Include="Android.App\PermissionGroupAttribute.cs" />
     <Compile Include="Android.App\PermissionTreeAttribute.cs" />
     <Compile Include="Android.App\ProgressDialog.cs" />
+    <Compile Include="Android.App\PropertyAttribute.cs" />
     <Compile Include="Android.App\SearchManager.cs" />
     <Compile Include="Android.App\SupportsGLTextureAttribute.cs" />
     <Compile Include="Android.App\SyncContext.cs" />
@@ -260,6 +264,7 @@
     <Compile Include="Android.Runtime\XAPeerMembers.cs" />
     <Compile Include="Android.Runtime\XmlPullParserReader.cs" />
     <Compile Include="Android.Runtime\XmlReaderPullParser.cs" />
+    <Compile Include="Android.Security\KeyChain.cs" />
     <Compile Include="Android.Telephony\CellInfo.cs" />
     <Compile Include="Android.Telephony\PhoneNumberUtils.cs" />
     <Compile Include="Android.Telephony\TelephonyManager.cs" />
@@ -392,7 +397,7 @@
   <PropertyGroup Condition=" '$(AndroidApiLevel)' &lt; '$(AndroidDefaultTargetDotnetApiLevel)' ">
     <BuildDependsOn></BuildDependsOn>
   </PropertyGroup>
-  
+
   <PropertyGroup Condition=" '$(AndroidApiLevel)' &gt;= '$(AndroidDefaultTargetDotnetApiLevel)' ">
     <BuildDependsOn>
       $(BuildDependsOn);
