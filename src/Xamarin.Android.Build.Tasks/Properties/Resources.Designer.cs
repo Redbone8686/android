@@ -108,6 +108,15 @@ namespace Xamarin.Android.Tasks.Properties {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to Invalid file name: filenames cannot use java reserved words..
+        /// </summary>
+        public static string APT0005 {
+            get {
+                return ResourceManager.GetString("APT0005", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   Looks up a localized string similar to This could be caused by the project exceeding the Windows maximum path length limitation. See https://learn.microsoft.com/dotnet/android/messages/apt2264 for details..
         /// </summary>
         public static string APT2264 {
@@ -531,6 +540,15 @@ namespace Xamarin.Android.Tasks.Properties {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to Command '{0}' failed.\n{1}
+        /// </summary>
+        public static string XA0142 {
+            get {
+                return ResourceManager.GetString("XA0142", resourceCulture);
+            }
+        }
+
+            /// <summary>
         ///   Looks up a localized string similar to There was a problem parsing {0}. This is likely due to incomplete or invalid XML. Exception: {1}.
         /// </summary>
         public static string XA1000 {
@@ -743,24 +761,6 @@ namespace Xamarin.Android.Tasks.Properties {
         public static string XA1025 {
             get {
                 return ResourceManager.GetString("XA1025", resourceCulture);
-            }
-        }
-
-        /// <summary>
-        ///   Looks up a localized string similar to Using AAPT is deprecated in favor of AAPT2. Please enable &apos;Use incremental Android packaging system (aapt2)&apos; in the Visual Studio project property pages or edit the project file in a text editor and set the &apos;AndroidUseAapt2&apos; MSBuild property to &apos;true&apos;..
-        /// </summary>
-        public static string XA1026 {
-            get {
-                return ResourceManager.GetString("XA1026", resourceCulture);
-            }
-        }
-
-        /// <summary>
-        ///   Looks up a localized string similar to Using AAPT is not supported in .NET for Android projects that target .NET 6 or higher. Please enable &apos;Use incremental Android packaging system (aapt2)&apos; in the Visual Studio project property pages or edit the project file in a text editor and set the &apos;AndroidUseAapt2&apos; MSBuild property to &apos;true&apos;..
-        /// </summary>
-        public static string XA1026_dotnet {
-            get {
-                return ResourceManager.GetString("XA1026_dotnet", resourceCulture);
             }
         }
 
@@ -1273,8 +1273,7 @@ namespace Xamarin.Android.Tasks.Properties {
 
         /// <summary>
         ///   Looks up a localized string similar to Cannot download Maven artifact &apos;{0}:{1}&apos;.
-        ///- {2}: {3}
-        ///- {4}: {5}.
+        ///{2}.
         /// </summary>
         public static string XA4236 {
             get {
@@ -1371,6 +1370,15 @@ namespace Xamarin.Android.Tasks.Properties {
         public static string XA4248 {
             get {
                 return ResourceManager.GetString("XA4248", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Maven artifact specification &apos;{0}&apos; is invalid. The correct format is &apos;group_id:artifact_id:version&apos;..
+        /// </summary>
+        public static string XA4249 {
+            get {
+                return ResourceManager.GetString("XA4249", resourceCulture);
             }
         }
 
@@ -1544,6 +1552,15 @@ namespace Xamarin.Android.Tasks.Properties {
         public static string XA4314 {
             get {
                 return ResourceManager.GetString("XA4314", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Ignoring {0}. Manifest does not have the required 'package' attribute on the manifest element.
+        /// </summary>
+        public static string XA4315 {
+            get {
+                return ResourceManager.GetString("XA4315", resourceCulture);
             }
         }
 
@@ -1737,6 +1754,24 @@ namespace Xamarin.Android.Tasks.Properties {
         public static string XA8000 {
             get {
                 return ResourceManager.GetString("XA8000", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Executable 'gradlew' not found in project directory '{0}'. Please ensure the path to your Gradle project folder is correct, and that it contains Gradle Wrapper scripts..
+        /// </summary>
+        public static string XAGRDL1000 {
+            get {
+                return ResourceManager.GetString("XAGRDL1000", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to dding reference to Gradle output: '{0}'. The '%(CreateAndroidLibrary)' metadata can be set to 'false' to opt out of this behavior..
+        /// </summary>
+        public static string XAGRDLRefLibraryOutputs {
+            get {
+                return ResourceManager.GetString("XAGRDLRefLibraryOutputs", resourceCulture);
             }
         }
     }

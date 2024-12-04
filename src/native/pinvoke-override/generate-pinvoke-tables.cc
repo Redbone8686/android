@@ -34,7 +34,6 @@ using namespace xamarin::android;
 const std::vector<std::string> internal_pinvoke_names = {
 	"create_public_directory",
 	"java_interop_free",
-	"java_interop_strdup",
 	"monodroid_clear_gdb_wait",
 	"_monodroid_counters_dump",
 	"_monodroid_detect_cpu_and_architecture",
@@ -46,7 +45,6 @@ const std::vector<std::string> internal_pinvoke_names = {
 	"monodroid_free",
 	"_monodroid_freeifaddrs",
 	"_monodroid_gc_wait_for_bridge_processing",
-	"_monodroid_get_android_api_level",
 	"_monodroid_get_dns_servers",
 	"monodroid_get_dylib",
 	"_monodroid_get_identity_hash_code",

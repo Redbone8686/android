@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using System.Xml.XPath;
 using Mono.Cecil;
 using NUnit.Framework;
+
+using Xamarin.Android.Tools;
 using Xamarin.ProjectTools;
 
 namespace Xamarin.Android.Build.Tests
@@ -28,13 +29,26 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
+		public void DotNetRun ([Values (true, false)] bool isRelease)
+		{
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease
+			};
+			using var builder = CreateApkBuilder ();
+			builder.Save (proj);
+
+			var dotnet = new DotNetCLI (Path.Combine (Root, builder.ProjectDirectory, proj.ProjectFilePath));
+			Assert.IsTrue (dotnet.Build (), "`dotnet build` should succeed");
+			Assert.IsTrue (dotnet.Run (), "`dotnet run --no-build` should succeed");
+
+			bool didLaunch = WaitForActivityToStart (proj.PackageName, "MainActivity",
+				Path.Combine (Root, builder.ProjectDirectory, "logcat.log"), 30);
+			Assert.IsTrue (didLaunch, "Activity should have started.");
+		}
+
+		[Test]
 		public void NativeAssemblyCacheWithSatelliteAssemblies ([Values (true, false)] bool enableMarshalMethods)
 		{
-			// TODO: enable when marshal methods are fixed
-			if (enableMarshalMethods) {
-				Assert.Ignore ("Test is skipped when marshal methods are enabled, pending fixes to MM for .NET9");
-			}
-
 			var path = Path.Combine ("temp", TestName);
 			var lib = new XamarinAndroidLibraryProject {
 				ProjectName = "Localization",
@@ -493,61 +507,6 @@ using System.Runtime.Serialization.Json;
 			{
 				return line.Contains ("Failed to load shared library");
 			}
-		}
-
-		[Test]
-		public void ResourceDesignerWithNuGetReference ([Values ("net8.0-android", "net9.0-android")] string dotnetTargetFramework)
-		{
-			// Build a NuGet Package
-			var nuget = new XamarinAndroidLibraryProject () {
-				Sdk = "Xamarin.Legacy.Sdk/0.2.0-alpha4",
-				ProjectName = "Test.Nuget.Package",
-				IsRelease = true,
-				ExtraNuGetConfigSources = {
-					"https://api.nuget.org/v3/index.json",
-				},
-			};
-			nuget.Sources.Clear ();
-			nuget.Sources.Add (new AndroidItem.AndroidResource ("Resources/values/Strings.xml") {
-						TextContent = () => @"<resources>
-    <string name='library_resouce_from_nuget'>Library Resource From Nuget</string>
-</resources>",
-			});
-			nuget.SetProperty ("PackageName", "Test.Nuget.Package");
-			var legacyTargetFrameworkVersion = "13.0";
-			var legacyTargetFramework = $"monoandroid{legacyTargetFrameworkVersion}";
-			nuget.TargetFramework = "";
-			nuget.TargetFrameworks = $"{dotnetTargetFramework};{legacyTargetFramework}";
-
-			var rootPath = Path.Combine (Root, "temp", TestName);
-			var nugetBuilder = CreateDllBuilder (Path.Combine (rootPath, nuget.ProjectName));
-			nugetBuilder.Save (nuget);
-			var dotnet = new DotNetCLI (Path.Combine (rootPath, nuget.ProjectName, nuget.ProjectFilePath));
-			Assert.IsTrue (dotnet.Pack (parameters: new [] { "Configuration=Release" }), "`dotnet pack` should succeed");
-
-			// Build an app which references it.
-			var proj = new XamarinAndroidApplicationProject () {
-				ProjectName = "App1",
-				IsRelease = true,
-			};
-			proj.SetAndroidSupportedAbis (DeviceAbi);
-			proj.OtherBuildItems.Add (new BuildItem ("None", "NuGet.config") {
-				TextContent = () => @"<?xml version='1.0' encoding='utf-8'?>
-<configuration>
-  <packageSources>
-	<add key='local' value='" + Path.Combine (Root, nugetBuilder.ProjectDirectory, "bin", "Release") + @"' />
-  </packageSources>
-</configuration>",
-			});
-			proj.PackageReferences.Add (new Package {
-					Id = "Test.Nuget.Package",
-					Version = "1.0.0",
-				});
-			builder = CreateApkBuilder (Path.Combine (rootPath, proj.ProjectName));
-			Assert.IsTrue (builder.Install (proj, doNotCleanupOnUpdate: true), "Install should have succeeded.");
-			string resource_designer = GetResourceDesignerPath (builder, proj);
-			var contents = GetResourceDesignerText (proj, resource_designer);
-			StringAssert.Contains ("public const int library_resouce_from_nuget =", contents);
 		}
 
 		[Test]
@@ -1010,6 +969,64 @@ namespace UnnamedProject
 		}
 
 		[Test]
+		[TestCase (false, true)]
+		[TestCase (false, false)]
+		[TestCase (true, false)]
+		public void FastDeployEnvironmentFiles (bool isRelease, bool embedAssembliesIntoApk)
+		{
+			if (embedAssembliesIntoApk) {
+				AssertCommercialBuild ();
+			}
+
+			var proj = new XamarinAndroidApplicationProject {
+				ProjectName = nameof (FastDeployEnvironmentFiles),
+				RootNamespace = nameof (FastDeployEnvironmentFiles),
+				IsRelease = isRelease,
+				EmbedAssembliesIntoApk = embedAssembliesIntoApk,
+				EnableDefaultItems = true,
+				OtherBuildItems = {
+					new BuildItem("AndroidEnvironment", "env.txt") {
+						TextContent = () => @"Foo=Bar
+Bar34=Foo55",
+					}
+				}
+			};
+			proj.MainActivity = proj.DefaultMainActivity.Replace ("//${AFTER_ONCREATE}", @"
+		Console.WriteLine (""Foo="" + Environment.GetEnvironmentVariable(""Foo""));
+		Console.WriteLine (""Bar34="" + Environment.GetEnvironmentVariable(""Bar34""));
+		Console.WriteLine (""DOTNET_MODIFIABLE_ASSEMBLIES="" + Environment.GetEnvironmentVariable(""DOTNET_MODIFIABLE_ASSEMBLIES""));");
+			var builder = CreateApkBuilder ();
+			Assert.IsTrue (builder.Build (proj), "`dotnet build` should succeed");
+			RunProjectAndAssert (proj, builder);
+
+			WaitForPermissionActivity (Path.Combine (Root, builder.ProjectDirectory, "permission-logcat.log"));
+			bool didLaunch = WaitForActivityToStart (proj.PackageName, "MainActivity",
+				Path.Combine (Root, builder.ProjectDirectory, "logcat.log"), 30);
+			Assert.IsTrue(didLaunch, "Activity should have started.");
+			var appStartupLogcatFile = Path.Combine (Root, builder.ProjectDirectory, "logcat.log");
+			var logcatOutput = File.ReadAllText (appStartupLogcatFile);
+
+			StringAssert.Contains (
+					"Foo=Bar",
+					logcatOutput,
+					"The Environment variable \"Foo\" was not set."
+			);
+			StringAssert.Contains (
+					"Bar34=Foo55",
+					logcatOutput,
+					"The Environment variable \"Bar34\" was not set."
+			);
+			// NOTE: set when $(UseInterpreter) is true, default for Debug mode
+			if (!isRelease) {
+				StringAssert.Contains (
+						"DOTNET_MODIFIABLE_ASSEMBLIES=Debug",
+						logcatOutput,
+						"The Environment variable \"DOTNET_MODIFIABLE_ASSEMBLIES\" was not set."
+				);
+			}
+		}
+
+		[Test]
 		public void EnableAndroidStripILAfterAOT ([Values (false, true)] bool profiledAOT)
 		{
 			var proj = new XamarinAndroidApplicationProject {
@@ -1136,5 +1153,127 @@ namespace UnnamedProject
 				Path.Combine (Root, builder.ProjectDirectory, "logcat.log"), 30);
 			Assert.IsTrue (didLaunch, "Activity should have started.");
 		}
+
+		[Test]
+		public void GradleFBProj ([Values (false, true)] bool isRelease)
+		{
+			var moduleName = "Library";
+			var gradleTestProjectDir = Path.Combine (Root, "temp", "gradle", TestName);
+			var gradleModule = new AndroidGradleModule (Path.Combine (gradleTestProjectDir, moduleName));
+			gradleModule.PackageName = "com.microsoft.mauifacebook";
+			gradleModule.BuildGradleFileContent = $@"
+plugins {{
+    id(""com.android.library"")
+}}
+android {{
+    namespace = ""{gradleModule.PackageName}""
+    compileSdk = {XABuildConfig.AndroidDefaultTargetDotnetApiLevel}
+    defaultConfig {{
+        minSdk = {XABuildConfig.AndroidMinimumDotNetApiLevel}
+    }}
+}}
+dependencies {{
+    implementation(""androidx.appcompat:appcompat:1.7.0"")
+    implementation(""com.google.android.material:material:1.11.0"")
+    implementation(""com.facebook.android:facebook-android-sdk:17.0.2"")
+}}
+";
+			gradleModule.JavaSources.Add (new AndroidItem.AndroidJavaSource ("FacebookSdk.java") {
+				TextContent = () => $@"
+package com.microsoft.mauifacebook;
+public class FacebookSdk {{
+    static com.facebook.appevents.AppEventsLogger _logger;
+    public static void initializeSDK(android.app.Activity activity, Boolean isDebug) {{
+        android.app.Application application = activity.getApplication();
+        com.facebook.FacebookSdk.sdkInitialize(application);
+        com.facebook.FacebookSdk.addLoggingBehavior(com.facebook.LoggingBehavior.APP_EVENTS);
+        com.facebook.appevents.AppEventsLogger.activateApp(application);
+        _logger = com.facebook.appevents.AppEventsLogger.newLogger(activity);
+    }}
+    public static void logEvent(String eventName) {{
+        _logger.logEvent(eventName);
+    }}
+}}
+",
+			});
+
+			var gradleProject = new AndroidGradleProject (gradleTestProjectDir) {
+				Modules = {
+					gradleModule,
+				},
+			};
+			gradleProject.Create ();
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+				ExtraNuGetConfigSources = {
+					"https://api.nuget.org/v3/index.json",
+				},
+				OtherBuildItems = {
+					new AndroidItem.TransformFile ("Transforms\\Metadata.xml") {
+						TextContent = () => $@"<metadata><attr path=""/api/package[@name='{gradleModule.PackageName}']"" name=""managedName"">Facebook</attr></metadata>",
+					},
+					new BuildItem (KnownProperties.AndroidGradleProject, gradleProject.BuildFilePath) {
+						Metadata = {
+							{ "ModuleName", moduleName },
+						},
+					},
+					new BuildItem ("AndroidMavenLibrary", "com.facebook.android:facebook-core") {
+						Metadata = {
+							{ "Version", "17.0.2" },
+							{ "Bind", "false" },
+						},
+					},
+					new BuildItem ("AndroidMavenLibrary", "com.facebook.android:facebook-bolts") {
+						Metadata = {
+							{ "Version", "17.0.2" },
+							{ "Bind", "false" },
+						},
+					},
+				},
+				PackageReferences = {
+					new Package {
+						Id = "Xamarin.AndroidX.AppCompat",
+						Version = "1.7.0.3",
+					},
+					new Package {
+						Id = "Xamarin.AndroidX.Annotation",
+						Version = "1.8.2.1",
+					},
+					new Package {
+						Id = "Xamarin.AndroidX.Legacy.Support.Core.Utils",
+						Version = "1.0.0.29",
+					},
+					new Package {
+						Id = "Xamarin.Google.Android.InstallReferrer",
+						Version = "1.1.2.6",
+					},
+					new Package {
+						Id = "Xamarin.AndroidX.Core.Core.Ktx",
+						Version = "1.13.1.5",
+					},
+					new Package {
+						Id = "Xamarin.Kotlin.StdLib",
+						Version = "2.0.21",
+					},
+				},
+			};
+			proj.MainActivity = proj.DefaultMainActivity.Replace ("//${AFTER_ONCREATE}", @"
+Facebook.FacebookSdk.InitializeSDK(this, Java.Lang.Boolean.True);
+Facebook.FacebookSdk.LogEvent(""TestFacebook"");
+");
+			proj.AndroidManifest =@"<?xml version=""1.0"" encoding=""utf-8""?>
+<manifest xmlns:android=""http://schemas.android.com/apk/res/android"" xmlns:tools=""http://schemas.android.com/tools"" android:versionCode=""1"" android:versionName=""1.0"" package=""com.xamarin.gradleproj"">
+  <application android:label=""UnnamedProject"">
+    <meta-data android:name=""com.facebook.sdk.ApplicationId"" android:value=""appid""/>
+    <meta-data android:name=""com.facebook.sdk.ClientToken"" android:value=""token""/>
+  </application>
+</manifest>";
+
+			using var builder = CreateApkBuilder ();
+			Assert.IsTrue (builder.Build (proj));
+			RunProjectAndAssert (proj, builder);
+		}
+
 	}
 }

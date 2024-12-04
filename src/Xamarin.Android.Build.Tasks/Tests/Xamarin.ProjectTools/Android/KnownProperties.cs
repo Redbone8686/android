@@ -9,9 +9,9 @@ namespace Xamarin.ProjectTools
 
 		public const string AndroidLinkMode = "AndroidLinkMode";
 		public const string EmbedAssembliesIntoApk = "EmbedAssembliesIntoApk";
-		public const string AndroidUseAapt2 = "AndroidUseAapt2";
 		public const string AndroidCreatePackagePerAbi = "AndroidCreatePackagePerAbi";
 		public const string AndroidEnableMarshalMethods = "AndroidEnableMarshalMethods";
+		public const string AndroidGradleProject = "AndroidGradleProject";
 
 		public const string AndroidSupportedAbis = "AndroidSupportedAbis";
 		public const string RuntimeIdentifier = "RuntimeIdentifier";

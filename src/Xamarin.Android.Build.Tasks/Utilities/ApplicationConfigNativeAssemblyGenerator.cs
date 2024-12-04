@@ -155,6 +155,7 @@ namespace Xamarin.Android.Tasks
 		SortedDictionary <string, string>? systemProperties;
 		StructureInstance? application_config;
 		List<StructureInstance<DSOCacheEntry>>? dsoCache;
+		List<StructureInstance<DSOCacheEntry>>? aotDsoCache;
 		List<StructureInstance<XamarinAndroidBundledAssembly>>? xamarinAndroidBundledAssemblies;
 
 		StructureInfo? applicationConfigStructureInfo;
@@ -172,7 +173,6 @@ namespace Xamarin.Android.Tasks
 		public string AndroidPackageName { get; set; }
 		public bool BrokenExceptionTransitions { get; set; }
 		public global::Android.Runtime.BoundExceptionType BoundExceptionType { get; set; }
-		public bool InstantRunEnabled { get; set; }
 		public bool JniAddNativeMethodRegistrationAttributePresent { get; set; }
 		public bool HaveRuntimeConfigBlob { get; set; }
 		public bool HaveAssemblyStore { get; set; }
@@ -218,14 +218,13 @@ namespace Xamarin.Android.Tasks
 			};
 			module.Add (sysProps, stringGroupName: "sysprop", stringGroupComment: " System properties name:value pairs");
 
-			dsoCache = InitDSOCache ();
+			(dsoCache, aotDsoCache) = InitDSOCache ();
 			var app_cfg = new ApplicationConfig {
 				uses_mono_llvm = UsesMonoLLVM,
 				uses_mono_aot = UsesMonoAOT,
 				aot_lazy_load = AotEnableLazyLoad,
 				uses_assembly_preload = UsesAssemblyPreload,
 				broken_exception_transitions = BrokenExceptionTransitions,
-				instant_run_enabled = InstantRunEnabled,
 				jni_add_native_method_registration_attribute_present = JniAddNativeMethodRegistrationAttributePresent,
 				have_runtime_config_blob = HaveRuntimeConfigBlob,
 				have_assemblies_blob = HaveAssemblyStore,
@@ -239,6 +238,7 @@ namespace Xamarin.Android.Tasks
 				number_of_shared_libraries = (uint)NativeLibraries.Count,
 				bundled_assembly_name_width = (uint)BundledAssemblyNameWidth,
 				number_of_dso_cache_entries = (uint)dsoCache.Count,
+				number_of_aot_cache_entries = (uint)aotDsoCache.Count,
 				android_runtime_jnienv_class_token = (uint)AndroidRuntimeJNIEnvToken,
 				jnienv_initialize_method_token = (uint)JNIEnvInitializeToken,
 				jnienv_registerjninatives_method_token = (uint)JNIEnvRegisterJniNativesToken,
@@ -255,6 +255,12 @@ namespace Xamarin.Android.Tasks
 				BeforeWriteCallback = HashAndSortDSOCache,
 			};
 			module.Add (dso_cache);
+
+			var aot_dso_cache = new LlvmIrGlobalVariable (aotDsoCache, "aot_dso_cache", LlvmIrVariableOptions.GlobalWritable) {
+				Comment = " AOT DSO cache entries",
+				BeforeWriteCallback = HashAndSortDSOCache,
+			};
+			module.Add (aot_dso_cache);
 
 			var dso_apk_entries = new LlvmIrGlobalVariable (typeof(List<StructureInstance<DSOApkEntry>>), "dso_apk_entries") {
 				ArrayItemCount = (ulong)NativeLibraries.Count,
@@ -337,7 +343,7 @@ namespace Xamarin.Android.Tasks
 			cache.Sort ((StructureInstance<DSOCacheEntry> a, StructureInstance<DSOCacheEntry> b) => a.Instance.hash.CompareTo (b.Instance.hash));
 		}
 
-		List<StructureInstance<DSOCacheEntry>> InitDSOCache ()
+		(List<StructureInstance<DSOCacheEntry>> dsoCache, List<StructureInstance<DSOCacheEntry>> aotDsoCache) InitDSOCache ()
 		{
 			var dsos = new List<(string name, string nameLabel, bool ignore)> ();
 			var nameCache = new HashSet<string> (StringComparer.OrdinalIgnoreCase);
@@ -357,6 +363,7 @@ namespace Xamarin.Android.Tasks
 			}
 
 			var dsoCache = new List<StructureInstance<DSOCacheEntry>> ();
+			var aotDsoCache = new List<StructureInstance<DSOCacheEntry>> ();
 			var nameMutations = new List<string> ();
 
 			for (int i = 0; i < dsos.Count; i++) {
@@ -372,11 +379,16 @@ namespace Xamarin.Android.Tasks
 						name = name,
 					};
 
-					dsoCache.Add (new StructureInstance<DSOCacheEntry> (dsoCacheEntryStructureInfo, entry));
+					var item = new StructureInstance<DSOCacheEntry> (dsoCacheEntryStructureInfo, entry);
+					if (name.StartsWith ("libaot-", StringComparison.OrdinalIgnoreCase)) {
+						aotDsoCache.Add (item);
+					} else {
+						dsoCache.Add (item);
+					}
 				}
 			}
 
-			return dsoCache;
+			return (dsoCache, aotDsoCache);
 
 			void AddNameMutations (string name)
 			{

@@ -1,8 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.Buffers;
 using System.IO;
 
 using K4os.Compression.LZ4;
+using Microsoft.Android.Build.Tasks;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+using Xamarin.Android.Tasks;
+using Xamarin.Android.Tools;
 
 namespace Xamarin.Android.Tasks
 {
@@ -49,7 +55,7 @@ namespace Xamarin.Android.Tasks
 
 		static readonly ArrayPool<byte> bytePool = ArrayPool<byte>.Shared;
 
-		public static CompressionResult Compress (AssemblyData data, string outputDirectory)
+		static CompressionResult Compress (AssemblyData data, string outputDirectory)
 		{
 			if (data == null)
 				throw new ArgumentNullException (nameof (data));
@@ -67,18 +73,20 @@ namespace Xamarin.Android.Tasks
 			// }
 
 			data.DestinationPath = Path.Combine (outputDirectory, $"{Path.GetFileName (data.SourcePath)}.lz4");
-			data.SourceSize = (uint)fi.Length;
+			data.SourceSize = checked((uint)fi.Length);
 
+			int bytesRead;
 			byte[] sourceBytes = null;
 			byte[] destBytes = null;
 			try {
-				sourceBytes = bytePool.Rent (checked((int)fi.Length));
+				int fileSize = checked((int)fi.Length);
+				sourceBytes = bytePool.Rent (fileSize);
 				using (var fs = File.Open (data.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read)) {
-					fs.Read (sourceBytes, 0, (int)fi.Length);
+					bytesRead = fs.Read (sourceBytes, 0, fileSize);
 				}
 
-				destBytes = bytePool.Rent (LZ4Codec.MaximumOutputSize (sourceBytes.Length));
-				int encodedLength = LZ4Codec.Encode (sourceBytes, 0, checked((int)fi.Length), destBytes, 0, destBytes.Length, LZ4Level.L12_MAX);
+				destBytes = bytePool.Rent (LZ4Codec.MaximumOutputSize (bytesRead));
+				int encodedLength = LZ4Codec.Encode (sourceBytes, 0, bytesRead, destBytes, 0, destBytes.Length, LZ4Level.L12_MAX);
 				if (encodedLength < 0)
 					return CompressionResult.EncodingFailed;
 
@@ -101,6 +109,58 @@ namespace Xamarin.Android.Tasks
 			}
 
 			return CompressionResult.Success;
+		}
+
+		public static string Compress (
+			TaskLoggingHelper log,
+			ITaskItem assembly,
+			IDictionary<AndroidTargetArch, Dictionary<string, CompressedAssemblyInfo>> compressedAssembliesInfo,
+			string compressedOutputDir)
+		{
+			if (bool.TryParse (assembly.GetMetadata ("AndroidSkipCompression"), out bool value) && value) {
+				log.LogDebugMessage ($"Skipping compression of {assembly.ItemSpec} due to 'AndroidSkipCompression' == 'true' ");
+				return assembly.ItemSpec;
+			}
+
+			string key = CompressedAssemblyInfo.GetDictionaryKey (assembly);
+			AndroidTargetArch arch = MonoAndroidHelper.GetTargetArch (assembly);
+			if (!compressedAssembliesInfo.TryGetValue (arch, out Dictionary<string, CompressedAssemblyInfo> assembliesInfo)) {
+				throw new InvalidOperationException ($"Internal error: compression assembly info for architecture {arch} not available");
+			}
+
+			if (!assembliesInfo.TryGetValue (key, out CompressedAssemblyInfo info) || info == null) {
+				log.LogDebugMessage ($"Assembly missing from {nameof (CompressedAssemblyInfo)}: {key}");
+				return assembly.ItemSpec;
+			}
+
+			AssemblyData compressedAssembly = new AssemblyData (assembly.ItemSpec, info.DescriptorIndex);
+			string assemblyOutputDir;
+			string subDirectory = assembly.GetMetadata ("DestinationSubDirectory");
+			string abi = MonoAndroidHelper.GetAssemblyAbi (assembly);
+			if (!String.IsNullOrEmpty (subDirectory) && !(subDirectory.EndsWith ($"{abi}/", StringComparison.Ordinal) || subDirectory.EndsWith ($"{abi}\\", StringComparison.Ordinal))) {
+				assemblyOutputDir = Path.Combine (compressedOutputDir, abi, subDirectory);
+			} else {
+				assemblyOutputDir = Path.Combine (compressedOutputDir, abi);
+			}
+
+			CompressionResult result = AssemblyCompression.Compress (compressedAssembly, assemblyOutputDir);
+			if (result != CompressionResult.Success) {
+				switch (result) {
+					case AssemblyCompression.CompressionResult.EncodingFailed:
+						log.LogMessage ($"Failed to compress {assembly.ItemSpec}");
+						break;
+
+					case AssemblyCompression.CompressionResult.InputTooBig:
+						log.LogMessage ($"Input assembly {assembly.ItemSpec} exceeds maximum input size");
+						break;
+
+					default:
+						log.LogMessage ($"Unknown error compressing {assembly.ItemSpec}");
+						break;
+				}
+				return assembly.ItemSpec;
+			}
+			return compressedAssembly.DestinationPath;
 		}
 	}
 }

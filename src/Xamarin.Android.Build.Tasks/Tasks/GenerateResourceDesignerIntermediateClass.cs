@@ -21,6 +21,7 @@ namespace Xamarin.Android.Tasks
 // </auto-generated>
 //------------------------------------------------------------------------------
 using System;
+using System.CodeDom.Compiler;
 
 namespace %NAMESPACE% {
 	#pragma warning disable IDE0002
@@ -28,7 +29,7 @@ namespace %NAMESPACE% {
 	/// Android Resource Designer class.
 	/// Exposes the Android Resource designer assembly into the project Namespace.
 	/// </summary>
-	public partial class Resource : %BASECLASS% {
+	%MODIFIER% partial class Resource : %BASECLASS% {
 	}
 	#pragma warning restore IDE0002
 }
@@ -40,25 +41,32 @@ namespace %NAMESPACE% {
 //------------------------------------------------------------------------------
 namespace %NAMESPACE%
 
-type Resource = %BASECLASS%
+type %MODIFIER% Resource = %BASECLASS%
 ";
 
 		public string Namespace { get; set; }
+		public string Modifier { get; set; } = "public";
 		public bool IsApplication { get; set; } = false;
 		public ITaskItem OutputFile { get; set; }
 		public override bool RunTask ()
 		{
-			string ns = IsApplication ? ResourceDesignerConstants : ResourceDesigner;
+			string baseClass = IsApplication ? ResourceDesignerConstants : ResourceDesigner;
 			var extension = Path.GetExtension (OutputFile.ItemSpec);
 			var language = string.Compare (extension, ".fs", StringComparison.OrdinalIgnoreCase) == 0 ? "F#" : CodeDomProvider.GetLanguageFromExtension (extension);
 			//bool isVB = string.Equals (extension, ".vb", StringComparison.OrdinalIgnoreCase);
 			bool isFSharp = string.Equals (language, "F#", StringComparison.OrdinalIgnoreCase);
 			bool isCSharp = string.Equals (language, "C#", StringComparison.OrdinalIgnoreCase);
+			var version = typeof(GenerateResourceDesignerIntermediateClass).Assembly.GetName().Version;
 			string template = "";
-			if (isCSharp)
-				template = CSharpTemplate.Replace ("%NAMESPACE%", Namespace).Replace ("%BASECLASS%", ns);
-			else if (isFSharp)
-				template = FSharpTemplate.Replace ("%NAMESPACE%", Namespace).Replace ("%BASECLASS%", ns);
+			if (isCSharp) {
+				template = CSharpTemplate.Replace ("%NAMESPACE%", Namespace)
+					.Replace ("%BASECLASS%", baseClass)
+					.Replace ("%MODIFIER%", Modifier.ToLower ());
+			} else if (isFSharp) {
+				template = FSharpTemplate.Replace ("%NAMESPACE%", Namespace)
+					.Replace ("%BASECLASS%", baseClass)
+					.Replace ("%MODIFIER%", Modifier.ToLower ());
+			}
 
 			Files.CopyIfStringChanged (template, OutputFile.ItemSpec);
 			return !Log.HasLoggedErrors;

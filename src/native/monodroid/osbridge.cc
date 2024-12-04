@@ -81,16 +81,15 @@ OSBridge::clear_mono_java_gc_bridge_info ()
 		info->handle = nullptr;
 		info->handle_type = nullptr;
 		info->refs_added = nullptr;
-		info->weak_handle = nullptr;
 	}
 }
 
 int
 OSBridge::get_gc_bridge_index (MonoClass *klass)
 {
-	uint32_t f = 0;
+	uint32_t f = 0u;
 
-	for (size_t i = 0; i < NUM_GC_BRIDGE_TYPES; ++i) {
+	for (size_t i = 0uz; i < NUM_GC_BRIDGE_TYPES; ++i) {
 		MonoClass *k = mono_java_gc_bridge_info [i].klass;
 		if (k == nullptr) {
 			f++;
@@ -444,67 +443,6 @@ OSBridge::monodroid_disable_gc_hooks ()
 }
 
 mono_bool
-OSBridge::take_global_ref_2_1_compat (JNIEnv *env, MonoObject *obj)
-{
-	jobject handle, weak;
-	int type = JNIGlobalRefType;
-
-	MonoJavaGCBridgeInfo    *bridge_info    = get_gc_bridge_info_for_object (obj);
-	if (bridge_info == nullptr)
-		return 0;
-
-	mono_field_get_value (obj, bridge_info->weak_handle, &weak);
-	handle = env->CallObjectMethod (weak, weakrefGet);
-	if (gref_log) {
-		fprintf (gref_log, "*try_take_global_2_1 obj=%p -> wref=%p handle=%p\n", obj, weak, handle);
-		fflush (gref_log);
-	}
-	if (handle) {
-		void* h = env->NewGlobalRef (handle);
-		env->DeleteLocalRef (handle);
-		handle = reinterpret_cast <jobject> (h);
-		_monodroid_gref_log_new (weak, get_object_ref_type (env, weak),
-		                         handle, get_object_ref_type (env, handle), "finalizer", gettid (), __PRETTY_FUNCTION__, 0);
-	}
-	_monodroid_weak_gref_delete (weak, get_object_ref_type (env, weak), "finalizer", gettid(), __PRETTY_FUNCTION__, 0);
-	env->DeleteGlobalRef (weak);
-	weak = nullptr;
-	mono_field_set_value (obj, bridge_info->weak_handle, &weak);
-
-	mono_field_set_value (obj, bridge_info->handle, &handle);
-	mono_field_set_value (obj, bridge_info->handle_type, &type);
-	return handle != nullptr;
-}
-
-mono_bool
-OSBridge::take_weak_global_ref_2_1_compat (JNIEnv *env, MonoObject *obj)
-{
-	jobject weaklocal;
-	jobject handle, weakglobal;
-
-	MonoJavaGCBridgeInfo    *bridge_info    = get_gc_bridge_info_for_object (obj);
-	if (bridge_info == nullptr)
-		return 0;
-
-	mono_field_get_value (obj, bridge_info->handle, &handle);
-	weaklocal = env->NewObject (weakrefClass, weakrefCtor, handle);
-	weakglobal = env->NewGlobalRef (weaklocal);
-	env->DeleteLocalRef (weaklocal);
-	if (gref_log) {
-		fprintf (gref_log, "*take_weak_2_1 obj=%p -> wref=%p handle=%p\n", obj, weakglobal, handle);
-		fflush (gref_log);
-	}
-	_monodroid_weak_gref_new (handle, get_object_ref_type (env, handle),
-	                          weakglobal, get_object_ref_type (env, weakglobal), "finalizer", gettid (), __PRETTY_FUNCTION__, 0);
-
-	_monodroid_gref_log_delete (handle, get_object_ref_type (env, handle), "finalizer", gettid (), __PRETTY_FUNCTION__, 0);
-
-	env->DeleteGlobalRef (handle);
-	mono_field_set_value (obj, bridge_info->weak_handle, &weakglobal);
-	return 1;
-}
-
-mono_bool
 OSBridge::take_global_ref_jni (JNIEnv *env, MonoObject *obj)
 {
 	jobject handle, weak;
@@ -524,18 +462,31 @@ OSBridge::take_global_ref_jni (JNIEnv *env, MonoObject *obj)
 		_monodroid_gref_log_new (weak, get_object_ref_type (env, weak),
 				handle, get_object_ref_type (env, handle),
 				"finalizer", gettid (),
-				"take_global_ref_jni", 0);
-	}
-	_monodroid_weak_gref_delete (weak, get_object_ref_type (env, weak),
-			"finalizer", gettid (), "take_global_ref_jni", 0);
-	env->DeleteWeakGlobalRef (weak);
-	if (!handle) {
-		void *old_handle = nullptr;
+				"   at [[gc:take_global_ref_jni]]", 0);
+	} else if (Logger::gc_spew_enabled ()) [[unlikely]] {
+		void   *key_handle  = nullptr;
+		if (bridge_info->key_handle) {
+			mono_field_get_value (obj, bridge_info->key_handle, &key_handle);
+		}
 
-		mono_field_get_value (obj, bridge_info->handle, &old_handle);
+		MonoClass *klass = mono_object_get_class (obj);
+		char *message = Util::monodroid_strdup_printf (
+				"handle %p/W; key_handle %p; MCW type: `%s.%s`: was collected by a Java GC",
+				weak,
+				key_handle,
+				mono_class_get_namespace (klass),
+				mono_class_get_name (klass));
+		_monodroid_gref_log (message);
+		free (message);
 	}
+
 	mono_field_set_value (obj, bridge_info->handle, &handle);
 	mono_field_set_value (obj, bridge_info->handle_type, &type);
+
+	_monodroid_weak_gref_delete (weak, get_object_ref_type (env, weak),
+			"finalizer", gettid (), "   at [[gc:take_global_ref_jni]]", 0);
+	env->DeleteWeakGlobalRef (weak);
+
 	return handle != nullptr;
 }
 
@@ -558,13 +509,14 @@ OSBridge::take_weak_global_ref_jni (JNIEnv *env, MonoObject *obj)
 	weak = env->NewWeakGlobalRef (handle);
 	_monodroid_weak_gref_new (handle, get_object_ref_type (env, handle),
 			weak, get_object_ref_type (env, weak),
-			"finalizer", gettid (), "take_weak_global_ref_jni", 0);
+			"finalizer", gettid (), "   at [[gc:take_weak_global_ref_jni]]", 0);
 
-	_monodroid_gref_log_delete (handle, get_object_ref_type (env, handle),
-			"finalizer", gettid (), "take_weak_global_ref_jni", 0);
-	env->DeleteGlobalRef (handle);
 	mono_field_set_value (obj, bridge_info->handle, &weak);
 	mono_field_set_value (obj, bridge_info->handle_type, &type);
+
+	_monodroid_gref_log_delete (handle, get_object_ref_type (env, handle),
+			"finalizer", gettid (), "   at [[gc:take_weak_global_ref_jni]]", 0);
+	env->DeleteGlobalRef (handle);
 	return 1;
 }
 
@@ -966,7 +918,6 @@ OSBridge::gc_cross_references (int num_sccs, MonoGCBridgeSCC **sccs, int num_xre
 	if (gc_disabled)
 		return;
 
-#if DEBUG
 	if (Logger::gc_spew_enabled ()) {
 		int i, j;
 		log_info (LOG_GC, "cross references callback invoked with %d sccs and %d xrefs.", num_sccs, num_xrefs);
@@ -975,11 +926,23 @@ OSBridge::gc_cross_references (int num_sccs, MonoGCBridgeSCC **sccs, int num_xre
 			log_info (LOG_GC, "group %d with %d objects", i, sccs [i]->num_objs);
 			for (j = 0; j < sccs [i]->num_objs; ++j) {
 				MonoObject *obj = sccs [i]->objs [j];
+
+				MonoJavaGCBridgeInfo    *bridge_info    = get_gc_bridge_info_for_object (obj);
+				jobject handle      = 0;
+				void   *key_handle  = nullptr;
+				if (bridge_info != nullptr) {
+					mono_field_get_value (obj, bridge_info->handle, &handle);
+					if (bridge_info->key_handle != nullptr) {
+						mono_field_get_value (obj, bridge_info->key_handle, &key_handle);
+					}
+				}
 				MonoClass *klass = mono_object_get_class (obj);
-				log_info (LOG_GC, "\tobj %p [%s::%s]",
+				log_info (LOG_GC, "\tobj %p [%s::%s] handle %p key_handle %p",
 						obj,
 						mono_class_get_namespace (klass),
-						mono_class_get_name (klass));
+						mono_class_get_name (klass),
+						handle,
+						key_handle);
 			}
 		}
 
@@ -988,7 +951,6 @@ OSBridge::gc_cross_references (int num_sccs, MonoGCBridgeSCC **sccs, int num_xre
 				log_info_nocheck (LOG_GC, "xref [%d] %d -> %d", i, xrefs [i].src_scc_index, xrefs [i].dst_scc_index);
 		}
 	}
-#endif
 
 	env = ensure_jnienv ();
 
@@ -1001,58 +963,13 @@ OSBridge::gc_cross_references (int num_sccs, MonoGCBridgeSCC **sccs, int num_xre
 	set_bridge_processing_field (domains_list, 0);
 }
 
-int
-OSBridge::platform_supports_weak_refs (void)
-{
-	char *value;
-	int api_level = 0;
-
-	if (AndroidSystem::monodroid_get_system_property ("ro.build.version.sdk", &value) > 0) {
-		api_level = atoi (value);
-		free (value);
-	}
-
-	if (AndroidSystem::monodroid_get_system_property (SharedConstants::DEBUG_MONO_WREF_PROPERTY, &value) > 0) {
-		int use_weak_refs = 0;
-		if (!strcmp ("jni", value))
-			use_weak_refs = 1;
-		else if (!strcmp ("java", value))
-			use_weak_refs = 0;
-		else {
-			use_weak_refs = -1;
-			log_warn (LOG_GC, "Unsupported debug.mono.wref value '%s'; "
-					"supported values are 'jni' and 'java'. Ignoring...",
-					value);
-		}
-		free (value);
-
-		if (use_weak_refs && api_level < 8)
-			log_warn (LOG_GC, "Using JNI weak references instead of "
-					"java.lang.WeakReference on API-%i. Are you sure you want to do this? "
-					"The GC may be compromised.",
-					api_level);
-
-		if (use_weak_refs >= 0)
-			return use_weak_refs;
-	}
-
-	return 1;
-}
-
 void
 OSBridge::register_gc_hooks (void)
 {
 	MonoGCBridgeCallbacks bridge_cbs;
 
-	if (platform_supports_weak_refs ()) {
-		take_global_ref = &OSBridge::take_global_ref_jni;
-		take_weak_global_ref = &OSBridge::take_weak_global_ref_jni;
-		log_info (LOG_GC, "environment supports jni NewWeakGlobalRef");
-	} else {
-		take_global_ref = &OSBridge::take_global_ref_2_1_compat;
-		take_weak_global_ref = &OSBridge::take_weak_global_ref_2_1_compat;
-		log_info (LOG_GC, "environment does not support jni NewWeakGlobalRef");
-	}
+	take_global_ref = &OSBridge::take_global_ref_jni;
+	take_weak_global_ref = &OSBridge::take_weak_global_ref_jni;
 
 	bridge_cbs.bridge_version = SGEN_BRIDGE_VERSION;
 	bridge_cbs.bridge_class_kind = gc_bridge_class_kind_cb;

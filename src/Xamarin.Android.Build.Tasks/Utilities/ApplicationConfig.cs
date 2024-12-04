@@ -29,7 +29,6 @@ namespace Xamarin.Android.Tasks
 		public bool   aot_lazy_load;
 		public bool   uses_assembly_preload;
 		public bool   broken_exception_transitions;
-		public bool   instant_run_enabled ;
 		public bool   jni_add_native_method_registration_attribute_present;
 		public bool   have_runtime_config_blob;
 		public bool   have_assemblies_blob;
@@ -42,6 +41,7 @@ namespace Xamarin.Android.Tasks
 		public uint   number_of_assemblies_in_apk;
 		public uint   bundled_assembly_name_width;
 		public uint   number_of_dso_cache_entries;
+		public uint   number_of_aot_cache_entries;
 		public uint   number_of_shared_libraries;
 
 		[NativeAssembler (NumberFormat = LLVMIR.LlvmIrVariableNumberFormat.Hexadecimal)]

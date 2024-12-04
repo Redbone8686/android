@@ -44,11 +44,14 @@ namespace Xamarin.Android.Build.Tests
 					new Package { Id = "System.Text.Json", Version = "8.0.*" },
 				},
 				Sources = {
-					new BuildItem ("EmbeddedResource", "Foo.resx") {
-						TextContent = () => InlineData.ResxWithContents ("<data name=\"CancelButton\"><value>Cancel</value></data>")
+					new BuildItem ("EmbeddedResource", "Resource.resx") {
+						TextContent = () => InlineData.ResxWithContents ("<data name=\"CancelButton\"><value>Cancel</value></data>"),
 					},
-					new BuildItem ("EmbeddedResource", "Foo.es.resx") {
+					new BuildItem ("EmbeddedResource", "Resource.es.resx") {
 						TextContent = () => InlineData.ResxWithContents ("<data name=\"CancelButton\"><value>Cancelar</value></data>")
+					},
+					new BuildItem ("EmbeddedResource", "Resource.de-DE.resx") {
+						TextContent = () => InlineData.ResxWithContents ("<data name=\"CancelButton\"><value>Abbrechen</value></data>")
 					},
 					new AndroidItem.TransformFile ("Transforms.xml") {
 						// Remove two methods that introduced warnings:
@@ -61,7 +64,8 @@ namespace Xamarin.Android.Build.Tests
 					},
 				}
 			};
-			proj.MainActivity = proj.DefaultMainActivity.Replace (": Activity", ": AndroidX.AppCompat.App.AppCompatActivity");
+			proj.MainActivity = proj.DefaultMainActivity.Replace (": Activity", ": AndroidX.AppCompat.App.AppCompatActivity")
+				.Replace ("//${AFTER_ONCREATE}", @"button.Text = Resource.CancelButton;");
 			proj.SetProperty ("AndroidUseAssemblyStore", usesAssemblyStore.ToString ());
 			proj.SetProperty ("RunAOTCompilation", aot.ToString ());
 			proj.OtherBuildItems.Add (new AndroidItem.InputJar ("javaclasses.jar") {
@@ -70,6 +74,21 @@ namespace Xamarin.Android.Build.Tests
 			proj.OtherBuildItems.Add (new BuildItem ("JavaSourceJar", "javaclasses-sources.jar") {
 				BinaryContent = () => ResourceData.JavaSourceJarTestSourcesJar,
 			});
+			proj.OtherBuildItems.Add (new BuildItem ("EmbeddedResource", default (Func<string>)) {
+						Update = () =>  "Resource.resx",
+						TextContent = () => InlineData.ResxWithContents ("<data name=\"CancelButton\"><value>Cancel</value></data>"),
+						Metadata = {
+							{ "Generator", "ResXFileCodeGenerator" },
+							{ "LastGenOutput", "Resource.designer.cs" }
+						},
+			});
+			proj.OtherBuildItems.Add (new BuildItem ("Compile", default (Func<string>)) {
+						TextContent = () => InlineData.DesignerWithContents (proj.ProjectName, "Resource", "public partial", new string[] {"CancelButton"}),
+						Update = () =>  "Resource.designer.cs",
+						Metadata = {
+							{ "DependentUpon", "Resource.resx" },
+						},
+					});
 			proj.AndroidJavaSources.Add (new AndroidItem.AndroidJavaSource ("JavaSourceTestExtension.java") {
 				Encoding = Encoding.ASCII,
 				TextContent = () => ResourceData.JavaSourceTestExtension,
@@ -98,6 +117,7 @@ namespace Xamarin.Android.Build.Tests
 				.ToArray ();
 			var expectedFiles = new List<string> {
 				$"{proj.PackageName}-Signed.apk",
+				"de-DE",
 				"es",
 				$"{proj.ProjectName}.dll",
 				$"{proj.ProjectName}.pdb",
@@ -147,6 +167,7 @@ namespace Xamarin.Android.Build.Tests
 			helper.AssertContainsEntry ($"assemblies/{proj.ProjectName}.pdb", shouldContainEntry: !TestEnvironment.CommercialBuildAvailable && !isRelease);
 			helper.AssertContainsEntry ($"assemblies/Mono.Android.dll",        shouldContainEntry: expectEmbeddedAssembies);
 			helper.AssertContainsEntry ($"assemblies/es/{proj.ProjectName}.resources.dll", shouldContainEntry: expectEmbeddedAssembies);
+			helper.AssertContainsEntry ($"assemblies/de-DE/{proj.ProjectName}.resources.dll", shouldContainEntry: expectEmbeddedAssembies);
 			foreach (var abi in rids.Select (AndroidRidAbiHelper.RuntimeIdentifierToAbi)) {
 				helper.AssertContainsEntry ($"lib/{abi}/libmonodroid.so");
 				helper.AssertContainsEntry ($"lib/{abi}/libmonosgen-2.0.so");
@@ -1572,7 +1593,7 @@ public class ToolbarEx {
 				b.ThrowOnBuildFailure = false;
 				Assert.IsFalse (b.Build (proj), "Build should have failed.");
 				var ext = b.IsUnix ? "" : ".exe";
-				var text = $"TestMe.java(1,8): javac{ext} error JAVAC0000:  error: class, interface, or enum expected";
+				var text = $"TestMe.java(1,8): javac{ext} error JAVAC0000:  error: class, interface, enum, or record expected";
 				Assert.IsTrue (StringAssertEx.ContainsText (b.LastBuildOutput, text), "TestMe.java(1,8) expected");
 				text = $"TestMe2.java(1,41): javac{ext} error JAVAC0000:  error: ';' expected";
 				Assert.IsTrue (StringAssertEx.ContainsText (b.LastBuildOutput, text), "TestMe2.java(1,41) expected");
@@ -1654,6 +1675,37 @@ public class ToolbarEx {
 			proj.MainActivity = proj.DefaultMainActivity.Replace ("//${AFTER_ONCREATE}", "AndroidX.CustomView.PoolingContainer.PoolingContainer.IsPoolingContainer (null);");
 			using var builder = CreateApkBuilder ();
 			Assert.IsTrue (builder.Build (proj), "Build should have succeeded.");
+		}
+
+		[Test]
+		public void IncrementalBuildDifferentDevice()
+		{
+			var proj = new XamarinAndroidApplicationProject {
+				Imports = {
+					new Import (() => "MockPrimaryCpuAbi.targets") {
+						TextContent = () =>
+"""
+<Project>
+	<!-- This target "mocks" what _GetPrimaryCpuAbi does -->
+	<Target Name="_MockPrimaryCpuAbi" BeforeTargets="_CreatePropertiesCache">
+		<PropertyGroup>
+			<RuntimeIdentifier>$(_SingleRID)</RuntimeIdentifier>
+			<RuntimeIdentifiers></RuntimeIdentifiers>
+			<AndroidSupportedAbis>$(_SingleABI)</AndroidSupportedAbis>
+		</PropertyGroup>
+	</Target>
+</Project>
+"""
+					},
+				},
+			};
+			using var builder = CreateApkBuilder ();
+			builder.Target = "Build";
+			builder.BuildingInsideVisualStudio = false;
+			Assert.IsTrue (builder.Build (proj, parameters: [ "_SingleRID=android-arm64", "_SingleABI=arm64-v8a" ]),
+				"first build should have succeeded.");
+			Assert.IsTrue (builder.Build (proj, parameters: [ "_SingleRID=android-x64", "_SingleABI=x86_64" ], doNotCleanupOnUpdate: true),
+				"second build should have succeeded.");
 		}
 	}
 }

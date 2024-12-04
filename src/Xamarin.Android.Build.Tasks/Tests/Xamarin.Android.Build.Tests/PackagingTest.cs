@@ -34,6 +34,54 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
+		public void CheckR8InfoMessagesToNotBreakTheBuild ()
+		{
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = true,
+			};
+			proj.SetProperty (proj.ReleaseProperties, KnownProperties.AndroidLinkTool, "r8");
+			proj.SetProperty (proj.ReleaseProperties, "AndroidCreateProguardMappingFile", true);
+			var packages = proj.PackageReferences;
+			packages.Add (KnownPackages.Xamarin_KotlinX_Coroutines_Android);
+			proj.OtherBuildItems.Add (new BuildItem ("ProguardConfiguration", "proguard.cfg") {
+				TextContent = () => @"-keepattributes Signature
+-keep class kotlinx.coroutines.channels.** { *; }
+"
+			});
+
+			using (var b = CreateApkBuilder ()) {
+				string mappingFile = Path.Combine (Root, b.ProjectDirectory, proj.OutputPath, "mapping.txt");
+				Assert.IsTrue (b.Build (proj), "build should have succeeded.");
+				FileAssert.Exists (mappingFile, $"'{mappingFile}' should have been generated.");
+			}
+		}
+
+		[Test]
+		public void CheckDebugModeWithTrimming ()
+		{
+			bool usesAssemblyStores = false;
+			var proj = new XamarinAndroidApplicationProject {
+				ProjectName = "MyApp",
+				IsRelease = false,
+				EmbedAssembliesIntoApk = true,
+			};
+			proj.SetProperty ("PublishTrimmed", "true");
+			proj.SetProperty ("AndroidUseAssemblyStore", usesAssemblyStores.ToString ());
+
+			using var b = CreateApkBuilder ();
+			Assert.IsTrue (b.Build (proj), "build should have succeeded.");
+
+			var apk = Path.Combine (Root, b.ProjectDirectory,
+				proj.OutputPath, $"{proj.PackageName}-Signed.apk");
+			var helper = new ArchiveAssemblyHelper (apk, usesAssemblyStores);
+			helper.Contains (["Mono.Android.dll", $"{proj.ProjectName}.dll"], out _, out var missingFiles, out _, [AndroidTargetArch.Arm64, AndroidTargetArch.X86_64]);
+
+			Assert.IsTrue (missingFiles == null || missingFiles.Count == 0,
+				string.Format ("The following Expected files are missing. {0}",
+				string.Join (Environment.NewLine, missingFiles)));
+		}
+
+		[Test]
 		[NonParallelizable] // Commonly fails NuGet restore
 		public void CheckIncludedAssemblies ([Values (false, true)] bool usesAssemblyStores)
 		{

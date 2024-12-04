@@ -54,6 +54,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";APT0005" ItemType="0;.resx" PsrId="211" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Invalid file name: Filenames cannot use Java reserved words.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Geçersiz dosya adı: Dosya adlarında Java ayrılmış sözcükleri kullanılamaz.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";APT2264" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[This could be caused by the project exceeding the Windows maximum path length limitation. See https://learn.microsoft.com/dotnet/android/messages/apt2264 for details.]]></Val>
@@ -456,6 +465,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";XA0142" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Command '{0}' failed.\n{1}]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA['{0}' komutu başarısız oldu.\n{1}]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";XA1000" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[There was a problem parsing {0}. This is likely due to incomplete or invalid XML. Exception: {1}]]></Val>
@@ -675,27 +693,6 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
-      <Item ItemId=";XA1026" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Using AAPT is deprecated in favor of AAPT2. Please enable 'Use incremental Android packaging system (aapt2)' in the Visual Studio project property pages or edit the project file in a text editor and set the 'AndroidUseAapt2' MSBuild property to 'true'.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[AAPT kullanımı, kullanım dışı bırakılarak yerine AAPT2 getirildi. Lütfen Visual Studio projesinin özellik sayfalarındaki 'Artımlı Android paketleme sistemini (aapt2) kullan' seçeneğini etkinleştirin veya proje dosyasını bir metin düzenleyicisinde düzenleyip 'AndroidUseAapt2' MSBuild özelliğini 'true' olarak ayarlayın.]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
-      <Item ItemId=";XA1026_dotnet" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Using AAPT is not supported in .NET for Android projects that target .NET 6 or higher. Please enable 'Use incremental Android packaging system (aapt2)' in the Visual Studio project property pages or edit the project file in a text editor and set the 'AndroidUseAapt2' MSBuild property to 'true'.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[.NET 6 veya üstünü hedefleyen Android için .NET projelerinde AAPT kullanımı desteklenmez. Lütfen Visual Studio projesinin özellik sayfalarındaki 'Artımlı Android paketleme sistemini (aapt2) kullan' seçeneğini etkinleştirin veya proje dosyasını bir metin düzenleyicisinde düzenleyip 'AndroidUseAapt2' MSBuild özelliğini 'true' olarak ayarlayın.]]></Val>
-          </Tgt>
-          <Prev Cat="Text">
-            <Val><![CDATA[Using AAPT is not supported in .NET Android projects that target .NET 6 or higher. Please enable 'Use incremental Android packaging system (aapt2)' in the Visual Studio project property pages or edit the project file in a text editor and set the 'AndroidUseAapt2' MSBuild property to 'true'.]]></Val>
-          </Prev>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
       <Item ItemId=";XA1027" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[The 'EnableProguard' MSBuild property is set to 'true' and the 'AndroidLinkTool' MSBuild property is empty, so 'AndroidLinkTool' will default to 'proguard'.]]></Val>
@@ -800,6 +797,15 @@
           <Val><![CDATA[The '{0}' MSBuild property is deprecated and will be removed in .NET {1}. See https://aka.ms/net-android-deprecations for more details.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[Bu '{0}' MSBuild özelliği kullanım dışı bırakıldı ve .NET’ten kaldırılacak {1}. Daha fazla ayrıntı için bkz. https://aka.ms/net-android-deprecations için ayrıntılara bakın.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XA1038" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[The '{0}' MSBuild property has an invalid value of '{1}'. A valid value is one of: {2}.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA['{0}' MSBuild özelliğinin geçersiz '{1}' değeri var. Geçerli bir değer şunlardan biri: {2}.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -1226,10 +1232,13 @@
       </Item>
       <Item ItemId=";XA4236" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
         <Str Cat="Text">
-          <Val><![CDATA[Cannot download Maven artifact '{0}:{1}'.]D;]A;- {2}: {3}]D;]A;- {4}: {5}]]></Val>
+          <Val><![CDATA[Cannot download Maven artifact '{0}:{1}'.]D;]A;{2}]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA['{0}:{1}' Maven yapıtı indirilemiyor.]D;]A;- {2}: {3}]D;]A;- {4}: {5}]]></Val>
+            <Val><![CDATA['{0}:{1}' Maven yapıtı indirilemiyor.]D;]A;{2}]]></Val>
           </Tgt>
+          <Prev Cat="Text">
+            <Val><![CDATA[Cannot download Maven artifact '{0}:{1}'.]D;]A;- {2}: {3}]D;]A;- {4}: {5}]]></Val>
+          </Prev>
         </Str>
         <Disp Icon="Str" />
       </Item>
@@ -1322,6 +1331,15 @@
           <Val><![CDATA[Could not find NuGet package '{0}' version '{1}' in lock file. Ensure NuGet Restore has run since this <PackageReference> was added.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA['{0}' NuGet paketi '{1}' sürümü kilit dosyasında bulunamadı. Bu <PackageReference> eklendikten sonra NuGet Geri Yükleme'nin çalıştırıldığından emin olun.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XA4249" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Maven artifact specification '{0}' is invalid. The correct format is 'group_id:artifact_id:version'.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Maven yapıt belirtimi '{0}' geçersiz. Doğru biçim: 'group_id:artifact_id:version'.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -1496,6 +1514,15 @@
           <Val><![CDATA[`{0}` is empty. A value for `{0}` should be provided.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[`{0}` boş. `{0}` için bir değer sağlanmlıdır.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XA4315" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Ignoring `{0}`. Manifest does not have the required 'package' attribute on the manifest element.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[`{0}` yoksayılıyor. Bildirim, gerekli 'package' özniteliğini bildirim öğesinde içermiyor.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -1697,6 +1724,24 @@
           <Val><![CDATA[Could not find Android Resource '{0}'. Please update @(AndroidResource) to add the missing resource.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA['{0}' Android Kaynağı bulunamadı. Lütfen eksik kaynağı eklemek için @(AndroidResource) kaynağını güncelleştirin.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XAGRDL1000" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Executable 'gradlew' not found in project directory '{0}'. Please ensure the path to your Gradle project folder is correct, and that it contains Gradle Wrapper scripts.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA['Gradlew' yürütülebilir dosyası '{0}' proje dizininde bulunamadı. Lütfen Gradle proje klasör yolunun doğru olduğundan ve Gradle Sarmalayıcı betikleri içerdiğinden emin olun.]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XAGRDLRefLibraryOutputs" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Adding reference to Gradle output: '{0}'. The '%(CreateAndroidLibrary)' metadata can be set to 'false' to opt out of this behavior.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Gradle çıkışına başvuru ekleniyor: '{0}'. Bu davranıştan çıkmak için '%(CreateAndroidLibrary)' meta verileri 'false' olarak ayarlanabilir.]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />

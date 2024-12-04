@@ -47,7 +47,6 @@ const ApplicationConfig application_config = {
 	.aot_lazy_load = false,
 	.uses_assembly_preload = false,
 	.broken_exception_transitions = false,
-	.instant_run_enabled = false,
 	.jni_add_native_method_registration_attribute_present = false,
 	.have_runtime_config_blob = false,
 	.have_assembly_store = false,
@@ -74,7 +73,7 @@ const char* const mono_aot_mode_name = "normal";
 const char* const app_environment_variables[] = {};
 const char* const app_system_properties[] = {};
 
-static constexpr size_t AssemblyNameWidth = 128;
+static constexpr size_t AssemblyNameWidth = 128uz;
 
 static char first_assembly_name[AssemblyNameWidth];
 static char second_assembly_name[AssemblyNameWidth];
@@ -128,6 +127,24 @@ constexpr char fake_dso_name[] = "libaot-Some.Assembly.dll.so";
 constexpr char fake_dso_name2[] = "libaot-Another.Assembly.dll.so";
 
 DSOCacheEntry dso_cache[] = {
+	{
+		.hash = xamarin::android::xxhash::hash (fake_dso_name, sizeof(fake_dso_name) - 1),
+		.real_name_hash = xamarin::android::xxhash::hash (fake_dso_name, sizeof(fake_dso_name) - 1),
+		.ignore = true,
+		.name = fake_dso_name,
+		.handle = nullptr,
+	},
+
+	{
+		.hash = xamarin::android::xxhash::hash (fake_dso_name2, sizeof(fake_dso_name2) - 1),
+		.real_name_hash = xamarin::android::xxhash::hash (fake_dso_name2, sizeof(fake_dso_name2) - 1),
+		.ignore = true,
+		.name = fake_dso_name2,
+		.handle = nullptr,
+	},
+};
+
+DSOCacheEntry aot_dso_cache[] = {
 	{
 		.hash = xamarin::android::xxhash::hash (fake_dso_name, sizeof(fake_dso_name) - 1),
 		.real_name_hash = xamarin::android::xxhash::hash (fake_dso_name, sizeof(fake_dso_name) - 1),

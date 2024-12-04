@@ -1,15 +1,19 @@
 ---
 title: .NET for Android Build Properties
 description: .NET for Android Build Properties
-ms.date: 04/11/2024
+ms.date: 09/09/2024
 ---
 
-# Build Properties
+# Build properties
 
 MSBuild properties control the behavior of the
 [targets](build-targets.md).
+
 They're specified within the project file, for example **MyApp.csproj**, within
 an [MSBuild PropertyGroup](/visualstudio/msbuild/propertygroup-element-msbuild).
+
+> [!NOTE]
+> In .NET for Android there is technically no distinction between an application and a bindings project, so properties will work in both. In practice it is highly recommended to create separate application and bindings projects. Properties that are primarily used in bindings projects are documented in the [MSBuild bindings project properties](../binding-libs/msbuild-reference/build-properties.md) reference guide.
 
 ## AdbTarget
 
@@ -153,7 +157,7 @@ for details about available feature switches.
 
 Added in .NET 8.
 
-[feature-switches]: https://github.com/dotnet/runtime/blob/main/docs/workflow/trimming/feature-switches.md
+[feature-switches]: /dotnet/core/deploying/trimming/trimming-options?pivots=dotnet-8-0#trim-framework-library-features
 
 ## AndroidBinUtilsPath
 
@@ -343,15 +347,17 @@ they're `0` and `10`.
 
 ## AndroidDexTool
 
-An enum-style property with valid
-values of `dx` or `d8`. Indicates which Android [dex][dex]
+An enum-style property with a valid
+value of `d8`. _Previously, a value of `dx` was supported in
+Xamarin.Android._
+
+Indicates which Android [dex][dex]
 compiler is used during the .NET for Android build process.
-The default value is `dx`. See our
+The default value is `d8`. See our
 documentation on [D8 and R8][d8-r8].
 
 [dex]: https://source.android.com/devices/tech/dalvik/dalvik-bytecode
 [d8-r8]: https://github.com/xamarin/xamarin-android/blob/main/Documentation/guides/D8andR8.md
-
 
 ## AndroidEnableDesugar
 
@@ -624,7 +630,7 @@ for use with
 [`System.Type.GetType(string)`](/dotnet/api/system.type.gettype#System_Type_GetType_System_String_).
 
 In .NET 6 and newer, this property has effect only when used together
-with [`$(UseNativeHttpHandler)=true`](https://github.com/dotnet/runtime/blob/main/docs/workflow/trimming/feature-switches.md).
+with [`$(UseNativeHttpHandler)=true`][feature-switches].
 The most common values for this property are:
 
 - `Xamarin.Android.Net.AndroidMessageHandler`: Use the Android Java APIs
@@ -891,7 +897,7 @@ merging *AndroidManifest.xml* files. This is an enum-style property
 where `legacy` selects the original C# implementation
 and `manifestmerger.jar` selects Google's Java implementation.
 
-The default value is currently `manifestmerger.jar`. If you want to 
+The default value is currently `manifestmerger.jar`. If you want to
 use the old version add the following to your csproj
 
 ```xml
@@ -983,7 +989,6 @@ that are intended for submission on Google Play. The default value is `apk`.
 When `$(AndroidPackageFormat)` is set to `aab`, other MSBuild
 properties are set, which are required for Android App Bundles:
 
-- [`$(AndroidUseAapt2)`](build-properties.md#androiduseaapt2) is `True`.
 - [`$(AndroidUseApkSigner)`](#androiduseapksigner) is `False`.
 - [`$(AndroidCreatePackagePerAbi)`](#androidcreatepackageperabi) is `False`.
 
@@ -1018,6 +1023,25 @@ specifying the Java package names of generated Java source code.
 
 The only supported value is
 `LowercaseCrc64`.
+
+## AndroidPrepareForBuildDependsOn
+
+A semi-colon delimited property that can be used to extend the
+Android build process. MSBuild targets added to this property
+will execute early in the build for both Application and Library
+project types. This property is empty by default.
+
+Example:
+
+```xml
+<PropertyGroup>
+  <AndroidPrepareForBuildDependsOn>MyCustomTarget</AndroidPrepareForBuildDependsOn>
+</PropertyGroup>
+
+<Target Name="MyCustomTarget" >
+  <Message Text="Running target: 'MyCustomTarget'" Importance="high"  />
+</Target>
+```
 
 ## AndroidProguardMappingFile
 
@@ -1078,6 +1102,15 @@ processing Android assets and resources.
 Specifies the name of the Resource
 file to generate. The default template sets this to
 `Resource.designer.cs`.
+
+## AndroidResourceDesignerClassModifier
+
+Specifies the class modifier for the intermediate `Resource` class which is
+generated. Valid values are `public` and `internal`.
+
+By default this will be `public`.
+
+Added in .NET 9.
 
 ## AndroidSdkBuildToolsVersion
 
@@ -1216,14 +1249,6 @@ Supported values include:
 ## AndroidTlsProvider
 
 This property is obsolete and should not be used.
-
-## AndroidUseAapt2
-
-A boolean property that allows the developer to
-control the use of the `aapt2` tool for packaging.
-By default this will be True.
-
-This property cannot be set to false.
 
 ## AndroidUseApkSigner
 
@@ -1553,8 +1578,7 @@ of the packaging process. If not specified, then the `-Xmx` option
 supplies **java** with a value of `1G`. This was found to be commonly
 required on Windows in comparison to other platforms.
 
-Specifying this property is necessary if the
-[`_CompileDex` target throws a `java.lang.OutOfMemoryError`](https://bugzilla.xamarin.com/18/18327/bug.html).
+Specifying this property is necessary if the `_CompileDex` target throws a `java.lang.OutOfMemoryError`.
 
 Customize the value by changing:
 

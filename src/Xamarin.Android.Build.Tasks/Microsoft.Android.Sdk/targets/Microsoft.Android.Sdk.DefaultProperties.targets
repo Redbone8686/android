@@ -2,7 +2,6 @@
 
   <!-- User-facing configuration-agnostic defaults -->
   <PropertyGroup>
-    <MinimumSupportedJavaVersion Condition=" '$(MinimumSupportedJavaVersion)' == '' ">11.0</MinimumSupportedJavaVersion>
     <AndroidBoundExceptionType Condition=" '$(AndroidBoundExceptionType)' == '' ">System</AndroidBoundExceptionType>
     <MonoAndroidResourcePrefix Condition=" '$(MonoAndroidResourcePrefix)' == '' ">Resources</MonoAndroidResourcePrefix>
     <MonoAndroidAssetsPrefix Condition=" '$(MonoAndroidAssetsPrefix)' == '' ">Assets</MonoAndroidAssetsPrefix>
@@ -87,10 +86,8 @@
     <SuppressTrimAnalysisWarnings Condition=" '$(SuppressTrimAnalysisWarnings)' == '' and ('$(TrimMode)' == 'full' or '$(IsAotCompatible)' == 'true') ">false</SuppressTrimAnalysisWarnings>
     <SuppressTrimAnalysisWarnings Condition=" '$(SuppressTrimAnalysisWarnings)' == '' ">true</SuppressTrimAnalysisWarnings>
     <!-- Prefer $(RuntimeIdentifiers) plural -->
-    <RuntimeIdentifiers Condition=" '$(RuntimeIdentifier)' == '' And '$(RuntimeIdentifiers)' == '' ">android-arm;android-arm64;android-x86;android-x64</RuntimeIdentifiers>
+    <RuntimeIdentifiers Condition=" '$(RuntimeIdentifier)' == '' And '$(RuntimeIdentifiers)' == '' ">android-arm64;android-x64</RuntimeIdentifiers>
     <RuntimeIdentifier  Condition=" '$(RuntimeIdentifiers)' != '' And '$(RuntimeIdentifier)' != '' " />
-    <AndroidManifest Condition=" '$(AndroidManifest)' == '' and Exists ('Properties\AndroidManifest.xml') and !Exists ('AndroidManifest.xml') ">Properties\AndroidManifest.xml</AndroidManifest>
-    <AndroidManifest Condition=" '$(AndroidManifest)' == '' ">AndroidManifest.xml</AndroidManifest>
     <GenerateApplicationManifest Condition=" '$(GenerateApplicationManifest)' == '' ">true</GenerateApplicationManifest>
     <!-- Default to AOT in Release mode -->
     <RunAOTCompilation Condition=" '$(RunAOTCompilation)' == '' and '$(AotAssemblies)' == '' and '$(Configuration)' == 'Release' ">true</RunAOTCompilation>
@@ -117,6 +114,8 @@
     <UseNativeHttpHandler Condition="'$(UseNativeHttpHandler)' == ''">true</UseNativeHttpHandler>
     <BuiltInComInteropSupport Condition="'$(BuiltInComInteropSupport)' == ''">false</BuiltInComInteropSupport>
     <JsonSerializerIsReflectionEnabledByDefault Condition="'$(JsonSerializerIsReflectionEnabledByDefault)' == '' and '$(TrimMode)' == 'partial'">true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- Set to disable throwing behavior, see: https://github.com/dotnet/runtime/issues/109724 -->
+    <_DefaultValueAttributeSupport Condition="'$(_DefaultValueAttributeSupport)' == '' and '$(TrimMode)' == 'partial'">true</_DefaultValueAttributeSupport>
     <MetricsSupport Condition="'$(MetricsSupport)' == ''">false</MetricsSupport>
     <AndroidAvoidEmitForPerformance Condition="'$(AndroidAvoidEmitForPerformance)' == ''">$(AvoidEmitForPerformance)</AndroidAvoidEmitForPerformance>
     <AndroidAvoidEmitForPerformance Condition="'$(AndroidAvoidEmitForPerformance)' == ''">true</AndroidAvoidEmitForPerformance>
@@ -124,9 +123,9 @@
     <VerifyDependencyInjectionOpenGenericServiceTrimmability Condition="'$(VerifyDependencyInjectionOpenGenericServiceTrimmability)' == '' and '$(PublishTrimmed)' == 'true'">false</VerifyDependencyInjectionOpenGenericServiceTrimmability>
     <VerifyDependencyInjectionOpenGenericServiceTrimmability Condition="'$(VerifyDependencyInjectionOpenGenericServiceTrimmability)' == ''">true</VerifyDependencyInjectionOpenGenericServiceTrimmability>
     <EnableSingleFileAnalyzer Condition="'$(EnableSingleFileAnalyzer)' == ''">true</EnableSingleFileAnalyzer>
+    <EnableTrimAnalyzer Condition="'$(EnableTrimAnalyzer)' == '' and '$(TrimMode)' == 'full'">true</EnableTrimAnalyzer>
 
     <!-- XA feature switches defaults -->
-    <VSAndroidDesigner Condition="'$(VSAndroidDesigner)' == ''">false</VSAndroidDesigner>
     <AndroidUseNegotiateAuthentication Condition="'$(AndroidUseNegotiateAuthentication)' == ''">false</AndroidUseNegotiateAuthentication>
 
     <!-- profiler won't work without internet permission, we must thus force it -->
@@ -137,6 +136,10 @@
     <ApplicationVersion Condition=" '$(ApplicationVersion)' == '' ">1</ApplicationVersion>
     <Version Condition=" $([System.Version]::TryParse ('$(ApplicationDisplayVersion)', $([System.Version]::Parse('1.0')))) ">$(ApplicationDisplayVersion)</Version>
     <ApplicationDisplayVersion Condition=" '$(ApplicationDisplayVersion)' == '' ">$(Version)</ApplicationDisplayVersion>
+  </PropertyGroup>
+  <PropertyGroup>
+    <AndroidManifest Condition=" '$(AndroidManifest)' == '' and Exists ('Properties\AndroidManifest.xml') and !Exists ('AndroidManifest.xml') ">Properties\AndroidManifest.xml</AndroidManifest>
+    <AndroidManifest Condition=" '$(AndroidManifest)' == '' And Exists ('AndroidManifest.xml') ">AndroidManifest.xml</AndroidManifest>
   </PropertyGroup>
 
 </Project>

@@ -30,6 +30,7 @@ ms.date: 04/11/2024
 + APT0002: Invalid file name: It must contain only \[^a-zA-Z0-9_.-\]+.
 + APT0003: Invalid file name: It must contain only \[^a-zA-Z0-9_.\]+.
 + APT0004: Invalid file name: It must start with either A-Z or a-z or an underscore.
++ APT0005: Invalid file name: filenames cannot use java reserved words.
 + [APT2264](apt2264.md): The system cannot find the file specified. (2).
 + [APT2265](apt2265.md): The system cannot find the file specified. (2).
 
@@ -104,6 +105,7 @@ or 'Help->Report a Problem' in Visual Studio for Mac.
 + [XA0139](xa0139.md): `@(AndroidAsset)` `{0}` has invalid `DeliveryType` metadata of `{1}`. Supported values are `installtime`, `ondemand` or `fastfollow`
 + [XA0140](xa0140.md):
 + [XA0141](xa0141.md): NuGet package '{0}' version '{1}' contains a shared library '{2}' which is not correctly aligned. See https://developer.android.com/guide/practices/page-sizes for more details
++ [XA0142](xa0142.md): Command '{0}' failed.\n{1}
 
 ## XA1xxx: Project related
 
@@ -143,6 +145,7 @@ or 'Help->Report a Problem' in Visual Studio for Mac.
 + [XA1036](xa1036.md): AndroidManifest.xml //uses-sdk/@android:minSdkVersion '29' does not match the $(SupportedOSPlatformVersion) value '21' in the project file (if there is no $(SupportedOSPlatformVersion) value in the project file, then a default value has been assumed).
 Either change the value in the AndroidManifest.xml to match the $(SupportedOSPlatformVersion) value, or remove the value in the AndroidManifest.xml (and add a $(SupportedOSPlatformVersion) value to the project file if it doesn't already exist).
 + [XA1037](xa1037.md): The '{0}' MSBuild property is deprecated and will be removed in .NET {1}. See https://aka.ms/net-android-deprecations for more details.
++ [XA1038](xa1038.md): The '{0}' MSBuild property has an invalid value. Value values are {1}.
 
 ## XA2xxx: Linker
 
@@ -200,6 +203,7 @@ Either change the value in the AndroidManifest.xml to match the $(SupportedOSPla
 + [XA4246](xa4246.md): Could not parse POM file '{file}'. - {exception}
 + [XA4247](xa4247.md): Could not resolve POM file for artifact '{artifact}'.
 + [XA4248](xa4248.md): Could not find NuGet package '{nugetId}' version '{version}' in lock file. Ensure NuGet Restore has run since this `<PackageReference>` was added.
++ [XA4235](xa4249.md): Maven artifact specification '{artifact}' is invalid. The correct format is 'group_id:artifact_id:version'.
 + XA4300: Native library '{library}' will not be bundled because it has an unsupported ABI.
 + [XA4301](xa4301.md): Apk already contains the item `xxx`.
 + [XA4302](xa4302.md): Unhandled exception merging \`AndroidManifest.xml\`: {ex}
@@ -215,6 +219,7 @@ Either change the value in the AndroidManifest.xml to match the $(SupportedOSPla
 + [XA4312](xa4312.md): Referencing an Android Wear application project from an Android application project is deprecated.
 + [XA4313](xa4313.md): Framework assembly has been deprecated.
 + [XA4314](xa4314.md): `$(Property)` is empty. A value for `$(Property)` should be provided.
++ [XA4315](xa4315.md): Ignoring {file}. Manifest does not have the required 'package' attribute on the manifest element.
 
 ## XA5xxx: GCC and toolchain
 

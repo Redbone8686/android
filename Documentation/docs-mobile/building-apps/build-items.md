@@ -1,20 +1,25 @@
 ---
 title: .NET for Android Build Items
 description: .NET for Android Build Items
-ms.date: 04/11/2024
+ms.date: 09/09/2024
 ---
 
-# Build Items
+# Build items
 
 Build items control how a .NET for Android application
 or library project is built.
 
+They're specified within the project file, for example **MyApp.csproj**, within
+an [MSBuild ItemGroup](/visualstudio/msbuild/itemgroup-element-msbuild).
+
+> [!NOTE]
+> In .NET for Android there is technically no distinction between an application and a bindings project, so build items will work in both. In practice it is highly recommended to create separate application and bindings projects. Build items that are primarily used in bindings projects are documented in the [MSBuild bindings project items](../binding-libs/msbuild-reference/build-items.md) reference guide.
+
 ## AndroidAdditionalJavaManifest
 
 `<AndroidAdditionalJavaManifest>` is used in conjunction with
-[Java Dependency Resolution](../features/maven/java-dependency-verification.md).
-
-It is used to specify additional POM files that will be needed to verify dependencies.
+[Java Dependency Resolution](../features/maven/java-dependency-verification.md)
+to specify additional POM files that will be needed to verify dependencies.
 These are often parent or imported POM files referenced by a Java library's POM file.
 
 ```xml
@@ -129,6 +134,35 @@ multiple files, and they will be evaluated in no particular order (so don't
 specify the same environment variable or system property in multiple
 files).
 
+## AndroidGradleProject
+
+`<AndroidGradleProject>` can be used to build and consume the outputs
+of Android Gradle projects created in Android Studio or elsewehere.
+
+The `Include` metadata should point to the top level `build.gradle` or `build.gradle.kts`
+file that will be used to build the project. This will be found in the root directory
+of your Gradle project, which should also contain `gradlew` wrapper scripts.
+
+```xml
+<ItemGroup>
+  <AndroidGradleProject Include="path/to/project/build.gradle.kts" ModuleName="mylibrary" />
+</ItemGroup>
+```
+
+The following MSBuild metadata are supported:
+
+- `%(Configuration)`: The name of the configuration to use to build or assemble
+  the project or project module specified. The default value is `Release`.
+- `%(ModuleName)`: The name of the [module or subproject](https://docs.gradle.org/current/userguide/intro_multi_project_builds.html) that should be built.
+  The default value is empty.
+- `%(OutputPath)`: Can be set to override the build output path of the Gradle project.
+  The default value is `$(IntermediateOutputPath)gradle/%(ModuleName)%(Configuration)-{Hash}`.
+- `%(CreateAndroidLibrary)`: Output AAR files will be added as an [`AndroidLibrary`](#androidlibrary) to the project.
+  Metadata supported by `<AndroidLibrary>` like `%(Bind)` or `%(Pack)` will be forwarded if set.
+  The default value is `true`.
+
+This build action was introduced in .NET 9.
+
 ## AndroidJavaLibrary
 
 Files with a Build action of `AndroidJavaLibrary` are Java
@@ -202,7 +236,7 @@ This simplification means you can use **AndroidLibrary** everywhere.
 ## AndroidLintConfig
 
 The Build action 'AndroidLintConfig' should be used in conjunction with the
-[`$(AndroidLintEnabled)`](/xamarin/android/deploy-test/building-apps/build-properties.md#androidlintenabled)
+[`$(AndroidLintEnabled)`](/xamarin/android/deploy-test/building-apps/build-properties#androidlintenabled)
 property. Files with this build action will be merged together and passed to the
 android `lint` tooling. They should be XML files containing information on
 tests to enable and disable.
@@ -290,7 +324,7 @@ used to specify the ABI that the library targets. Thus, if you add
 `lib/armeabi-v7a/libfoo.so` to the build, then the ABI will be "sniffed" as
 `armeabi-v7a`.
 
-### Item Attribute Name
+### Item attribute name
 
 **Abi** &ndash; Specifies the ABI of the native library.
 
@@ -319,7 +353,7 @@ However these Items MUST be URL encoded or use
 [`$([MSBuild]::Escape(''))`](/visualstudio/msbuild/how-to-escape-special-characters-in-msbuild).
 This is so MSBuild does not try to interpret them as actual file wildcards.
 
-For example 
+For example
 
 ```xml
 <ItemGroup>
@@ -331,7 +365,7 @@ For example
 NOTE: `*`, `?` and `.` will be replaced in the `BuildApk` task with the
 appropriate file globs.
 
-If the default file glob is too restrictive you can remove it by adding the 
+If the default file glob is too restrictive you can remove it by adding the
 following to your csproj
 
 ```xml
@@ -356,7 +390,7 @@ included from the final package. The default values are as follows
 Items can use file blob characters for wildcards such as `*` and `?`.
 However these Items MUST use URL encoding or '$([MSBuild]::Escape(''))'.
 This is so MSBuild does not try to interpret them as actual file wildcards.
-For example 
+For example
 
 ```xml
 <ItemGroup>
@@ -531,5 +565,5 @@ this build action, see
 [ProGuard](/xamarin/android/deploy-test/release-prep/proguard).
 
 These files are ignored unless the
-[`$(EnableProguard)`](/xamarin/android/deploy-test/building-apps/build-properties.md#enableproguard)
+[`$(EnableProguard)`](/xamarin/android/deploy-test/building-apps/build-properties#enableproguard)
 MSBuild property is `True`.

@@ -7,7 +7,7 @@ RUNTIME       := $(shell which mono64 2> /dev/null && echo mono64 || echo mono) 
 SOLUTION       = Xamarin.Android.sln
 TEST_TARGETS   = build-tools/scripts/RunTests.targets
 API_LEVEL     ?=
-PREPARE_NET_FX = net8.0
+PREPARE_NET_FX = net9.0
 PREPARE_ARGS =
 PREPARE_PROJECT = build-tools/xaprepare/xaprepare/xaprepare.csproj
 PREPARE_MSBUILD_FLAGS = $(PREPARE_MSBUILD_ARGS) $(MSBUILD_ARGS)
@@ -24,7 +24,6 @@ all:
 	$(call DOTNET_BINLOG,all) $(MSBUILD_FLAGS) $(SOLUTION)
 	$(call DOTNET_BINLOG,setup-workload) -t:ConfigureLocalWorkload build-tools/create-packs/Microsoft.Android.Sdk.proj
 
--include bin/Build$(CONFIGURATION)/rules.mk
 
 ifeq ($(OS_NAME),)
 export OS_NAME       := $(shell uname)

@@ -15,11 +15,11 @@ namespace Xamarin.Android.Prepare
 	//
 	partial class Configurables
 	{
-		const string BinutilsVersion                = "L_18.1.6-8.0.0";
+		const string BinutilsVersion                = "L_18.1.6-8.0.0-1";
 
-		const string MicrosoftOpenJDK17Version      = "17.0.11";
-		const string MicrosoftOpenJDK17Release      = "17.0.11.9";
-		const string MicrosoftOpenJDK17RootDirName  = "jdk-17.0.11+9";
+		const string MicrosoftOpenJDK17Version      = "17.0.12";
+		const string MicrosoftOpenJDK17Release      = "17.0.12";
+		const string MicrosoftOpenJDK17RootDirName  = "jdk-17.0.12+7";
 
 		static Context ctx => Context.Instance;
 
@@ -146,23 +146,6 @@ namespace Xamarin.Android.Prepare
 				{ "x86_64",         "x86_64-linux-android" },
 			};
 
-			/// <summary>
-			///   Used in rules.mk generator. Files to include in the XA bundle archives.
-			/// </summary>
-			public static readonly List <string> BundleZipsInclude = new List <string> {
-				"$(ZIP_OUTPUT_BASENAME)/THIRD-PARTY-NOTICES.TXT",
-				"$(ZIP_OUTPUT_BASENAME)/bin/Debug",
-				"$(ZIP_OUTPUT_BASENAME)/bin/Release",
-			};
-
-			/// <summary>
-			///   Used in rules.mk generator. Files to exclude from the XA bundle archives. Must be syntactically
-			///   correct for GNU Make.
-			/// </summary>
-			public static readonly List <string> BundleZipsExclude = new List <string> {
-				"$(ZIP_OUTPUT_BASENAME)/bin/*/bundle-*.zip"
-			};
-
 			public static readonly List <NDKTool> NDKTools = new List<NDKTool> {
 				// Tools prefixed with architecture triple
 				new NDKTool (name: "as", prefixed: true),
@@ -174,6 +157,7 @@ namespace Xamarin.Android.Prepare
 				new NDKTool (name: "ld"),
 				new NDKTool (name: "llc"),
 				new NDKTool (name: "llvm-mc"),
+				new NDKTool (name: "llvm-objcopy"),
 				new NDKTool (name: "llvm-strip"),
 			};
 		}

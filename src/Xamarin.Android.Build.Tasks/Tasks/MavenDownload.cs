@@ -87,8 +87,11 @@ public class MavenDownload : AsyncTask
 		if (repository is null)
 			return null;
 
+		// Allow user to override the Maven filename of the artifact
+		var maven_override_filename = item.GetMetadataOrDefault ("ArtifactFilename", null);
+
 		// Download artifact
-		var artifact_file = await MavenExtensions.DownloadPayload (repository, artifact, MavenCacheDirectory, Log, CancellationToken);
+		var artifact_file = await MavenExtensions.DownloadPayload (repository, artifact, MavenCacheDirectory, maven_override_filename, Log, CancellationToken);
 
 		if (artifact_file is null)
 			return null;
@@ -97,8 +100,7 @@ public class MavenDownload : AsyncTask
 
 		var result = new TaskItem (artifact_file);
 
-		result.SetMetadata ("JavaArtifact", $"{artifact.GroupId}:{artifact.Id}");
-		result.SetMetadata ("JavaVersion", artifact.Version);
+		result.SetMetadata ("JavaArtifact", artifact.VersionedArtifactString);
 
 		// Allow user to opt out of dependency verification
 		if (string.Compare (item.GetMetadataOrDefault ("VerifyDependencies", "true"), "false", true) == 0)
@@ -121,8 +123,7 @@ public class MavenDownload : AsyncTask
 				var pom_item = new TaskItem (kv.Value);
 				var pom_artifact = Artifact.Parse (kv.Key);
 
-				pom_item.SetMetadata ("JavaArtifact", $"{pom_artifact.GroupId}:{pom_artifact.Id}");
-				pom_item.SetMetadata ("JavaVersion", pom_artifact.Version);
+				pom_item.SetMetadata ("JavaArtifact", pom_artifact.VersionedArtifactString);
 
 				additionalPoms.Add (pom_item);
 

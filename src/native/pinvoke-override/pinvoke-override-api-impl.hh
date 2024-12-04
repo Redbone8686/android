@@ -19,7 +19,9 @@ namespace xamarin::android {
 		void *lib_handle = dso_handle == nullptr ? nullptr : *dso_handle;
 
 		if (lib_handle == nullptr) {
-			lib_handle = internal::MonodroidDl::monodroid_dlopen (library_name, MONO_DL_LOCAL, nullptr, nullptr);
+			// We're being called as part of the p/invoke mechanism, we don't need to look in the AOT cache
+			constexpr bool PREFER_AOT_CACHE = false;
+			lib_handle = internal::MonodroidDl::monodroid_dlopen (library_name, MONO_DL_LOCAL, nullptr, PREFER_AOT_CACHE);
 			if (lib_handle == nullptr) {
 				log_warn (LOG_ASSEMBLY, "Shared library '%s' not loaded, p/invoke '%s' may fail", library_name, symbol_name);
 				return nullptr;
@@ -103,8 +105,8 @@ namespace xamarin::android {
 	PinvokeEntry*
 	PinvokeOverride::find_pinvoke_address (hash_t hash, const PinvokeEntry *entries, size_t entry_count) noexcept
 	{
-		while (entry_count > 0) {
-			const size_t mid = entry_count / 2;
+		while (entry_count > 0uz) {
+			const size_t mid = entry_count / 2uz;
 			const PinvokeEntry *const ret = entries + mid;
 			const std::strong_ordering result = hash <=> ret->hash;
 
@@ -112,7 +114,7 @@ namespace xamarin::android {
 				entry_count = mid;
 			} else if (result > 0) {
 				entries = ret + 1;
-				entry_count -= mid + 1;
+				entry_count -= mid + 1uz;
 			} else {
 				return const_cast<PinvokeEntry*>(ret);
 			}

@@ -10,8 +10,8 @@
 
   <Target Name="BuildExternal">
     <Exec
-        Command="&quot;$(DotNetPreviewTool)&quot; build monodroid.proj -c $(Configuration) -p:XamarinAndroidSourcePath=$(_Root) -p:DebuggingToolsOutputDirectory=$(MicrosoftAndroidSdkOutDir) -p:CompatTargetsOutputDirectory=$(XAInstallPrefix)xbuild/Novell -bl:$(_BinlogPathPrefix)-build-monodroid.binlog"
-        WorkingDirectory="$(_Root)external\monodroid"
+        Command="&quot;$(DotNetPreviewTool)&quot; build monodroid.proj -c $(Configuration) -p:XamarinAndroidSourcePath=$(_Root) -p:XAIntegrationBuild=true -bl:$(_BinlogPathPrefix)-build-monodroid.binlog"
+        WorkingDirectory="$(_Root)external\android-platform-support\build-tools"
     />
   </Target>
 
@@ -56,6 +56,26 @@
       XmlInputPath="$(MauiSourcePath)\src\DotNet\Dependencies\Workloads.csproj"
       Value="Microsoft.NET.Sdk.Android.Manifest-$(DotNetSdkManifestsFolder)"
       Query="/Project/ItemGroup/PackageDownload[contains(@Include,'Microsoft.NET.Sdk.Android.Manifest-')]/@Include" />
+    <XmlPeek
+        XmlInputPath="$(_Root)NuGet.config"
+        Query="/configuration/packageSources/add[starts-with(@key,'darc-pub-dotnet-android-')]">
+      <Output TaskParameter="Result" ItemName="_DotNetAndroidFeeds" />
+    </XmlPeek>
+    <XmlPeek
+        Condition=" '@(_DotNetAndroidFeeds->Count())' != '0' "
+        XmlInputPath="$(MauiSourcePath)\NuGet.config"
+        Query="/configuration/packageSources/*">
+      <Output TaskParameter="Result" ItemName="_DotNetMauiFeeds" />
+    </XmlPeek>
+    <ItemGroup>
+      <_DotNetMauiFeeds Include="@(_DotNetAndroidFeeds)" />
+    </ItemGroup>
+    <XmlPoke
+        Condition=" '@(_DotNetAndroidFeeds->Count())' != '0' "
+        XmlInputPath="$(MauiSourcePath)\NuGet.config"
+        Value="@(_DotNetMauiFeeds, ' ')"
+        Query="/configuration/packageSources"
+    />
   </Target>
 
   <Target Name="InstallMaui">
@@ -91,14 +111,13 @@
 
     <!-- Parse NuGet.config -->
     <XmlPeek
-        Condition=" '$(MauiUseLocalPacks)' != 'true' "
-        XmlInputPath="$(XamarinAndroidSourcePath)NuGet.config"
+        Condition=" '$(MauiUseLocalPacks)' == 'true' "
+        XmlInputPath="$(MauiSourcePath)\NuGet.config"
         Query="/configuration/packageSources/add/@value">
       <Output TaskParameter="Result" ItemName="_NuGetSources" />
     </XmlPeek>
     <XmlPeek
-        Condition=" '$(MauiUseLocalPacks)' == 'true' "
-        XmlInputPath="$(MauiSourcePath)\NuGet.config"
+        XmlInputPath="$(XamarinAndroidSourcePath)NuGet.config"
         Query="/configuration/packageSources/add/@value">
       <Output TaskParameter="Result" ItemName="_NuGetSources" />
     </XmlPeek>
@@ -106,8 +125,6 @@
     <!-- dotnet workload install maui-android -->
     <ItemGroup>
       <_NuGetSources Condition=" '$(MauiUseLocalPacks)' == 'true' " Include="$(MauiPackagePath.TrimEnd('\'))" />
-      <_NuGetSources Include="https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet7/nuget/v3/index.json" />
-      <_NuGetSources Include="https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet6/nuget/v3/index.json" />
       <_InstallArguments Include="--skip-manifest-update" />
       <_InstallArguments Include="--skip-sign-check" />
       <_InstallArguments Include="--verbosity diag" />

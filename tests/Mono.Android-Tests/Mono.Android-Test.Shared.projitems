@@ -48,6 +48,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)System.Text\EncodingTests.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)System.Text.Json\JsonSerializerTest.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)System.Threading\InterlockedTest.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)System.Xml\XmlSerializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Java.Interop\JavaObjectExtensionsTests.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Xamarin.Android.Net\AndroidClientHandlerTests.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Xamarin.Android.Net\AndroidMessageHandlerTests.cs" />
@@ -119,6 +120,12 @@
       <Link>Assets\subfolder\asset2.txt</Link>
     </AndroidAsset>
   </ItemGroup>
+
+  <ItemGroup>
+    <AndroidJavaSource Include="$(MSBuildThisFileDirectory)java/net/dot/android/test/ValueProvider.java" />
+    <AndroidJavaSource Include="$(MSBuildThisFileDirectory)java/net/dot/android/test/Example.java" />
+  </ItemGroup>
+
   <ItemGroup>
     <Folder Include="$(MSBuildThisFileDirectory)LinkedAssets\" />
   </ItemGroup>

@@ -136,8 +136,7 @@ public class MavenDownloadTests
 
 			var output_item = task.ResolvedAndroidMavenLibraries! [0];
 
-			Assert.AreEqual ("com.google.auto.value:auto-value-annotations", output_item.GetMetadata ("JavaArtifact"));
-			Assert.AreEqual ("1.10.4", output_item.GetMetadata ("JavaVersion"));
+			Assert.AreEqual ("com.google.auto.value:auto-value-annotations:1.10.4", output_item.GetMetadata ("JavaArtifact"));
 			Assert.AreEqual (Path.Combine (temp_cache_dir, "central", "com.google.auto.value", "auto-value-annotations", "1.10.4", "auto-value-annotations-1.10.4.pom"), output_item.GetMetadata ("Manifest"));
 		} finally {
 			DeleteTempDirectory (temp_cache_dir);
@@ -164,15 +163,44 @@ public class MavenDownloadTests
 
 			var output_item = task.ResolvedAndroidMavenLibraries! [0];
 
-			Assert.AreEqual ("androidx.core:core", output_item.GetMetadata ("JavaArtifact"));
-			Assert.AreEqual ("1.12.0", output_item.GetMetadata ("JavaVersion"));
+			Assert.AreEqual ("androidx.core:core:1.12.0", output_item.GetMetadata ("JavaArtifact"));
 			Assert.AreEqual (Path.Combine (temp_cache_dir, "google", "androidx.core", "core", "1.12.0", "core-1.12.0.pom"), output_item.GetMetadata ("Manifest"));
 		} finally {
 			DeleteTempDirectory (temp_cache_dir);
 		}
 	}
 
-	ITaskItem CreateMavenTaskItem (string name, string? version, string? repository = null)
+	[Test]
+	public async Task ArtifactFilenameOverride ()
+	{
+		// Technically the artifact is 'react-android-0.76.1-release.aar' but we're going to override the filename to
+		// 'react-android-0.76.1.module' and download it instead for this test because the real .aar is 120+ MB.
+		var temp_cache_dir = Path.Combine (Path.GetTempPath (), Guid.NewGuid ().ToString ());
+
+		try {
+			var engine = new MockBuildEngine (TestContext.Out, new List<BuildErrorEventArgs> ());
+			var task = new MavenDownload {
+				BuildEngine = engine,
+				MavenCacheDirectory = temp_cache_dir,
+				AndroidMavenLibraries = [CreateMavenTaskItem ("com.facebook.react:react-android", "0.76.1", artifactFilename: "react-android-0.76.1.module")],
+			};
+
+			await task.RunTaskAsync ();
+
+			Assert.AreEqual (0, engine.Errors.Count);
+			Assert.AreEqual (1, task.ResolvedAndroidMavenLibraries?.Length);
+
+			var output_item = task.ResolvedAndroidMavenLibraries! [0];
+
+			Assert.AreEqual ("com.facebook.react:react-android:0.76.1", output_item.GetMetadata ("JavaArtifact"));
+			Assert.True (output_item.ItemSpec.EndsWith (Path.Combine ("0.76.1", "react-android-0.76.1.module"), StringComparison.OrdinalIgnoreCase));
+			Assert.AreEqual (Path.Combine (temp_cache_dir, "central", "com.facebook.react", "react-android", "0.76.1", "react-android-0.76.1.pom"), output_item.GetMetadata ("Manifest"));
+		} finally {
+			DeleteTempDirectory (temp_cache_dir);
+		}
+	}
+
+	ITaskItem CreateMavenTaskItem (string name, string? version, string? repository = null, string? artifactFilename = null)
 	{
 		var item = new TaskItem (name);
 
@@ -180,6 +208,8 @@ public class MavenDownloadTests
 			item.SetMetadata ("Version", version);
 		if (repository is not null)
 			item.SetMetadata ("Repository", repository);
+		if (artifactFilename is not null)
+			item.SetMetadata ("ArtifactFilename", artifactFilename);
 
 		return item;
 	}

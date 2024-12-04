@@ -16,6 +16,8 @@ using Java.Interop.Tools.TypeNameMappings;
 using Xamarin.Android.Tools;
 using Microsoft.Android.Build.Tasks;
 using Java.Interop.Tools.JavaCallableWrappers.Adapters;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
 
 namespace Xamarin.Android.Tasks
 {
@@ -71,7 +73,6 @@ namespace Xamarin.Android.Tasks
 
 		public bool EmbedAssemblies { get; set; }
 		public bool NeedsInternet   { get; set; }
-		public bool InstantRunEnabled { get; set; }
 
 		public bool ErrorOnCustomJavaObject { get; set; }
 
@@ -183,34 +184,43 @@ namespace Xamarin.Android.Tasks
 			}
 
 			// Now that "never" never happened, we can proceed knowing that at least the assembly sets are the same for each architecture
-			var nativeCodeGenStates = new Dictionary<AndroidTargetArch, NativeCodeGenState> ();
-			bool generateJavaCode = true;
+			var nativeCodeGenStates = new ConcurrentDictionary<AndroidTargetArch, NativeCodeGenState> ();
 			NativeCodeGenState? templateCodeGenState = null;
 
-			foreach (var kvp in allAssembliesPerArch) {
+			var firstArch = allAssembliesPerArch.First ().Key;
+			var generateSucceeded = true;
+
+			// Generate Java sources in parallel
+			Parallel.ForEach (allAssembliesPerArch, (kvp) => {
 				AndroidTargetArch arch = kvp.Key;
 				Dictionary<string, ITaskItem> archAssemblies = kvp.Value;
+
+				// We only need to generate Java code for one ABI, as the Java code is ABI-agnostic
+				// Pick the "first" one as the one to generate Java code for
+				var generateJavaCode = arch == firstArch;
+
 				(bool success, NativeCodeGenState? state) = GenerateJavaSourcesAndMaybeClassifyMarshalMethods (arch, archAssemblies, MaybeGetArchAssemblies (userAssembliesPerArch, arch), useMarshalMethods, generateJavaCode);
 
 				if (!success) {
-					return;
+					generateSucceeded = false;
 				}
 
+				// If this is the first architecture, we need to store the state for later use
 				if (generateJavaCode) {
 					templateCodeGenState = state;
-					generateJavaCode = false;
 				}
 
-				nativeCodeGenStates.Add (arch, state);
-			}
+				nativeCodeGenStates.TryAdd (arch, state);
+			});
+
+			// If we hit an error generating the Java code, we should bail out now
+			if (!generateSucceeded)
+				return;
 
 			if (templateCodeGenState == null) {
 				throw new InvalidOperationException ($"Internal error: no native code generator state defined");
 			}
 			JCWGenerator.EnsureAllArchitecturesAreIdentical (Log, nativeCodeGenStates);
-
-			NativeCodeGenState.Template = templateCodeGenState;
-			BuildEngine4.RegisterTaskObjectAssemblyLocal (ProjectSpecificTaskObjectKey (NativeCodeGenStateRegisterTaskKey), nativeCodeGenStates, RegisteredTaskObjectLifetime.Build);
 
 			if (useMarshalMethods) {
 				// We need to parse the environment files supplied by the user to see if they want to use broken exception transitions. This information is needed
@@ -249,6 +259,9 @@ namespace Xamarin.Android.Tasks
 				WriteTypeMappings (state);
 			}
 
+			// Set for use by <GeneratePackageManagerJava/> task later
+			NativeCodeGenState.TemplateJniAddNativeMethodRegistrationAttributePresent = templateCodeGenState.JniAddNativeMethodRegistrationAttributePresent;
+
 			var acwMapGen = new ACWMapGenerator (Log);
 			if (!acwMapGen.Generate (templateCodeGenState, AcwMapFile)) {
 				Log.LogDebugMessage ("ACW map generation failed");
@@ -256,6 +269,18 @@ namespace Xamarin.Android.Tasks
 
 			IList<string> additionalProviders = MergeManifest (templateCodeGenState, MaybeGetArchAssemblies (userAssembliesPerArch, templateCodeGenState.TargetArch));
 			GenerateAdditionalProviderSources (templateCodeGenState, additionalProviders);
+
+			if (useMarshalMethods) {
+				// Save NativeCodeGenState for <GeneratePackageManagerJava/> task later
+				Log.LogDebugMessage ($"Saving {nameof (NativeCodeGenState)} to {nameof (NativeCodeGenStateRegisterTaskKey)}");
+				BuildEngine4.RegisterTaskObjectAssemblyLocal (ProjectSpecificTaskObjectKey (NativeCodeGenStateRegisterTaskKey), nativeCodeGenStates, RegisteredTaskObjectLifetime.Build);
+			} else {
+				// Otherwise, dispose all XAAssemblyResolvers
+				Log.LogDebugMessage ($"Disposing all {nameof (NativeCodeGenState)}.{nameof (NativeCodeGenState.Resolver)}");
+				foreach (var state in nativeCodeGenStates.Values) {
+					state.Resolver.Dispose ();
+				}
+			}
 
 			Dictionary<string, ITaskItem> MaybeGetArchAssemblies (Dictionary<AndroidTargetArch, Dictionary<string, ITaskItem>> dict, AndroidTargetArch arch)
 			{
@@ -322,7 +347,6 @@ namespace Xamarin.Android.Tasks
 				Debug = Debug,
 				MultiDex = MultiDex,
 				NeedsInternet = NeedsInternet,
-				InstantRunEnabled = InstantRunEnabled
 			};
 			// Only set manifest.VersionCode if there is no existing value in AndroidManifest.xml.
 			if (manifest.HasVersionCode) {

@@ -22,13 +22,13 @@
     <Nullable>annotations</Nullable>
     <!-- Causes issues with linker files imported from Mono -->
     <NoWarn>$(NoWarn);CA1310;CA1305</NoWarn>
+    <WarningsAsErrors>Nullable</WarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="$(MonoCecilVersion)" GeneratePathProperty="true" />
-    <PackageReference Include="ILRepack" Version="2.0.28" />
     <PackageReference Include="Irony" />
-    <PackageReference Include="NuGet.ProjectModel" Version="6.9.1" />
+    <PackageReference Include="NuGet.ProjectModel" Version="6.11.0" />
     <PackageReference Include="Newtonsoft.Json" Version="$(NewtonsoftJsonPackageVersion)" />
     <PackageReference Include="System.CodeDom" />
     <PackageReference Include="System.IO.Hashing" Version="$(SystemIOHashingPackageVersion)" />
@@ -223,6 +223,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Resources\ApplicationRegistration.java">
       <LogicalName>ApplicationRegistration.java</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\net.android.init.gradle.kts">
+      <LogicalName>net.android.init.gradle.kts</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="..\Mono.Android\java\mono\android\TypeManager.java">
       <LogicalName>JavaInteropTypeManager.java</LogicalName>

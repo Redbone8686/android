@@ -83,8 +83,7 @@ MonodroidRuntime::thread_start ([[maybe_unused]] MonoProfiler *prof, [[maybe_unu
 
 	if (r != JNI_OK) {
 #if DEBUG
-		log_fatal (LOG_DEFAULT, "ERROR: Unable to attach current thread to the Java VM!");
-		Helpers::abort_application ();
+		Helpers::abort_application ("ERROR: Unable to attach current thread to the Java VM!");
 #endif
 	}
 }
@@ -158,7 +157,7 @@ MonodroidRuntime::open_from_update_dir (MonoAssemblyName *aname, [[maybe_unused]
 	pname.append (name, name_len);
 
 	bool is_dll = Util::ends_with (name, SharedConstants::DLL_EXTENSION);
-	size_t file_name_len = pname.length () + 1;
+	size_t file_name_len = pname.length () + 1uz;
 	if (!is_dll)
 		file_name_len += SharedConstants::DLL_EXTENSION.length ();
 
@@ -206,7 +205,7 @@ MonodroidRuntime::should_register_file ([[maybe_unused]] const char *filename)
 		return true;
 	}
 
-	size_t filename_len = strlen (filename) + 1; // includes space for path separator
+	size_t filename_len = strlen (filename) + 1uz; // includes space for path separator
 	for (const char *odir : AndroidSystem::override_dirs) {
 		if (odir == nullptr) {
 			continue;
@@ -228,29 +227,13 @@ MonodroidRuntime::should_register_file ([[maybe_unused]] const char *filename)
 inline void
 MonodroidRuntime::gather_bundled_assemblies (jstring_array_wrapper &runtimeApks, size_t *out_user_assemblies_count, bool have_split_apks)
 {
-#if defined(DEBUG)
-	if (application_config.instant_run_enabled) {
-		for (const char *od : AndroidSystem::override_dirs) {
-			if (od == nullptr || !Util::directory_exists (od)) {
-				continue;
-			}
-
-			// TODO: temporary hack for the location of typemaps, to be fixed
-			dynamic_local_string<SENSIBLE_PATH_MAX> above { od };
-			above.append ("/..");
-			log_debug (LOG_ASSEMBLY, "Loading TypeMaps from %s", above.get());
-			embeddedAssemblies.try_load_typemaps_from_directory (above.get());
-		}
-	}
-#endif
-
 	if (!AndroidSystem::is_embedded_dso_mode_enabled ()) {
 		*out_user_assemblies_count = embeddedAssemblies.register_from_filesystem<should_register_file> ();
 		return;
 	}
 
 	int64_t apk_count = static_cast<int64_t>(runtimeApks.get_length ());
-	size_t prev_num_assemblies = 0;
+	size_t prev_num_assemblies = 0uz;
 	bool got_split_config_abi_apk = false;
 	bool got_base_apk = false;
 
@@ -347,11 +330,9 @@ MonodroidRuntime::monodroid_debug_accept (int sock, struct sockaddr_in addr)
 	if (accepted < 0)
 		return -3;
 
-	constexpr const char handshake_msg [] = "MonoDroid-Handshake\n";
-	constexpr size_t handshake_length = sizeof (handshake_msg) - 1;
-
+	constexpr std::string_view msg { "MonoDroid-Handshake\n" };
 	do {
-		res = send (accepted, handshake_msg, handshake_length, 0);
+		res = send (accepted, msg.data (), msg.size (), 0);
 	} while (res == -1 && errno == EINTR);
 	if (res < 0)
 		return -4;
@@ -430,16 +411,16 @@ MonodroidRuntime::parse_runtime_args (dynamic_local_string<PROPERTY_VALUE_BUFFER
 			options->debug = true;
 
 			if (token.has_at ('=', ARG_DEBUG.length ())) {
-				constexpr size_t arg_name_length = ARG_DEBUG.length () + 1; // Includes the '='
+				constexpr size_t arg_name_length = ARG_DEBUG.length () + 1uz; // Includes the '='
 
 				static_local_string<SMALL_STRING_PARSE_BUFFER_LEN> hostport (token.length () - arg_name_length);
 				hostport.assign (token.start () + arg_name_length, token.length () - arg_name_length);
 
 				string_segment address;
-				size_t field = 0;
-				while (field < 3 && hostport.next_token (':', address)) {
+				size_t field = 0uz;
+				while (field < 3uz && hostport.next_token (':', address)) {
 					switch (field) {
-						case 0: // host
+						case 0uz: // host
 							if (address.empty ()) {
 								log_error (LOG_DEFAULT, "Invalid --debug argument for the host field (empty string)");
 							} else {
@@ -447,13 +428,13 @@ MonodroidRuntime::parse_runtime_args (dynamic_local_string<PROPERTY_VALUE_BUFFER
 							}
 							break;
 
-						case 1: // sdb_port
+						case 1uz: // sdb_port
 							if (!address.to_integer (sdb_port)) {
 								log_error (LOG_DEFAULT, "Invalid --debug argument for the sdb_port field");
 							}
 							break;
 
-						case 2: // out_port
+						case 2uz: // out_port
 							if (!address.to_integer (out_port)) {
 								log_error (LOG_DEFAULT, "Invalid --debug argument for the sdb_port field");
 							}
@@ -561,8 +542,13 @@ MonodroidRuntime::mono_runtime_init ([[maybe_unused]] JNIEnv *env, [[maybe_unuse
 		if (options.out_port > 0) {
 			int sock = socket (PF_INET, SOCK_STREAM, IPPROTO_TCP);
 			if (sock < 0) {
-				log_fatal (LOG_DEBUGGER, "Could not construct a socket for stdout and stderr; does your app have the android.permission.INTERNET permission? %s", strerror (errno));
-				Helpers::abort_application ();
+				Helpers::abort_application (
+					LOG_DEBUGGER,
+					Util::monodroid_strdup_printf (
+						"Could not construct a socket for stdout and stderr; does your app have the android.permission.INTERNET permission? %s",
+						strerror (errno)
+					)
+				);
 			}
 
 			sockaddr_in addr;
@@ -573,27 +559,43 @@ MonodroidRuntime::mono_runtime_init ([[maybe_unused]] JNIEnv *env, [[maybe_unuse
 
 			int r;
 			if ((r = inet_pton (AF_INET, options.host, &addr.sin_addr)) != 1) {
-				log_error (LOG_DEBUGGER, "Could not setup a socket for stdout and stderr: %s",
-						r == -1 ? strerror (errno) : "address not parseable in the specified address family");
-				Helpers::abort_application ();
+				Helpers::abort_application (
+					LOG_DEBUGGER,
+					Util::monodroid_strdup_printf (
+						"Could not setup a socket for stdout and stderr: %s",
+						r == -1 ? strerror (errno) : "address not parseable in the specified address family"
+					)
+				);
 			}
 
 			if (options.server) {
 				int accepted = monodroid_debug_accept (sock, addr);
 				log_warn (LOG_DEBUGGER, "Accepted stdout connection: %d", accepted);
 				if (accepted < 0) {
-					log_fatal (LOG_DEBUGGER, "Error accepting stdout and stderr (%s:%d): %s",
-							     options.host, options.out_port, strerror (errno));
-					Helpers::abort_application ();
+					Helpers::abort_application (
+						LOG_DEBUGGER,
+						Util::monodroid_strdup_printf (
+							"Error accepting stdout and stderr (%s:%d): %s",
+							options.host,
+							options.out_port,
+							strerror (errno)
+						)
+					);
 				}
 
 				dup2 (accepted, 1);
 				dup2 (accepted, 2);
 			} else {
 				if (monodroid_debug_connect (sock, addr) != 1) {
-					log_fatal (LOG_DEBUGGER, "Error connecting stdout and stderr (%s:%d): %s",
-							     options.host, options.out_port, strerror (errno));
-					Helpers::abort_application ();
+					Helpers::abort_application (
+						LOG_DEBUGGER,
+						Util::monodroid_strdup_printf (
+							"Error connecting stdout and stderr (%s:%d): %s",
+							options.host,
+							options.out_port,
+							strerror (errno)
+						)
+					);
 				}
 
 				dup2 (sock, 1);
@@ -698,19 +700,15 @@ MonodroidRuntime::mono_runtime_init ([[maybe_unused]] JNIEnv *env, [[maybe_unuse
 }
 
 void
-MonodroidRuntime::cleanup_runtime_config (MonovmRuntimeConfigArguments *args, [[maybe_unused]] void *user_data)
+MonodroidRuntime::cleanup_runtime_config ([[maybe_unused]] MonovmRuntimeConfigArguments *args, [[maybe_unused]] void *user_data)
 {
-	if (args == nullptr || args->kind != 1 || args->runtimeconfig.data.data == nullptr) {
-		return;
-	}
-
-	munmap (static_cast<void*>(const_cast<char*>(args->runtimeconfig.data.data)), args->runtimeconfig.data.data_len);
+	embeddedAssemblies.unmap_runtime_config_blob ();
 }
 
 MonoDomain*
 MonodroidRuntime::create_domain (JNIEnv *env, jstring_array_wrapper &runtimeApks, bool is_root_domain, bool have_split_apks)
 {
-	size_t user_assemblies_count   = 0;
+	size_t user_assemblies_count = 0uz;
 
 	gather_bundled_assemblies (runtimeApks, &user_assemblies_count, have_split_apks);
 
@@ -738,10 +736,12 @@ MonodroidRuntime::create_domain (JNIEnv *env, jstring_array_wrapper &runtimeApks
 		log_fatal (LOG_DEFAULT, "No assemblies (or assembly blobs) were found in the application APK file(s) or on the filesystem");
 #endif
 		constexpr const char *assemblies_prefix = EmbeddedAssemblies::get_assemblies_prefix ().data ();
-		log_fatal (LOG_DEFAULT, "Make sure that all entries in the APK directory named `%s` are STORED (not compressed)", assemblies_prefix);
-		log_fatal (LOG_DEFAULT, "If Android Gradle Plugin's minification feature is enabled, it is likely all the entries in `%s` are compressed", assemblies_prefix);
-
-		Helpers::abort_application ();
+		Helpers::abort_application (
+			Util::monodroid_strdup_printf (
+				"ALL entries in APK named `%s` MUST be STORED. Gradle's minification may COMPRESS such entries.",
+				assemblies_prefix
+			)
+		);
 	}
 
 	MonoDomain *domain = mono_jit_init_version (const_cast<char*> ("RootDomain"), const_cast<char*> ("mobile"));
@@ -779,16 +779,21 @@ MonodroidRuntime::lookup_bridge_info (MonoClass *klass, const OSBridge::MonoJava
 	info->handle            = mono_class_get_field_from_name (info->klass, const_cast<char*> ("handle"));
 	info->handle_type       = mono_class_get_field_from_name (info->klass, const_cast<char*> ("handle_type"));
 	info->refs_added        = mono_class_get_field_from_name (info->klass, const_cast<char*> ("refs_added"));
-	info->weak_handle       = mono_class_get_field_from_name (info->klass, const_cast<char*> ("weak_handle"));
-	if (info->klass == nullptr || info->handle == nullptr || info->handle_type == nullptr ||
-			info->refs_added == nullptr || info->weak_handle == nullptr) {
-		log_fatal (LOG_DEFAULT, "The type `%s.%s` is missing required instance fields! handle=%p handle_type=%p refs_added=%p weak_handle=%p",
-				type->_namespace, type->_typename,
+	info->key_handle        = mono_class_get_field_from_name (info->klass, const_cast<char*> ("key_handle"));
+
+	// key_handle is optional, as Java.Interop.JavaObject doesn't currently have it
+	if (info->klass == nullptr || info->handle == nullptr || info->handle_type == nullptr || info->refs_added == nullptr) {
+		Helpers::abort_application (
+			Util::monodroid_strdup_printf (
+				"The type `%s.%s` is missing required instance fields! handle=%p handle_type=%p refs_added=%p key_handle=%p",
+				type->_namespace,
+				type->_typename,
 				info->handle,
 				info->handle_type,
 				info->refs_added,
-				info->weak_handle);
-		Helpers::abort_application ();
+				info->key_handle
+			)
+		);
 	}
 }
 
@@ -835,7 +840,6 @@ MonodroidRuntime::init_android_runtime (JNIEnv *env, jclass runtimeClass, jobjec
 	init.env                    = env;
 	init.logCategories          = log_categories;
 	init.version                = env->GetVersion ();
-	init.androidSdkVersion      = android_api_level;
 	init.isRunningOnDesktop     = is_running_on_desktop ? 1 : 0;
 	init.brokenExceptionTransitions = application_config.broken_exception_transitions ? 1 : 0;
 	init.packageNamingPolicy    = static_cast<int>(application_config.package_naming_policy);
@@ -965,7 +969,6 @@ MonodroidRuntime::propagate_uncaught_exception (JNIEnv *env, jobject javaThread,
 	mono_runtime_invoke (method, nullptr, args, nullptr);
 }
 
-#if DEBUG
 static void
 setup_gc_logging (void)
 {
@@ -974,7 +977,6 @@ setup_gc_logging (void)
 		log_categories |= LOG_GC;
 	}
 }
-#endif
 
 inline void
 MonodroidRuntime::set_environment_variable_for_directory (const char *name, jstring_wrapper &value, bool createDirectory, mode_t mode)
@@ -1090,7 +1092,7 @@ MonodroidRuntime::set_profile_options ()
 	}
 
 	constexpr std::string_view OUTPUT_ARG { "output=" };
-	constexpr size_t start_index = AOT_PREFIX.length () + 1; // one char past ':'
+	constexpr size_t start_index = AOT_PREFIX.length () + 1uz; // one char past ':'
 
 	dynamic_local_string<SENSIBLE_PATH_MAX> output_path;
 	bool have_output_arg = false;
@@ -1193,7 +1195,7 @@ MonodroidRuntime::load_assembly (MonoDomain *domain, jstring_wrapper &assembly)
 		internal_timing->end_event (total_time_index, true /* uses_more_info */);
 
 		constexpr std::string_view PREFIX { " (domain): " };
-		constexpr size_t PREFIX_SIZE = sizeof(PREFIX) - 1;
+		constexpr size_t PREFIX_SIZE = sizeof(PREFIX) - 1uz;
 
 		dynamic_local_string<SENSIBLE_PATH_MAX + PREFIX_SIZE> more_info { PREFIX };
 		more_info.append_c (assm_name);
@@ -1209,8 +1211,8 @@ MonodroidRuntime::load_assemblies (load_assemblies_context_type ctx, bool preloa
 		total_time_index = internal_timing->start_event (TimingEventKind::AssemblyPreload);
 	}
 
-	size_t i = 0;
-	for (i = 0; i < assemblies.get_length (); ++i) {
+	size_t i = 0uz;
+	for (i = 0uz; i < assemblies.get_length (); ++i) {
 		jstring_wrapper &assembly = assemblies [i];
 		load_assembly (ctx, assembly);
 		// only load the first "main" assembly if we are not preloading.
@@ -1222,7 +1224,7 @@ MonodroidRuntime::load_assemblies (load_assemblies_context_type ctx, bool preloa
 		internal_timing->end_event (total_time_index, true /* uses-more_info */);
 
 		static_local_string<SharedConstants::INTEGER_BASE10_BUFFER_SIZE> more_info;
-		more_info.append (static_cast<uint64_t>(i + 1));
+		more_info.append (static_cast<uint64_t>(i + 1u));
 		internal_timing->add_more_info (total_time_index, more_info);
 	}
 }
@@ -1369,7 +1371,7 @@ MonodroidRuntime::install_logging_handlers ()
 inline void
 MonodroidRuntime::Java_mono_android_Runtime_initInternal (JNIEnv *env, jclass klass, jstring lang, jobjectArray runtimeApksJava,
                                                           jstring runtimeNativeLibDir, jobjectArray appDirs, jint localDateTimeOffset,
-                                                          jobject loader, jobjectArray assembliesJava, jint apiLevel, jboolean isEmulator,
+                                                          jobject loader, jobjectArray assembliesJava, jboolean isEmulator,
                                                           jboolean haveSplitApks)
 {
 	char *mono_log_mask_raw = nullptr;
@@ -1410,7 +1412,6 @@ MonodroidRuntime::Java_mono_android_Runtime_initInternal (JNIEnv *env, jclass kl
 		);
 	}
 
-	android_api_level = apiLevel;
 	AndroidSystem::detect_embedded_dso_mode (applicationDirs);
 	AndroidSystem::set_running_in_emulator (isEmulator);
 
@@ -1419,21 +1420,22 @@ MonodroidRuntime::Java_mono_android_Runtime_initInternal (JNIEnv *env, jclass kl
 	jstring_wrapper jstr (env, lang);
 	set_environment_variable ("LANG", jstr);
 
-	AndroidSystem::setup_environment ();
-
 	set_environment_variable_for_directory ("TMPDIR", applicationDirs[SharedConstants::APP_DIRS_CACHE_DIR_INDEX]);
 	set_environment_variable_for_directory ("HOME", home);
 	create_xdg_directories_and_environment (home);
 	AndroidSystem::set_primary_override_dir (home);
+	AndroidSystem::create_update_dir (AndroidSystem::get_primary_override_dir ());
+
+	AndroidSystem::setup_environment ();
 
 	jstring_array_wrapper runtimeApks (env, runtimeApksJava);
 	AndroidSystem::setup_app_library_directories (runtimeApks, applicationDirs, haveSplitApks);
 
 	Logger::init_reference_logging (AndroidSystem::get_primary_override_dir ());
-	AndroidSystem::create_update_dir (AndroidSystem::get_primary_override_dir ());
+
+	setup_gc_logging ();
 
 #if DEBUG
-	setup_gc_logging ();
 	set_debug_env_vars ();
 #endif
 
@@ -1552,7 +1554,7 @@ JNIEXPORT void JNICALL
 Java_mono_android_Runtime_init (JNIEnv *env, jclass klass, jstring lang, jobjectArray runtimeApksJava,
                                 jstring runtimeNativeLibDir, jobjectArray appDirs, jobject loader,
                                 [[maybe_unused]] jobjectArray externalStorageDirs, jobjectArray assembliesJava, [[maybe_unused]] jstring packageName,
-                                jint apiLevel, [[maybe_unused]] jobjectArray environmentVariables)
+                                [[maybe_unused]] jint apiLevel, [[maybe_unused]] jobjectArray environmentVariables)
 {
 	monodroidRuntime.Java_mono_android_Runtime_initInternal (
 		env,
@@ -1564,7 +1566,6 @@ Java_mono_android_Runtime_init (JNIEnv *env, jclass klass, jstring lang, jobject
 		0,
 		loader,
 		assembliesJava,
-		apiLevel,
 		/* isEmulator */ JNI_FALSE,
 		/* haveSplitApks */ JNI_FALSE
 	);
@@ -1573,7 +1574,7 @@ Java_mono_android_Runtime_init (JNIEnv *env, jclass klass, jstring lang, jobject
 JNIEXPORT void JNICALL
 Java_mono_android_Runtime_initInternal (JNIEnv *env, jclass klass, jstring lang, jobjectArray runtimeApksJava,
                                 jstring runtimeNativeLibDir, jobjectArray appDirs, jint localDateTimeOffset, jobject loader,
-                                jobjectArray assembliesJava, jint apiLevel, jboolean isEmulator,
+                                jobjectArray assembliesJava, jboolean isEmulator,
                                 jboolean haveSplitApks)
 {
 	monodroidRuntime.Java_mono_android_Runtime_initInternal (
@@ -1586,7 +1587,6 @@ Java_mono_android_Runtime_initInternal (JNIEnv *env, jclass klass, jstring lang,
 		localDateTimeOffset,
 		loader,
 		assembliesJava,
-		apiLevel,
 		isEmulator,
 		application_config.ignore_split_configs ? false : haveSplitApks
 	);

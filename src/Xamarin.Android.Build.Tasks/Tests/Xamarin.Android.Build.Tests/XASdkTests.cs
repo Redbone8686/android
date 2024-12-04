@@ -239,8 +239,10 @@ public class JavaSourceTest {
 				var expectedMonoAndroidRefPath = Path.Combine (refDirectory, "ref", dotnetVersion, "Mono.Android.dll");
 				Assert.IsTrue (dotnet.LastBuildOutput.ContainsText (expectedMonoAndroidRefPath), $"Build should be using {expectedMonoAndroidRefPath}");
 
+				// TODO: We could parameterize this later
+				const string runtime = "Mono";
 				var runtimeApiLevel = (apiLevel == XABuildConfig.AndroidDefaultTargetDotnetApiLevel && apiLevel < XABuildConfig.AndroidLatestStableApiLevel) ? XABuildConfig.AndroidLatestStableApiLevel : apiLevel;
-				var runtimeDirectory = Directory.GetDirectories (Path.Combine (TestEnvironment.DotNetPreviewPacksDirectory, $"Microsoft.Android.Runtime.{runtimeApiLevel}.{runtimeIdentifier}")).LastOrDefault ();
+				var runtimeDirectory = Directory.GetDirectories (Path.Combine (TestEnvironment.DotNetPreviewPacksDirectory, $"Microsoft.Android.Runtime.{runtime}.{runtimeApiLevel}.{runtimeIdentifier}")).LastOrDefault ();
 				var expectedMonoAndroidRuntimePath = Path.Combine (runtimeDirectory, "runtimes", runtimeIdentifier, "lib", dotnetVersion, "Mono.Android.dll");
 				Assert.IsTrue (dotnet.LastBuildOutput.ContainsText (expectedMonoAndroidRuntimePath), $"Build should be using {expectedMonoAndroidRuntimePath}");
 			}
@@ -261,37 +263,6 @@ public class JavaSourceTest {
 				FileAssert.Exists (aab);
 				FileAssert.Exists (aabSigned);
 			}
-		}
-
-		[Test]
-		public void XamarinLegacySdk ([Values ("net8.0-android34.0", "net9.0-android35.0")] string dotnetTargetFramework)
-		{
-			var proj = new XamarinAndroidLibraryProject {
-				Sdk = "Xamarin.Legacy.Sdk/0.2.0-alpha4",
-				EnableDefaultItems = true,
-				Sources = {
-					new AndroidItem.AndroidLibrary ("javaclasses.jar") {
-						BinaryContent = () => ResourceData.JavaSourceJarTestJar,
-					}
-				}
-			};
-
-			// NOTE: keep this on the latest Xamarin.Android shipped
-			var legacyTargetFrameworkVersion = "13.0";
-			var legacyTargetFramework = $"monoandroid{legacyTargetFrameworkVersion}";
-			proj.SetProperty ("TargetFramework",  value: "");
-			proj.SetProperty ("TargetFrameworks", value: $"{dotnetTargetFramework};{legacyTargetFramework}");
-
-			var projBuilder = CreateDllBuilder ();
-			projBuilder.Save (proj);
-			var dotnet = new DotNetCLI (Path.Combine (Root, projBuilder.ProjectDirectory, proj.ProjectFilePath));
-			Assert.IsTrue (dotnet.Pack (parameters: new [] { "Configuration=Debug" }), "`dotnet pack` should succeed");
-
-			var nupkgPath = Path.Combine (Root, projBuilder.ProjectDirectory, proj.OutputPath, $"{proj.ProjectName}.1.0.0.nupkg");
-			FileAssert.Exists (nupkgPath);
-			using var nupkg = ZipHelper.OpenZip (nupkgPath);
-			nupkg.AssertContainsEntry (nupkgPath, $"lib/{dotnetTargetFramework}/{proj.ProjectName}.dll");
-			nupkg.AssertContainsEntry (nupkgPath, $"lib/{legacyTargetFramework}/{proj.ProjectName}.dll");
 		}
 
 		[Test]

@@ -583,6 +583,7 @@ namespace Xamarin.Android.Build.Tests
 				builder.BuildLogFile = "install3.log";
 				Assert.IsTrue (builder.Install (app, doNotCleanupOnUpdate: true, saveProject: false), "Third install should have succeeded.");
 				logLines = builder.LastBuildOutput;
+				Assert.IsFalse (logLines.Any (l => l.Contains ("Remove redundant file")), "No redundant files should be deleted");
 				Assert.IsTrue (logLines.Any (l => l.Contains ("NotifySync CopyFile") && l.Contains ("UnnamedProject.dll")), "UnnamedProject.dll should have been uploaded");
 				Assert.IsTrue (logLines.Any (l => l.Contains ("NotifySync CopyFile") && l.Contains ("Library1.dll")), "Library1.dll should have been uploaded");
 				Assert.IsTrue (logLines.Any (l => l.Contains ("NotifySync SkipCopyFile") && l.Contains ("Library2.dll")), "Library2.dll should not have been uploaded");
@@ -623,6 +624,22 @@ namespace Xamarin.Android.Build.Tests
 			FileAssert.Exists (apkset);
 			var after = File.GetLastWriteTimeUtc (apkset);
 			Assert.AreNotEqual (before, after, $"{apkset} should change!");
+		}
+
+		[Test]
+		public void AdbTargetArchitecture ()
+		{
+			AssertCommercialBuild ();
+			AssertHasDevices ();
+
+			const string abi = "x86_64";
+			var proj = new XamarinAndroidApplicationProject ();
+
+			using var b = CreateApkBuilder ();
+			b.Verbosity = LoggerVerbosity.Diagnostic;
+			Assert.IsTrue (b.Install (proj, parameters: [ $"AdbTargetArchitecture={abi}" ]), "install should have succeeded.");
+			Assert.IsTrue (StringAssertEx.ContainsText (b.LastBuildOutput, $"Using $(AdbTargetArchitecture): {abi}"),
+				$"`_GetPrimaryCpuAbi` should be skipped for $(AdbTargetArchitecture)!");
 		}
 
 		[Test]

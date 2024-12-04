@@ -22,13 +22,11 @@ namespace Android.Runtime {
 
 		internal AndroidRuntime (IntPtr jnienv,
 				IntPtr vm,
-				bool allocNewObjectSupported,
 				IntPtr classLoader,
 				IntPtr classLoader_loadClass,
 				bool jniAddNativeMethodRegistrationAttributePresent)
 			: base (new AndroidRuntimeOptions (jnienv,
 					vm,
-					allocNewObjectSupported,
 					classLoader,
 					classLoader_loadClass,
 					jniAddNativeMethodRegistrationAttributePresent))
@@ -87,7 +85,6 @@ namespace Android.Runtime {
 	class AndroidRuntimeOptions : JniRuntime.CreationOptions {
 		public AndroidRuntimeOptions (IntPtr jnienv,
 				IntPtr vm,
-				bool allocNewObjectSupported,
 				IntPtr classLoader,
 				IntPtr classLoader_loadClass,
 				bool jniAddNativeMethodRegistrationAttributePresent)
@@ -96,7 +93,6 @@ namespace Android.Runtime {
 			ClassLoader             = new JniObjectReference (classLoader, JniObjectReferenceType.Global);
 			ClassLoader_LoadClass_id= classLoader_loadClass;
 			InvocationPointer       = vm;
-			NewObjectRequired       = !allocNewObjectSupported;
 			ObjectReferenceManager  = new AndroidObjectReferenceManager ();
 			TypeManager             = new AndroidTypeManager (jniAddNativeMethodRegistrationAttributePresent);
 			ValueManager            = new AndroidValueManager ();
@@ -850,7 +846,13 @@ namespace Android.Runtime {
 				throw new ArgumentNullException (nameof (value));
 
 			if (Logger.LogGlobalRef) {
-				RuntimeNativeMethods._monodroid_gref_log ($"Finalizing handle {value.PeerReference}\n");
+				RuntimeNativeMethods._monodroid_gref_log (
+						string.Format (CultureInfo.InvariantCulture,
+							"Finalizing Instance.Type={0} PeerReference={1} IdentityHashCode=0x{2:x} Instance=0x{3:x}",
+							value.GetType ().ToString (),
+							value.PeerReference.ToString (),
+							value.JniIdentityHashCode,
+							RuntimeHelpers.GetHashCode (value)));
 			}
 
 			// FIXME: need hash cleanup mechanism.

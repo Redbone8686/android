@@ -156,14 +156,10 @@ namespace Xamarin.Android.Build.Tests
 			proj.SetProperty ("LinkerDumpDependencies", "True");
 			proj.SetProperty ("AndroidUseAssemblyStore", "False");
 
-			byte [] apkDescData;
 			var flavor = (forms ? "XForms" : "Simple") + "DotNet";
 			var apkDescFilename = $"BuildReleaseArm64{flavor}.apkdesc";
 			var apkDescReference = "reference.apkdesc";
-			using (var stream = typeof (XamarinAndroidApplicationProject).Assembly.GetManifestResourceStream ($"Xamarin.ProjectTools.Resources.Base.{apkDescFilename}")) {
-				apkDescData = new byte [stream.Length];
-				stream.Read (apkDescData, 0, (int) stream.Length);
-			}
+			byte [] apkDescData = XamarinAndroidCommonProject.GetResourceContents ($"Xamarin.ProjectTools.Resources.Base.{apkDescFilename}");
 			proj.OtherBuildItems.Add (new BuildItem ("ApkDescFile", apkDescReference) { BinaryContent = () => apkDescData });
 
 			// use BuildHelper.CreateApkBuilder so that the test directory is not removed in tearup
@@ -183,8 +179,8 @@ namespace Xamarin.Android.Build.Tests
 				var apkFile = Path.Combine (Root, b.ProjectDirectory, proj.OutputPath, proj.PackageName + "-Signed.apk");
 				var apkDescPath = Path.Combine (Root, apkDescFilename);
 				var apkDescReferencePath = Path.Combine (Root, b.ProjectDirectory, apkDescReference);
-				var (code, stdOut, stdErr) = RunApkDiffCommand ($"-s --save-description-2={apkDescPath} --descrease-is-regression {regressionCheckArgs} {apkDescReferencePath} {apkFile}");
-				Assert.IsTrue (code == 0, $"apkdiff regression test failed with exit code: {code}\ncontext: https://github.com/xamarin/xamarin-android/blob/main/Documentation/project-docs/ApkSizeRegressionChecks.md\nstdOut: {stdOut}\nstdErr: {stdErr}");
+				var (code, stdOut, stdErr) = RunApkDiffCommand ($"-s --save-description-2={apkDescPath} --descrease-is-regression {regressionCheckArgs} {apkDescReferencePath} {apkFile}", Path.Combine (Root, b.ProjectDirectory, "apkdiff.log"));
+				Assert.IsTrue (code == 0, $"apkdiff regression test failed with exit code: {code}. See test attachments.");
 			}
 		}
 
@@ -273,7 +269,7 @@ namespace Xamarin.Android.Build.Tests
 		[TestCase ("", new string [0], false)]
 		[TestCase ("", new string [0], true)]
 		[TestCase ("SuppressTrimAnalysisWarnings=false", new string [] { "IL2055" }, true, 2)]
-		[TestCase ("TrimMode=full", new string [0], false)]
+		[TestCase ("TrimMode=full", new string [] { "IL2055" }, false, 1)]
 		[TestCase ("TrimMode=full", new string [] { "IL2055" }, true, 2)]
 		[TestCase ("IsAotCompatible=true", new string [] { "IL2055", "IL3050" }, false)]
 		[TestCase ("IsAotCompatible=true", new string [] { "IL2055", "IL3050" }, true, 3)]
@@ -725,6 +721,21 @@ namespace UnamedProject
 
 				FileAssert.DoesNotExist (build_props, "build.props should *not* exist after `Clean`.");
 				FileAssert.Exists (designtime_build_props, "designtime/build.props should exist after `Clean`.");
+			}
+		}
+
+		[Test]
+		public void DesignTimeBuildMissingAndroidPlatformJar ()
+		{
+			var path = Path.Combine ("temp", TestName);
+			var androidSdkPath = CreateFauxAndroidSdkDirectory (Path.Combine (path, "android-sdk"), "35.0.0", []);
+			try {
+				var proj = new XamarinAndroidApplicationProject ();
+				using var builder = CreateApkBuilder (Path.Combine (path, proj.ProjectName));
+				Assert.IsTrue (builder.DesignTimeBuild (proj, parameters: [$"AndroidSdkDirectory={androidSdkPath}"]),
+					"design-time build should have succeeded.");
+			} finally {
+				Directory.Delete (androidSdkPath, recursive: true);
 			}
 		}
 
@@ -1282,6 +1293,8 @@ GVuZHNDbGFzc1ZhbHVlLmNsYXNzUEsFBgAAAAADAAMAwgAAAMYBAAAAAA==
 		[Test]
 		public void BuildAppCheckDebugSymbols ()
 		{
+			AssertCommercialBuild (); // FIXME: when Fast Deployment isn't available, we would need to use `llvm-objcopy` to extract the debug symbols
+
 			var path = Path.Combine ("temp", TestContext.CurrentContext.Test.Name);
 			var lib = new XamarinAndroidLibraryProject () {
 				IsRelease = false,
@@ -1447,6 +1460,49 @@ namespace App1
 			} finally {
 				Environment.SetEnvironmentVariable ("JAVA_TOOL_OPTIONS", oldEnvVar);
 			}
+		}
+
+		[Test]
+		public void LibraryWithGenericAttribute ()
+		{
+			var path = Path.Combine ("temp", TestContext.CurrentContext.Test.Name);
+			var lib = new XamarinAndroidLibraryProject {
+				ProjectName = "Library1",
+				IsRelease = true,
+				Sources = {
+					new BuildItem.Source ("Class1.cs") {
+						TextContent = () => """
+							namespace Library1;
+							public class Class1 { }
+						"""
+					},
+					new BuildItem.Source ("GenericTestAttribute.cs") {
+						TextContent = () => """
+							using System;
+							[assembly: GenericTestAttribute<Guid>]
+							[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true, Inherited = false)]
+							public class GenericTestAttribute<T> : Attribute { }
+						""",
+					},
+				},
+			};
+			var proj = new XamarinAndroidApplicationProject {
+				ProjectName = "App1",
+				IsRelease = true,
+				Sources = {
+					new BuildItem.Source ("Class2.cs") {
+						TextContent= () => """
+							namespace App1;
+							class Class2 : Library1.Class1 { }
+						""",
+					},
+				},
+			};
+			proj.AddReference (lib);
+			using var libb = CreateDllBuilder (Path.Combine (path, "Library1"));
+			Assert.IsTrue (libb.Build (lib), "Library1 Build should have succeeded.");
+			using var b = CreateApkBuilder (Path.Combine (path, "App1"));
+			Assert.IsTrue (b.Build (proj), "App1 Build should have succeeded.");
 		}
 	}
 }

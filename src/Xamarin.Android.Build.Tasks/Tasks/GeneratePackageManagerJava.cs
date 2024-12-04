@@ -13,6 +13,7 @@ using Microsoft.Build.Utilities;
 using Java.Interop.Tools.TypeNameMappings;
 using Xamarin.Android.Tools;
 using Microsoft.Android.Build.Tasks;
+using System.Collections.Concurrent;
 
 namespace Xamarin.Android.Tasks
 {
@@ -21,8 +22,6 @@ namespace Xamarin.Android.Tasks
 	public class GeneratePackageManagerJava : AndroidTask
 	{
 		public override string TaskPrefix => "GPM";
-
-		Guid buildId = Guid.NewGuid ();
 
 		[Required]
 		public ITaskItem[] ResolvedAssemblies { get; set; }
@@ -62,9 +61,6 @@ namespace Xamarin.Android.Tasks
 		[Required]
 		public bool EnablePreloadAssembliesDefault { get; set; }
 
-		[Required]
-		public bool InstantRunEnabled { get; set; }
-
 		public bool EnableMarshalMethods { get; set; }
 		public string RuntimeConfigBinFilePath { get; set; }
 		public string BoundExceptionType { get; set; }
@@ -81,9 +77,6 @@ namespace Xamarin.Android.Tasks
 		public bool EnableSGenConcurrent { get; set; }
 		public string? CustomBundleConfigFile { get; set; }
 
-		[Output]
-		public string BuildId { get; set; }
-
 		bool _Debug {
 			get {
 				return string.Equals (Debug, "true", StringComparison.OrdinalIgnoreCase);
@@ -92,9 +85,6 @@ namespace Xamarin.Android.Tasks
 
 		public override bool RunTask ()
 		{
-			BuildId = buildId.ToString ();
-			Log.LogDebugMessage ("  [Output] BuildId: {0}", BuildId);
-
 			var doc = AndroidAppManifest.Load (Manifest, MonoAndroidHelper.SupportedVersions);
 			int minApiVersion = doc.MinSdkVersion == null ? 4 : (int) doc.MinSdkVersion;
 			// We need to include any special assemblies in the Assemblies list
@@ -190,9 +180,6 @@ namespace Xamarin.Android.Tasks
 			if (sequencePointsMode != SequencePointsMode.None && !environmentParser.HaveMonoDebug) {
 				AddEnvironmentVariable (defaultMonoDebug[0], defaultMonoDebug[1]);
 			}
-
-			if (!environmentParser.HavebuildId)
-				AddEnvironmentVariable ("XAMARIN_BUILD_ID", BuildId);
 
 			if (!environmentParser.HaveHttpMessageHandler) {
 				if (HttpClientHandlerType == null)
@@ -324,9 +311,9 @@ namespace Xamarin.Android.Tasks
 				}
 			}
 
-			Dictionary<AndroidTargetArch, NativeCodeGenState>? nativeCodeGenStates = null;
+			ConcurrentDictionary<AndroidTargetArch, NativeCodeGenState>? nativeCodeGenStates = null;
 			if (enableMarshalMethods) {
-				nativeCodeGenStates = BuildEngine4.GetRegisteredTaskObjectAssemblyLocal<Dictionary<AndroidTargetArch, NativeCodeGenState>> (
+				nativeCodeGenStates = BuildEngine4.GetRegisteredTaskObjectAssemblyLocal<ConcurrentDictionary<AndroidTargetArch, NativeCodeGenState>> (
 					ProjectSpecificTaskObjectKey (GenerateJavaStubs.NativeCodeGenStateRegisterTaskKey),
 					RegisteredTaskObjectLifetime.Build
 				);
@@ -344,8 +331,7 @@ namespace Xamarin.Android.Tasks
 				BrokenExceptionTransitions = environmentParser.BrokenExceptionTransitions,
 				PackageNamingPolicy = pnp,
 				BoundExceptionType = boundExceptionType,
-				InstantRunEnabled = InstantRunEnabled,
-				JniAddNativeMethodRegistrationAttributePresent = NativeCodeGenState.Template != null ? NativeCodeGenState.Template.JniAddNativeMethodRegistrationAttributePresent : false,
+				JniAddNativeMethodRegistrationAttributePresent = NativeCodeGenState.TemplateJniAddNativeMethodRegistrationAttributePresent,
 				HaveRuntimeConfigBlob = haveRuntimeConfigBlob,
 				NumberOfAssembliesInApk = assemblyCount,
 				BundledAssemblyNameWidth = assemblyNameWidth,
@@ -406,6 +392,14 @@ namespace Xamarin.Android.Tasks
 				} finally {
 					marshalMethodsWriter.Flush ();
 					Files.CopyIfStreamChanged (marshalMethodsWriter.BaseStream, marshalMethodsLlFilePath);
+				}
+			}
+
+			if (nativeCodeGenStates is not null) {
+				// Dispose all XAAssemblyResolvers
+				Log.LogDebugMessage ($"Disposing all {nameof (NativeCodeGenState)}.{nameof (NativeCodeGenState.Resolver)}");
+				foreach	(var state in nativeCodeGenStates.Values) {
+					state.Resolver.Dispose ();
 				}
 			}
 

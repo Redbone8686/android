@@ -54,6 +54,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";APT0005" ItemType="0;.resx" PsrId="211" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Invalid file name: Filenames cannot use Java reserved words.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[文件名无效: 文件名不能使用 Java 保留字。]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";APT2264" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[This could be caused by the project exceeding the Windows maximum path length limitation. See https://learn.microsoft.com/dotnet/android/messages/apt2264 for details.]]></Val>
@@ -456,6 +465,15 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
+      <Item ItemId=";XA0142" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Command '{0}' failed.\n{1}]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[命令 '{0}' 失败。\n{1}]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
       <Item ItemId=";XA1000" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[There was a problem parsing {0}. This is likely due to incomplete or invalid XML. Exception: {1}]]></Val>
@@ -675,27 +693,6 @@
         </Str>
         <Disp Icon="Str" />
       </Item>
-      <Item ItemId=";XA1026" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Using AAPT is deprecated in favor of AAPT2. Please enable 'Use incremental Android packaging system (aapt2)' in the Visual Studio project property pages or edit the project file in a text editor and set the 'AndroidUseAapt2' MSBuild property to 'true'.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[已禁止使用 AAPT，取而代之的是使用 AAPT2。请在 Visual Studio 项目属性页面中启用“使用增量 Android 打包系统(aapt2)”，或者在文本编辑器中编辑项目文件，并将 "AndroidUseAapt2" MSBuild 属性设置为 "true"。]]></Val>
-          </Tgt>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
-      <Item ItemId=";XA1026_dotnet" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
-        <Str Cat="Text">
-          <Val><![CDATA[Using AAPT is not supported in .NET for Android projects that target .NET 6 or higher. Please enable 'Use incremental Android packaging system (aapt2)' in the Visual Studio project property pages or edit the project file in a text editor and set the 'AndroidUseAapt2' MSBuild property to 'true'.]]></Val>
-          <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[面向 .NET 6 或更高版本的 .NET for Android 项目不支持使用 AAPT。请在 Visual Studio 项目属性页面中启用“使用增量 Android 打包系统(aapt2)”，或者在文本编辑器中编辑项目文件，并将 "AndroidUseAapt2" MSBuild 属性设置为 "true"。]]></Val>
-          </Tgt>
-          <Prev Cat="Text">
-            <Val><![CDATA[Using AAPT is not supported in .NET Android projects that target .NET 6 or higher. Please enable 'Use incremental Android packaging system (aapt2)' in the Visual Studio project property pages or edit the project file in a text editor and set the 'AndroidUseAapt2' MSBuild property to 'true'.]]></Val>
-          </Prev>
-        </Str>
-        <Disp Icon="Str" />
-      </Item>
       <Item ItemId=";XA1027" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
         <Str Cat="Text">
           <Val><![CDATA[The 'EnableProguard' MSBuild property is set to 'true' and the 'AndroidLinkTool' MSBuild property is empty, so 'AndroidLinkTool' will default to 'proguard'.]]></Val>
@@ -800,6 +797,15 @@
           <Val><![CDATA[The '{0}' MSBuild property is deprecated and will be removed in .NET {1}. See https://aka.ms/net-android-deprecations for more details.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[“{0}”MSBuild 属性已弃用，将在 .NET {1} 中移除。有关更多详细信息，请参阅 https://aka.ms/net-android-deprecations。]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XA1038" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[The '{0}' MSBuild property has an invalid value of '{1}'. A valid value is one of: {2}.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA["{0}" MSBuild 属性的 "{1}" 值无效。有效值为以下值之一: {2}。]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -1226,10 +1232,13 @@
       </Item>
       <Item ItemId=";XA4236" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
         <Str Cat="Text">
-          <Val><![CDATA[Cannot download Maven artifact '{0}:{1}'.]D;]A;- {2}: {3}]D;]A;- {4}: {5}]]></Val>
+          <Val><![CDATA[Cannot download Maven artifact '{0}:{1}'.]D;]A;{2}]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
-            <Val><![CDATA[无法下载 Maven 项目“{0}:{1}”。]D;]A;- {2}: {3}]D;]A;- {4}: {5}]]></Val>
+            <Val><![CDATA[无法下载 Maven 项目“{0}:{1}”。]D;]A;{2}]]></Val>
           </Tgt>
+          <Prev Cat="Text">
+            <Val><![CDATA[Cannot download Maven artifact '{0}:{1}'.]D;]A;- {2}: {3}]D;]A;- {4}: {5}]]></Val>
+          </Prev>
         </Str>
         <Disp Icon="Str" />
       </Item>
@@ -1322,6 +1331,15 @@
           <Val><![CDATA[Could not find NuGet package '{0}' version '{1}' in lock file. Ensure NuGet Restore has run since this <PackageReference> was added.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[在锁定文件中找不到 NuGet 包“{0}”版本“{1}”。确保自添加此 <PackageReference> 后 NuGet 还原已运行。]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XA4249" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Maven artifact specification '{0}' is invalid. The correct format is 'group_id:artifact_id:version'.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[Maven 项目规范“{0}”无效。正确的格式为 "group_id:artifact_id:version"。]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -1496,6 +1514,15 @@
           <Val><![CDATA[`{0}` is empty. A value for `{0}` should be provided.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[“{0}”为空。应提供“{0}”的值。]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XA4315" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Ignoring `{0}`. Manifest does not have the required 'package' attribute on the manifest element.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[正在忽略“{0}”。清单在清单元素上没有所需的“package”属性。]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />
@@ -1697,6 +1724,24 @@
           <Val><![CDATA[Could not find Android Resource '{0}'. Please update @(AndroidResource) to add the missing resource.]]></Val>
           <Tgt Cat="Text" Stat="Loc" Orig="New">
             <Val><![CDATA[找不到 Android 资源“{0}”。请更新 @(AndroidResource)以添加缺少的资源。]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XAGRDL1000" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Executable 'gradlew' not found in project directory '{0}'. Please ensure the path to your Gradle project folder is correct, and that it contains Gradle Wrapper scripts.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[在项目目录 ‘{0}’ 中找不到可执行的 ‘gradlew’。请确保 Gradle 项目文件夹的路径正确无误，并且包含 Gradle 包装器脚本。]]></Val>
+          </Tgt>
+        </Str>
+        <Disp Icon="Str" />
+      </Item>
+      <Item ItemId=";XAGRDLRefLibraryOutputs" ItemType="0;.resx" PsrId="211" InstFlg="true" Leaf="true">
+        <Str Cat="Text">
+          <Val><![CDATA[Adding reference to Gradle output: '{0}'. The '%(CreateAndroidLibrary)' metadata can be set to 'false' to opt out of this behavior.]]></Val>
+          <Tgt Cat="Text" Stat="Loc" Orig="New">
+            <Val><![CDATA[正在添加对 Gradle 输出 ‘{0}’ 的引用。可以将 ‘%(CreateAndroidLibrary)’ 元数据设置为 ‘false’ 以选择退出此行为。]]></Val>
           </Tgt>
         </Str>
         <Disp Icon="Str" />

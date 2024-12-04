@@ -157,6 +157,10 @@ namespace Xamarin.ProjectTools
 			Id = "Xamarin.Kotlin.Reflect",
 			Version = "1.9.10.2"
 		};
+		public static Package Xamarin_KotlinX_Coroutines_Android = new Package {
+			Id = "Xamarin.KotlinX.Coroutines.Android",
+			Version = "1.8.1.1"
+		};
 		public static Package Acr_UserDialogs = new Package {
 			Id = "Acr.UserDialogs",
 			Version = "8.0.1",
@@ -220,7 +224,7 @@ namespace Xamarin.ProjectTools
 		};
 		public static Package Mono_AotProfiler_Android  = new Package {
 			Id = "Mono.AotProfiler.Android",
-			Version = "7.0.0-preview1",
+			Version = "9.0.0-preview1",
 		};
 		public static Package SkiaSharp = new Package () {
 			Id = "SkiaSharp",

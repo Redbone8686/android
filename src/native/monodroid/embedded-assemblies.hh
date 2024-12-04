@@ -11,12 +11,15 @@
 #include <vector>
 
 #include <dirent.h>
+#include <elf.h>
 #include <semaphore.h>
+#include <sys/mman.h>
 
 #include <mono/metadata/object.h>
 #include <mono/metadata/assembly.h>
 #include <mono/metadata/mono-private-unstable.h>
 
+#include "archive-dso-stub-config.hh"
 #include "strings.hh"
 #include "xamarin-app.hh"
 #include "cpp-util.hh"
@@ -101,6 +104,7 @@ namespace xamarin::android::internal {
 
 		static constexpr size_t assembly_store_file_path_size = calc_size(apk_lib_dir_name, zip_path_separator, SharedConstants::android_lib_abi, zip_path_separator, assembly_store_prefix, SharedConstants::android_lib_abi, assembly_store_extension, dso_suffix);
 		static constexpr auto assembly_store_file_path = concat_string_views<assembly_store_file_path_size> (apk_lib_dir_name, zip_path_separator, SharedConstants::android_lib_abi, zip_path_separator, assembly_store_prefix, SharedConstants::android_lib_abi, assembly_store_extension, dso_suffix);
+		static constexpr size_t dso_size_overhead = ArchiveDSOStubConfig::PayloadSectionOffset + (ArchiveDSOStubConfig::SectionHeaderEntryCount * ArchiveDSOStubConfig::SectionHeaderEntrySize);
 
 	public:
 		/* filename is e.g. System.dll, System.dll.mdb, System.pdb */
@@ -112,9 +116,6 @@ namespace xamarin::android::internal {
 		{}
 #endif  // def RELEASE
 
-#if defined (DEBUG)
-		void try_load_typemaps_from_directory (const char *path);
-#endif
 		STATIC_IN_ANDROID_RELEASE const char* typemap_managed_to_java (MonoReflectionType *type, const uint8_t *mvid) noexcept;
 
 		void install_preload_hooks_for_appdomains ();
@@ -155,10 +156,21 @@ namespace xamarin::android::internal {
 
 		void get_runtime_config_blob (const char *& area, uint32_t& size) const
 		{
-			area = static_cast<char*>(runtime_config_blob_mmap.area);
+			area = static_cast<char*>(runtime_config_data);
 
-			abort_unless (runtime_config_blob_mmap.size < std::numeric_limits<uint32_t>::max (), "Runtime config binary blob size exceeds %u bytes", std::numeric_limits<uint32_t>::max ());
-			size = static_cast<uint32_t>(runtime_config_blob_mmap.size);
+			abort_unless (runtime_config_data_size < std::numeric_limits<uint32_t>::max (), "Runtime config binary blob size exceeds %u bytes", std::numeric_limits<uint32_t>::max ());
+			size = static_cast<uint32_t>(runtime_config_data_size);
+		}
+
+		void unmap_runtime_config_blob ()
+		{
+			if (runtime_config_blob_mmap.area == nullptr) {
+				return;
+			}
+
+			munmap (runtime_config_blob_mmap.area, runtime_config_blob_mmap.size);
+			runtime_config_blob_mmap.area = nullptr;
+			runtime_config_blob_mmap.size = 0;
 		}
 
 		bool have_runtime_config_blob () const noexcept
@@ -262,6 +274,47 @@ namespace xamarin::android::internal {
 
 		bool zip_read_entry_info (std::vector<uint8_t> const& buf, dynamic_local_string<SENSIBLE_PATH_MAX>& file_name, ZipEntryLoadState &state);
 
+		[[gnu::always_inline]]
+		static std::tuple<void*, size_t> get_wrapper_dso_payload_pointer_and_size (md_mmap_info const& map_info, const  char *file_name) noexcept
+		{
+			using Elf_Header = std::conditional_t<SharedConstants::is_64_bit_target, Elf64_Ehdr, Elf32_Ehdr>;
+			using Elf_SHeader = std::conditional_t<SharedConstants::is_64_bit_target, Elf64_Shdr, Elf32_Shdr>;
+
+			const void* const mapped_elf = map_info.area;
+			auto elf_bytes = static_cast<const uint8_t* const>(mapped_elf);
+			auto elf_header = reinterpret_cast<const Elf_Header*const>(mapped_elf);
+
+			if constexpr (SharedConstants::debug_build) {
+				// In debug mode we might be dealing with plain data, without DSO wrapper
+				if (elf_header->e_ident[EI_MAG0] != ELFMAG0 ||
+						elf_header->e_ident[EI_MAG1] != ELFMAG1 ||
+						elf_header->e_ident[EI_MAG2] != ELFMAG2 ||
+						elf_header->e_ident[EI_MAG3] != ELFMAG3) {
+					log_debug (LOG_ASSEMBLY, "Not an ELF image: %s", file_name);
+					// Not an ELF image, just return what we mmapped before
+					return { map_info.area, map_info.size };
+				}
+			}
+
+			auto section_header = reinterpret_cast<const Elf_SHeader*const>(elf_bytes + elf_header->e_shoff);
+			Elf_SHeader const& payload_hdr = section_header[ArchiveDSOStubConfig::PayloadSectionIndex];
+
+			return {
+				const_cast<void*>(reinterpret_cast<const void*const> (elf_bytes + ArchiveDSOStubConfig::PayloadSectionOffset)),
+				payload_hdr.sh_size
+			};
+		}
+
+		[[gnu::always_inline]]
+		void store_mapped_runtime_config_data (md_mmap_info const& map_info, const char *file_name) noexcept
+		{
+			auto [payload_start, payload_size] = get_wrapper_dso_payload_pointer_and_size (map_info, file_name);
+			log_debug (LOG_ASSEMBLY, "Runtime config: payload pointer %p ; size %zu", payload_start, payload_size);
+			runtime_config_data = payload_start;
+			runtime_config_data_size = payload_size;
+			runtime_config_blob_found = true;
+		}
+
 		std::tuple<const char*, uint32_t> get_assemblies_prefix_and_length () const noexcept
 		{
 			if (assemblies_prefix_override != nullptr) {
@@ -288,7 +341,7 @@ namespace xamarin::android::internal {
 		}
 
 		template<typename Key, typename Entry, int (*compare)(const Key*, const Entry*), bool use_extra_size = false>
-		static const Entry* binary_search (const Key *key, const Entry *base, size_t nmemb, size_t extra_size = 0) noexcept;
+		static const Entry* binary_search (const Key *key, const Entry *base, size_t nmemb, size_t extra_size = 0uz) noexcept;
 
 #if defined (DEBUG)
 		static int compare_type_name (const char *type_name, const TypeMapEntry *entry) noexcept;
@@ -324,8 +377,7 @@ namespace xamarin::android::internal {
 		static constexpr size_t get_mangled_prefix_length ()
 		{
 			if constexpr (IsSatelliteAssembly) {
-				// +1 for the extra `-` char in the culture portion of satellite assembly's name;
-				return SharedConstants::MANGLED_ASSEMBLY_SATELLITE_ASSEMBLY_MARKER.length () + 1;
+				return SharedConstants::MANGLED_ASSEMBLY_SATELLITE_ASSEMBLY_MARKER.length ();
 			} else {
 				return SharedConstants::MANGLED_ASSEMBLY_REGULAR_ASSEMBLY_MARKER.length ();
 			}
@@ -338,7 +390,7 @@ namespace xamarin::android::internal {
 		}
 
 		template<bool IsSatelliteAssembly>
-		static void unmangle_name (dynamic_local_string<SENSIBLE_PATH_MAX> &name, size_t start_idx = 0) noexcept
+		static void unmangle_name (dynamic_local_string<SENSIBLE_PATH_MAX> &name, size_t start_idx = 0uz) noexcept
 		{
 			constexpr size_t mangled_data_size = get_mangled_data_size<IsSatelliteAssembly> ();
 			if (name.length () <= mangled_data_size) {
@@ -353,7 +405,7 @@ namespace xamarin::android::internal {
 			if constexpr (IsSatelliteAssembly) {
 				// Make sure assembly name is {CULTURE}/assembly.dll
 				for (size_t idx = start_idx; idx < name.length (); idx++) {
-					if (name[idx] == SharedConstants::SATELLITE_ASSEMBLY_MARKER_CHAR) {
+					if (name[idx] == SharedConstants::SATELLITE_CULTURE_END_MARKER_CHAR) {
 						name[idx] = '/';
 						break;
 					}
@@ -371,8 +423,8 @@ namespace xamarin::android::internal {
 
 		bool                   register_debug_symbols;
 		bool                   have_and_want_debug_symbols;
-		size_t                 bundled_assembly_index = 0;
-		size_t                 number_of_found_assemblies = 0;
+		size_t                 bundled_assembly_index = 0uz;
+		size_t                 number_of_found_assemblies = 0uz;
 
 #if defined (DEBUG)
 		TypeMappingInfo       *java_to_managed_maps;
@@ -383,9 +435,11 @@ namespace xamarin::android::internal {
 		const char            *assemblies_prefix_override = nullptr;
 
 		md_mmap_info           runtime_config_blob_mmap{};
+		void                  *runtime_config_data = nullptr;
+		size_t                 runtime_config_data_size = 0uz;
 		bool                   runtime_config_blob_found = false;
-		uint32_t               number_of_mapped_assembly_stores = 0;
-		uint32_t               number_of_zip_dso_entries = 0;
+		uint32_t               number_of_mapped_assembly_stores = 0u;
+		uint32_t               number_of_zip_dso_entries = 0u;
 		bool                   need_to_scan_more_apks = true;
 
 		AssemblyStoreIndexEntry *assembly_store_hashes;

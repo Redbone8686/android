@@ -28,7 +28,7 @@
         Files="@(_PackageFiles)"
         FileClassifications="@(FrameworkListFileClass)"
         TargetFile="$(FrameworkListFile)"
-        TargetFilePrefixes="ref;runtimes"
+        TargetFilePrefixes="ref;runtimes;analyzers"
         RootAttributes="@(FrameworkListRootAttributes)"
     />
     <ItemGroup>
@@ -39,7 +39,7 @@
   <Target Name="_GetDefaultPackageVersion"
       DependsOnTargets="GetXAVersionInfo" >
     <PropertyGroup>
-      <PackageVersion>$(AndroidPackVersionLong)+sha.$(XAVersionHash)</PackageVersion>
+      <PackageVersion>$(AndroidPackVersionLong)</PackageVersion>
     </PropertyGroup>
   </Target>
 
@@ -54,26 +54,28 @@
     <RemoveDir Directories="$(XamarinAndroidSourcePath)bin\Build$(Configuration)\nuget-unsigned" />
   </Target>
 
+  <Target Name="_CreateItemGroups">
+    <ItemGroup>
+      <_AndroidRuntimeNames Include="Mono;NativeAOT" />
+      <_AndroidRIDs Include="android-arm;android-arm64;android-x86;android-x64" Runtime="%(_AndroidRuntimeNames.Identity)" />
+    </ItemGroup>
+  </Target>
+
   <Target Name="_CreateDefaultRefPack"
       Condition=" '$(AndroidLatestStableApiLevel)' != '$(AndroidDefaultTargetDotnetApiLevel)' and Exists('$(_MonoAndroidNETOutputRoot)$(AndroidDefaultTargetDotnetApiLevel)\Mono.Android.dll') ">
     <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidApiLevel=$(AndroidDefaultTargetDotnetApiLevel) &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Ref.proj&quot;" />
   </Target>
 
   <Target Name="_CreatePreviewPacks"
+      DependsOnTargets="_CreateItemGroups"
       Condition=" '$(AndroidLatestStableApiLevel)' != '$(AndroidLatestUnstableApiLevel)' and Exists('$(_MonoAndroidNETOutputRoot)$(AndroidLatestUnstableApiLevel)\Mono.Android.dll') ">
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidApiLevel=$(AndroidLatestUnstableApiLevel) -p:AndroidRID=android-arm   &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidApiLevel=$(AndroidLatestUnstableApiLevel) -p:AndroidRID=android-arm64 &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidApiLevel=$(AndroidLatestUnstableApiLevel) -p:AndroidRID=android-x86   &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidApiLevel=$(AndroidLatestUnstableApiLevel) -p:AndroidRID=android-x64   &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
+    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidApiLevel=$(AndroidLatestUnstableApiLevel) -p:AndroidRID=%(_AndroidRIDs.Identity) -p:AndroidRuntime=%(_AndroidRIDs.Runtime) &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
     <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidApiLevel=$(AndroidLatestUnstableApiLevel) &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Ref.proj&quot;" />
   </Target>
 
   <Target Name="CreateAllPacks"
-      DependsOnTargets="DeleteExtractedWorkloadPacks;_SetGlobalProperties;GetXAVersionInfo;_CleanNuGetDirectory;_CreatePreviewPacks;_CreateDefaultRefPack">
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidRID=android-arm   &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidRID=android-arm64 &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidRID=android-x86   &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidRID=android-x64   &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
+      DependsOnTargets="DeleteExtractedWorkloadPacks;_SetGlobalProperties;GetXAVersionInfo;_CleanNuGetDirectory;_CreateItemGroups;_CreatePreviewPacks;_CreateDefaultRefPack">
+    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:AndroidRID=%(_AndroidRIDs.Identity) -p:AndroidRuntime=%(_AndroidRIDs.Runtime) &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj&quot;" />
     <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Ref.proj&quot;" />
     <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:HostOS=Linux   &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Sdk.proj&quot;" Condition=" '$(HostOS)' == 'Linux' " />
     <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_GlobalProperties, ' ') -p:HostOS=Darwin  &quot;$(MSBuildThisFileDirectory)Microsoft.Android.Sdk.proj&quot;" Condition=" '$(HostOS)' == 'Darwin' " />
@@ -120,9 +122,6 @@
     </PropertyGroup>
     <ItemGroup>
       <_NuGetSources Include="$(OutputPath.TrimEnd('\'))" />
-      <!-- This allows us to install our older Android .NET packs -->
-      <_NuGetSources Include="https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet7/nuget/v3/index.json" />
-      <_NuGetSources Include="https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet6/nuget/v3/index.json" />
       <_PreviewPacks Condition=" '$(AndroidLatestStableApiLevel)' != '$(AndroidLatestUnstableApiLevel)' " Include="$(XamarinAndroidSourcePath)bin\Build$(Configuration)\nuget-unsigned\Microsoft.Android.Ref.$(AndroidLatestUnstableApiLevel).*.nupkg" />
       <_InstallArguments Include="android" />
       <_InstallArguments Include="android-$(AndroidLatestUnstableApiLevel)" Condition=" '@(_PreviewPacks->Count())' != '0' " />
@@ -151,10 +150,10 @@
       <_PackFoldersToDelete Include="$(DotNetPreviewPath)sdk-manifests\$(DotNetSdkManifestsFolder)\workloadsets" />
       <_PackFoldersToDelete Include="$(DotNetPreviewPath)sdk-manifests\$(DotNetSdkManifestsFolder)\microsoft.net.sdk.android" />
       <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Ref.%(_PackApiLevels.Identity)" />
-      <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Runtime.%(_PackApiLevels.Identity).android-arm" />
-      <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Runtime.%(_PackApiLevels.Identity).android-arm64" />
-      <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Runtime.%(_PackApiLevels.Identity).android-x86" />
-      <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Runtime.%(_PackApiLevels.Identity).android-x64" />
+      <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Runtime.Mono.%(_PackApiLevels.Identity).android-arm" />
+      <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Runtime.Mono.%(_PackApiLevels.Identity).android-arm64" />
+      <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Runtime.Mono.%(_PackApiLevels.Identity).android-x86" />
+      <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Runtime.Mono.%(_PackApiLevels.Identity).android-x64" />
       <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Sdk.Darwin" />
       <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Sdk.Linux" />
       <_PackFoldersToDelete Include="$(DotNetPreviewPath)packs\Microsoft.Android.Sdk.Windows" />
@@ -163,7 +162,7 @@
     <RemoveDir Directories="@(_PackFoldersToDelete)" />
   </Target>
 
-  <!-- https://github.com/dotnet/arcade/blob/efc3da96e5ac110513e92ebd9ef87c73f44d8540/Documentation/DependencyFlowOnboardingWithoutArcade.md -->
+  <!-- https://github.com/dotnet/arcade/blob/00d6decc59f5030c2399a64fd3e4f6e8e11bacca/Documentation/DependencyFlowOnboardingWithoutArcade.md -->
   <Target Name="PushManifestToBuildAssetRegistry" 
       DependsOnTargets="GetXAVersionInfo" >
     <PropertyGroup>
@@ -192,7 +191,7 @@
       <ManifestBuildData Include="AzureDevOpsBranch=$(BUILD_SOURCEBRANCH)" />
     </ItemGroup>
 
-    <PushToAzureDevOpsArtifacts
+    <PushToBuildStorage
         ItemsToPush="@(ItemsToPush)"
         IsStableBuild="$(IsStableBuild)"
         ManifestBuildData="@(ManifestBuildData)"
@@ -216,90 +215,6 @@
   </Target>
 
   <!-- Targets for setting up a local workload test environment without needing to pack .nupkg files -->
-  <ItemGroup>
-    <_FrameworkListInputs  Include="$(MicrosoftAndroidRefPackDir)**" />
-    <_FrameworkListOutputs Include="$(BuildOutputDirectory)lib\packs\Microsoft.Android.Ref.$(AndroidDefaultTargetDotnetApiLevel)\$(AndroidPackVersion)\data\FrameworkList.xml" />
-    <_FrameworkListOutputs Include="$(BuildOutputDirectory)lib\packs\Microsoft.Android.Ref.$(AndroidLatestStableApiLevel)\$(AndroidPackVersion)\data\FrameworkList.xml" />
-    <_FrameworkListOutputs Include="$(BuildOutputDirectory)lib\packs\Microsoft.Android.Ref.$(AndroidLatestUnstableApiLevel)\$(AndroidPackVersion)\data\FrameworkList.xml" />
-    <_RuntimeListInputs  Include="$(MicrosoftAndroidArmPackDir)**" />
-    <_RuntimeListInputs  Include="$(MicrosoftAndroidArm64PackDir)**" />
-    <_RuntimeListInputs  Include="$(MicrosoftAndroidx86PackDir)**" />
-    <_RuntimeListInputs  Include="$(MicrosoftAndroidx64PackDir)**" />
-    <_RuntimeListOutputs Include="@(AndroidSupportedTargetJitAbi->'$(BuildOutputDirectory)lib\packs\Microsoft.Android.Runtime.$(AndroidDefaultTargetDotnetApiLevel).%(AndroidRID)\$(AndroidPackVersion)\data\RuntimeList.xml')" AndroidRID="%(AndroidRID)" />
-    <_RuntimeListOutputs Include="@(AndroidSupportedTargetJitAbi->'$(BuildOutputDirectory)lib\packs\Microsoft.Android.Runtime.$(AndroidLatestStableApiLevel).%(AndroidRID)\$(AndroidPackVersion)\data\RuntimeList.xml')" AndroidRID="%(AndroidRID)" />
-    <_RuntimeListOutputs Include="@(AndroidSupportedTargetJitAbi->'$(BuildOutputDirectory)lib\packs\Microsoft.Android.Runtime.$(AndroidLatestUnstableApiLevel).%(AndroidRID)\$(AndroidPackVersion)\data\RuntimeList.xml')" AndroidRID="%(AndroidRID)" />
-    <_TemplatesInputs Include="$(XamarinAndroidSourcePath)src\Microsoft.Android.Templates\**" />
-    <_TemplatesOutputs Include="$(BuildOutputDirectory)lib\template-packs\microsoft.android.templates.$(AndroidPackVersion).nupkg" />
-  </ItemGroup>
-
-  <Target Name="CreateLocalRuntimeLists"
-      Inputs="$(MSBuildThisFile);@(_RuntimeListInputs)"
-      Outputs="@(_RuntimeListOutputs)">
-    <MSBuild
-        Projects="$(MSBuildThisFileDirectory)Microsoft.Android.Runtime.proj"
-        Properties="FrameworkListFile=%(_RuntimeListOutputs.Identity);AndroidRID=%(_RuntimeListOutputs.AndroidRID)"
-        Targets="_GetRuntimePackItems;_GenerateFrameworkListFile"
-    />
-  </Target>
-
-  <Target Name="CreateLocalFrameworkLists"
-      Inputs="$(MSBuildThisFile);@(_FrameworkListInputs)"
-      Outputs="@(_FrameworkListOutputs)">
-    <MSBuild
-        Projects="$(MSBuildThisFileDirectory)Microsoft.Android.Ref.proj"
-        Properties="FrameworkListFile=%(_FrameworkListOutputs.Identity)"
-        Targets="_GetTargetingPackItems;_GenerateFrameworkListFile"
-    />
-  </Target>
-
-  <Target Name="PackAndCopyTemplates"
-      Inputs="@(_TemplatesInputs)"
-      Outputs="@(_TemplatesOutputs)">
-    <ItemGroup>
-      <_PackProps Include="-v:n -c $(Configuration)" />
-      <_PackProps Include="-p:IncludeSymbols=False" />
-      <_PackProps Include="-p:OutputPath=$(DotNetPreviewPath)template-packs" />
-      <_PackProps Include="-p:TemplatePackVersion=$(AndroidPackVersion)" />
-      <_PackProps Include="-p:PackageId=microsoft.android.templates" />
-    </ItemGroup>
-    <Exec Command="&quot;$(DotNetPreviewTool)&quot; pack @(_PackProps, ' ') &quot;$(XamarinAndroidSourcePath)src\Microsoft.Android.Templates\Microsoft.Android.Templates.csproj&quot;" />
-  </Target>
-
-  <Target Name="InstallManifestAndDependencies"
-      DependsOnTargets="DeleteExtractedWorkloadPacks;_GetDefaultPackageVersion">
-    <PropertyGroup>
-      <_LocalSdkManifestsFolder>$(BuildOutputDirectory)lib\sdk-manifests\$(DotNetSdkManifestsFolder)\</_LocalSdkManifestsFolder>
-      <_LocalAndroidManifestFolder>$(_LocalSdkManifestsFolder)microsoft.net.sdk.android\$(AndroidPackVersionLong)\</_LocalAndroidManifestFolder>
-      <_EmptyWorkloadDir>$(_LocalSdkManifestsFolder)android.deps.workload\0.0.1\</_EmptyWorkloadDir>
-      <_EmptyWorkloadJsonContent>
-<![CDATA[
-{"version": "0.0.1", "workloads": { "android-deps": { "extends" : [ "microsoft-net-runtime-android", "microsoft-net-runtime-android-aot" ] } } }
-]]>
-      </_EmptyWorkloadJsonContent>
-    </PropertyGroup>
-    <MakeDir Directories="$(_LocalAndroidManifestFolder)" />
-    <MSBuild
-        Projects="$(MSBuildThisFileDirectory)Microsoft.NET.Sdk.Android.proj"
-        Properties="WorkloadManifestJsonPath=$(_LocalAndroidManifestFolder)WorkloadManifest.json;WorkloadManifestTargetsPath=$(_LocalAndroidManifestFolder)WorkloadManifest.targets;WorkloadVersion=$(AndroidPackVersion)"
-        Targets="_GenerateXAWorkloadContent"
-    />
-    <!-- Create empty workload to install dotnet/runtime dependencies -->
-    <MakeDir Directories="$(_EmptyWorkloadDir)" />
-    <WriteLinesToFile
-        File="$(_EmptyWorkloadDir)WorkloadManifest.json"
-        Lines="$(_EmptyWorkloadJsonContent)"
-        Overwrite="true"
-    />
-    <Exec
-        Command="&quot;$(DotNetPreviewTool)&quot; workload install android-deps --configfile &quot;$(XamarinAndroidSourcePath)NuGet.config&quot; --skip-manifest-update --skip-sign-check --verbosity diag"
-        EnvironmentVariables="DOTNETSDK_WORKLOAD_MANIFEST_ROOTS=$(BuildOutputDirectory)lib\sdk-manifests"
-        WorkingDirectory="$(XamarinAndroidSourcePath)"
-    />
-  </Target>
-
-  <PropertyGroup>
-    <ConfigureLocalWorkloadDependsOn Condition="'$(RunningOnCI)' != 'true'">CreateLocalFrameworkLists;CreateLocalRuntimeLists;PackAndCopyTemplates;InstallManifestAndDependencies</ConfigureLocalWorkloadDependsOn>
-  </PropertyGroup>
-  <Target Name="ConfigureLocalWorkload" DependsOnTargets="$(ConfigureLocalWorkloadDependsOn)" />
+  <Import Project="ConfigureLocalWorkload.targets" />
 
 </Project>

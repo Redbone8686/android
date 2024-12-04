@@ -6,7 +6,7 @@
     <DotNetTargetFramework>net$(DotNetTargetFrameworkVersion)</DotNetTargetFramework>
     <DotNetAndroidTargetFramework>$(DotNetTargetFramework)-android</DotNetAndroidTargetFramework>
     <!-- Used for bootstrap, command-line tooling, and desktop NUnit projects -->
-    <DotNetStableTargetFramework>net8.0</DotNetStableTargetFramework>
+    <DotNetStableTargetFramework>net9.0</DotNetStableTargetFramework>
     <TargetFrameworkNETStandard>netstandard2.0</TargetFrameworkNETStandard>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <BuildOutputDirectory>$(MSBuildThisFileDirectory)bin\$(Configuration)\</BuildOutputDirectory>
@@ -35,10 +35,10 @@
          * Major/Minor match Android stable API level, such as 30.0 for API 30.
          * Bump first digit of the patch version for feature releases (and reset the first two digits to 0)
     -->
-    <AndroidPackVersion>35.0.0</AndroidPackVersion>
-    <AndroidPackVersionSuffix>rc.1</AndroidPackVersionSuffix>
+    <AndroidPackVersion>35.99.0</AndroidPackVersion>
+    <AndroidPackVersionSuffix>preview.1</AndroidPackVersionSuffix>
+    <!-- Final value set by GetXAVersionInfo target -->
     <IsStableBuild>false</IsStableBuild>
-    <IsStableBuild Condition=" '$(AndroidPackVersionSuffix)' == 'rtm' ">true</IsStableBuild>
   </PropertyGroup>
 
   <!-- Common <PackageReference/> versions -->

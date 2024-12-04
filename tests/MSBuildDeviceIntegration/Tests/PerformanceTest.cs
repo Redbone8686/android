@@ -50,15 +50,47 @@ namespace Xamarin.Android.Build.Tests
 				Assert.Fail ($"No timeout value found for a key of {caller}");
 			}
 
-			//TODO: Update baselines in MSBuildDeviceIntegration.csv, there is currently a slight performance regression in .NET 6
-			expected += 500;
-
 			action (builder);
 			var actual = GetDurationFromBinLog (builder);
 			TestContext.Out.WriteLine($"expected: {expected}ms, actual: {actual}ms");
 			if (actual > expected) {
 				Assert.Fail ($"Exceeded expected time of {expected}ms, actual {actual}ms");
 			}
+		}
+
+		void ProfileTask (ProjectBuilder builder, string task, int iterations, Action<ProjectBuilder> action, [CallerMemberName] string caller = null)
+		{
+			if (!csv_values.TryGetValue (caller, out int expected)) {
+				Assert.Fail ($"No timeout value found for a key of {caller}");
+			}
+			double total = 0;
+			for (int i=0; i < iterations; i++) {
+				action (builder);
+				var duration = GetTaskDurationFromBinLog (builder, task);
+				TestContext.Out.WriteLine($"run {i} took: {duration}ms");
+				total += duration;
+			}
+			total /= iterations;
+			TestContext.Out.WriteLine($"expected: {expected}ms, actual: {total}ms");
+			if (total > expected) {
+				Assert.Fail ($"Exceeded expected time of {expected}ms, actual {total}ms");
+			}
+		}
+
+		double GetTaskDurationFromBinLog (ProjectBuilder builder, string task)
+		{
+			var binlog = Path.Combine (Root, builder.ProjectDirectory, $"{Path.GetFileNameWithoutExtension (builder.BuildLogFile)}.binlog");
+			FileAssert.Exists (binlog);
+
+			var build = BinaryLog.ReadBuild (binlog);
+			var duration = build
+				.FindChildrenRecursive<Task> (t => t.Name == task)
+				.Aggregate (TimeSpan.Zero, (duration, target) => duration + target.Duration);
+
+			if (duration == TimeSpan.Zero)
+				throw new InvalidDataException ($"No task build duration found in {binlog}");
+
+			return duration.TotalMilliseconds;
 		}
 
 		double GetDurationFromBinLog (ProjectBuilder builder)
@@ -153,6 +185,8 @@ namespace Xamarin.Android.Build.Tests
 		[Retry (Retry)]
 		public void Build_AndroidResource_Change ()
 		{
+			AssertCommercialBuild (); // If <BuildApk/> runs, this test will fail without Fast Deployment
+
 			var proj = CreateApplicationProject ();
 			using (var builder = CreateBuilderWithoutLogFile ()) {
 				builder.Target = "Build";
@@ -170,6 +204,8 @@ namespace Xamarin.Android.Build.Tests
 		[Retry (Retry)]
 		public void Build_AndroidAsset_Change ()
 		{
+			AssertCommercialBuild (); // If <BuildApk/> runs, this test will fail without Fast Deployment
+
 			var bytes = new byte [1024*1024*10];
 			var rnd = new Random ();
 			rnd.NextBytes (bytes);
@@ -205,27 +241,6 @@ namespace Xamarin.Android.Build.Tests
 
 		[Test]
 		[Retry (Retry)]
-		public void Build_Designer_Change ()
-		{
-			var proj = CreateApplicationProject ();
-			using (var builder = CreateBuilderWithoutLogFile ()) {
-				builder.Target = "Build";
-				builder.Build (proj);
-				builder.AutomaticNuGetRestore = false;
-
-				// Change AndroidResource & run SetupDependenciesForDesigner
-				proj.LayoutMain += $"{Environment.NewLine}<!--comment-->";
-				proj.Touch ("Resources\\layout\\Main.axml");
-				var parameters = new [] { "DesignTimeBuild=True", "AndroidUseManagedDesignTimeResourceGenerator=False" };
-				builder.RunTarget (proj, "SetupDependenciesForDesigner", parameters: parameters);
-
-				// Profile AndroidResource change
-				Profile (builder, b => b.Build (proj));
-			}
-		}
-
-		[Test]
-		[Retry (Retry)]
 		public void Build_JLO_Change ()
 		{
 			var className = "Foo";
@@ -249,6 +264,8 @@ namespace Xamarin.Android.Build.Tests
 		[Retry (Retry)]
 		public void Build_AndroidManifest_Change ()
 		{
+			AssertCommercialBuild (); // If <BuildApk/> runs, this test will fail without Fast Deployment
+
 			var proj = CreateApplicationProject ();
 			using (var builder = CreateBuilderWithoutLogFile ()) {
 				builder.Target = "Build";
@@ -263,43 +280,9 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		[Retry (Retry)]
-		public void Build_CSProj_Change ()
-		{
-			var proj = CreateApplicationProject ();
-			using (var builder = CreateBuilderWithoutLogFile ()) {
-				builder.Target = "Build";
-				builder.Build (proj);
-				builder.AutomaticNuGetRestore = false;
-
-				// Profile .csproj change
-				proj.Sources.Add (new BuildItem ("None", "Foo.txt") {
-					TextContent = () => "Bar",
-				});
-				Profile (builder, b => b.Build (proj));
-			}
-		}
-
-		static object [] XAML_Change = new object [] {
-			new object [] {
-				/* produceReferenceAssembly */ false,
-				/* install */                  false,
-			},
-			new object [] {
-				/* produceReferenceAssembly */ true,
-				/* install */                  false,
-			},
-			new object [] {
-				/* produceReferenceAssembly */ true,
-				/* install */                  true,
-			},
-		};
-
-		[Test]
-		[TestCaseSource (nameof (XAML_Change))]
 		[Category ("UsesDevice")]
 		[Retry (Retry)]
-		public void Build_XAML_Change (bool produceReferenceAssembly, bool install)
+		public void Build_XAML_Change ([Values (true, false)] bool install)
 		{
 			if (install) {
 				AssertCommercialBuild (); // This test will fail without Fast Deployment
@@ -315,8 +298,6 @@ namespace Xamarin.Android.Build.Tests
 			var caller = nameof (Build_XAML_Change);
 			if (install) {
 				caller = caller.Replace ("Build", "Install");
-			} else if (produceReferenceAssembly) {
-				caller += "_RefAssembly";
 			}
 			var app = CreateApplicationProject ();
 			app.ProjectName = "MyApp";
@@ -332,7 +313,7 @@ namespace Xamarin.Android.Build.Tests
 			var lib = new DotNetStandard {
 				ProjectName = "MyLibrary",
 				Sdk = "Microsoft.NET.Sdk",
-				TargetFramework = "netstandard2.0",
+				TargetFramework = "net8.0", // Vanilla project
 				Sources = {
 					new BuildItem.Source ("Bar.cs") {
 						TextContent = () => "public class Bar { public Bar () { System.Console.WriteLine (" + count++ + "); } }"
@@ -345,7 +326,6 @@ namespace Xamarin.Android.Build.Tests
 					KnownPackages.XamarinForms,
 				}
 			};
-			lib.SetProperty ("ProduceReferenceAssembly", produceReferenceAssembly.ToString ());
 			app.References.Add (new BuildItem.ProjectReference ($"..\\{lib.ProjectName}\\{lib.ProjectName}.csproj", lib.ProjectName, lib.ProjectGuid));
 
 			using (var libBuilder = CreateBuilderWithoutLogFile (Path.Combine (path, lib.ProjectName), isApp: false))
@@ -391,6 +371,28 @@ namespace Xamarin.Android.Build.Tests
 				proj.MainActivity += $"{Environment.NewLine}//comment";
 				proj.Touch ("MainActivity.cs");
 				Profile (builder, b => b.Install (proj));
+			}
+		}
+
+		[Test]
+		[Category ("UsesDevice")]
+		[Retry (Retry)]
+		public void Install_CSharp_FromClean ()
+		{
+			AssertCommercialBuild (); // This test will fail without Fast Deployment
+
+			var proj = CreateApplicationProject ();
+			proj.PackageName = "com.xamarin.install_csharp_change";
+			proj.MainActivity = proj.DefaultMainActivity;
+			using (var builder = CreateBuilderWithoutLogFile ()) {
+				builder.BuildLogFile = "install.log";
+				builder.Verbosity = LoggerVerbosity.Quiet;
+				builder.Install (proj);
+				builder.AutomaticNuGetRestore = false;
+				ProfileTask (builder, "FastDeploy", 20, b => {
+					b.Uninstall (proj);
+					b.Install (proj);
+				});
 			}
 		}
 	}

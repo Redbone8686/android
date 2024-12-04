@@ -65,16 +65,20 @@ namespace Xamarin.Android.Tasks
 
 			// Set ShrunkAssemblies for _RemoveRegisterAttribute and <BuildApk/>
 			// This should match the Condition on the _RemoveRegisterAttribute target
-			if (PublishTrimmed && !AndroidIncludeDebugSymbols) {
-				var shrunkAssemblies = new List<ITaskItem> (OutputAssemblies.Length);
-				foreach (var assembly in OutputAssemblies) {
-					var dir = Path.GetDirectoryName (assembly.ItemSpec);
-					var file = Path.GetFileName (assembly.ItemSpec);
-					shrunkAssemblies.Add (new TaskItem (assembly) {
-						ItemSpec = Path.Combine (dir, "shrunk", file),
-					});
+			if (PublishTrimmed) {
+				if (!AndroidIncludeDebugSymbols) {
+					var shrunkAssemblies = new List<ITaskItem> (OutputAssemblies.Length);
+					foreach (var assembly in OutputAssemblies) {
+						var dir = Path.GetDirectoryName (assembly.ItemSpec);
+						var file = Path.GetFileName (assembly.ItemSpec);
+						shrunkAssemblies.Add (new TaskItem (assembly) {
+							ItemSpec = Path.Combine (dir, "shrunk", file),
+						});
+					}
+					ShrunkAssemblies = shrunkAssemblies.ToArray ();
+				} else {
+					ShrunkAssemblies = OutputAssemblies;
 				}
-				ShrunkAssemblies = shrunkAssemblies.ToArray ();
 			}
 
 			if (InputJavaLibraries != null) {
@@ -186,8 +190,10 @@ namespace Xamarin.Android.Tasks
 				}
 
 				string destination = Path.Combine (abi, item.GetMetadata ("DestinationSubDirectory"));
-				//Log.LogDebugMessage ($"DEBUG!!!'{item.ItemSpec}' '{rid}' = '{abi}'. DestinationSubDirectory='{destination}'");
-				item.SetMetadata ("DestinationSubDirectory", destination + Path.DirectorySeparatorChar);
+				if (destination.Length > 0 && destination [destination.Length - 1] != Path.DirectorySeparatorChar) {
+					destination += Path.DirectorySeparatorChar;
+				}
+				item.SetMetadata ("DestinationSubDirectory", destination);
 				item.SetMetadata ("DestinationSubPath", Path.Combine (destination, Path.GetFileName (item.ItemSpec)));
 			}
 		}

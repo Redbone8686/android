@@ -292,12 +292,9 @@ int xml myxml 0x7f140000
 			File.WriteAllText (Path.Combine (Root, path, "lp", "res", "font", "arial.ttf"), "");
 			File.WriteAllText (Path.Combine (Root, path, "lp", "res", "values", "strings.xml"), StringsXml2);
 			File.WriteAllText (Path.Combine (Root, path, "lp", "res", "values", "dimen.xml"), Dimen);
-			using (var stream = typeof (XamarinAndroidCommonProject).Assembly.GetManifestResourceStream ("Xamarin.ProjectTools.Resources.Base.Icon.png")) {
-				var icon_binary_mdpi = new byte [stream.Length];
-				stream.Read (icon_binary_mdpi, 0, (int)stream.Length);
-				File.WriteAllBytes (Path.Combine (Root, path, "lp", "res", "drawable", "ic_menu_preferences.png"), icon_binary_mdpi);
-				File.WriteAllBytes (Path.Combine (Root, path, "lp", "res", "mipmap-hdpi", "icon.png"), icon_binary_mdpi);
-			}
+			var icon_binary_mdpi = XamarinAndroidCommonProject.GetResourceContents ("Xamarin.ProjectTools.Resources.Base.Icon.png");
+			File.WriteAllBytes (Path.Combine (Root, path, "lp", "res", "drawable", "ic_menu_preferences.png"), icon_binary_mdpi);
+			File.WriteAllBytes (Path.Combine (Root, path, "lp", "res", "mipmap-hdpi", "icon.png"), icon_binary_mdpi);
 			File.WriteAllText (Path.Combine (Root, path, "lp", "res", "menu", "options.xml"), Menu);
 			File.WriteAllText (Path.Combine (Root, path, "lp", "__res_name_case_map.txt"), "menu/Options.xml;menu/options.xml");
 		}
@@ -318,13 +315,9 @@ int xml myxml 0x7f140000
 			library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "values", "strings2.xml")) { TextContent = () => StringsXml2 });
 			library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "values", "dimen.xml")) { TextContent = () => Dimen });
 
-			using (var stream = typeof (XamarinAndroidCommonProject).Assembly.GetManifestResourceStream ("Xamarin.ProjectTools.Resources.Base.Icon.png")) {
-				var icon_binary_mdpi = new byte [stream.Length];
-				stream.Read (icon_binary_mdpi, 0, (int)stream.Length);
-				library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "drawable", "ic_menu_preferences.png")) { BinaryContent = () => icon_binary_mdpi });
-				library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "mipmap-hdpi", "icon.png")) { BinaryContent = () => icon_binary_mdpi });
-			}
-
+			var icon_binary_mdpi = XamarinAndroidCommonProject.GetResourceContents ("Xamarin.ProjectTools.Resources.Base.Icon.png");
+			library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "drawable", "ic_menu_preferences.png")) { BinaryContent = () => icon_binary_mdpi });
+			library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "mipmap-hdpi", "icon.png")) { BinaryContent = () => icon_binary_mdpi });
 			library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "menu", "options.xml")) { TextContent = () => Menu });
 
 			using (ProjectBuilder builder = CreateDllBuilder (Path.Combine (Root, path))) {
@@ -628,93 +621,6 @@ int xml myxml 0x7f140000
 			string aapt2Designer = Path.Combine (Root, path, "Resource.designer.aapt2.cs");
 			string managedDesigner = Path.Combine (Root, path, "Resource.designer.managed.cs");
 			CompareFilesIgnoreRuntimeInfoString (managedDesigner, aapt2Designer);
-			Directory.Delete (Path.Combine (Root, path), recursive: true);
-		}
-
-		[Test]
-		public void CompareAaptAndManagedParserOutputWithCustomIds ()
-		{
-			var path = Path.Combine ("temp", TestName);
-			CreateResourceDirectory (path);
-			File.WriteAllText (Path.Combine (Root, path, "res", "layout", "custom.xml"), CustomId);
-			File.WriteAllText (Path.Combine (Root, path, "foo.map"), @"a\nb");
-			Directory.CreateDirectory (Path.Combine (Root, path, "java"));
-			string resPath = Path.Combine (Root, path, "res");
-			int platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
-			IBuildEngine engine = new MockBuildEngine (TestContext.Out);
-			var aapt = new Aapt () {
-				BuildEngine = engine,
-				ToolPath = GetPathToAapt (),
-				ResourceDirectory = resPath,
-				ManifestFiles = new ITaskItem [] { new TaskItem (Path.Combine (Root, path, "AndroidManifest.xml")) },
-				ResourceOutputFile = Path.Combine (Root, path, "foo.apk"),
-				AssemblyIdentityMapFile = Path.Combine (Root, path, "foo.map"),
-				JavaPlatformJarPath = Path.Combine (AndroidSdkDirectory, "platforms", $"android-{platform}", "android.jar"),
-				JavaDesignerOutputDirectory = Path.Combine (Root, path, "java"),
-				ResourceSymbolsTextFileDirectory = Path.Combine (Root, path),
-				AdditionalResourceDirectories = new ITaskItem [] { new TaskItem (Path.Combine (Root, path, "lp", "res")) },
-				AndroidUseLatestPlatformSdk = true,
-				ApiLevel = $"{platform}",
-
-			};
-			Assert.IsTrue (aapt.Execute (), "Aapt should have succeeded.");
-			string rTxt = Path.Combine (Root, path, "R.txt");
-			FileAssert.Exists (rTxt, $"{rTxt} should have been created.");
-
-			var task = new GenerateResourceDesigner {
-				BuildEngine = engine
-			};
-			task.UseManagedResourceGenerator = true;
-			task.DesignTimeBuild = false;
-			task.Namespace = "MonoAndroidApplication4.MonoAndroidApplication4";
-			task.NetResgenOutputFile = Path.Combine (Root, path, "Resource.designer.aapt.cs");
-			task.ProjectDir = Path.Combine (Root, path);
-			task.CaseMapFile = Path.Combine (Root, path, "case_map.txt");
-			task.ResourceDirectory = Path.Combine (Root, path, "res") + Path.DirectorySeparatorChar;
-			task.Resources = new TaskItem [] {
-				new TaskItem (Path.Combine (Root, path, "res", "values", "strings.xml"), new Dictionary<string, string> () {
-					{ "LogicalName", "values\\strings.xml" },
-				}),
-			};
-			task.AdditionalResourceDirectories = new TaskItem [] {
-				new TaskItem (Path.Combine (Root, path, "lp", "res")),
-			};
-			task.ResourceFlagFile = Path.Combine (Root, path, "AndroidResgen.flag");
-			task.IsApplication = true;
-			task.JavaPlatformJarPath = aapt.JavaPlatformJarPath;
-			Assert.IsTrue (task.Execute (), "Task should have executed successfully.");
-
-			string aaptDesigner = Path.Combine (Root, path, "Resource.designer.aapt.cs");
-			var aaptDesignerText = File.ReadAllText (aaptDesigner);
-			StringAssert.Contains ("MyCustomID", aaptDesignerText, "");
-			StringAssert.Contains ("HelloWorldTextView", aaptDesignerText, "");
-			StringAssert.Contains ("ACustomID", aaptDesignerText, "");
-			StringAssert.Contains ("foo1", aaptDesignerText, "");
-
-			task.UseManagedResourceGenerator = true;
-			task.DesignTimeBuild = true;
-			task.NetResgenOutputFile = Path.Combine (Root, path, "Resource.designer.managedrtxt.cs");
-			Assert.IsTrue (task.Execute (), "Task should have executed successfully.");
-
-			string managedDesignerRtxt = Path.Combine (Root, path, "Resource.designer.managedrtxt.cs");
-			CompareFilesIgnoreRuntimeInfoString (managedDesignerRtxt, aaptDesigner);
-
-			File.WriteAllText (task.ResourceFlagFile, string.Empty);
-			File.Delete (Path.Combine (Root, path, "R.txt.bak"));
-			File.Move (rTxt, Path.Combine (Root, path, "R.txt.bak"));
-
-			task.UseManagedResourceGenerator = true;
-			task.DesignTimeBuild = true;
-			task.NetResgenOutputFile = Path.Combine (Root, path, "Resource.designer.managed.cs");
-			Assert.IsTrue (task.Execute (), "Task should have executed successfully.");
-			string managedDesigner = Path.Combine (Root, path, "Resource.designer.managed.cs");
-
-			var managedDesignerText = File.ReadAllText (managedDesigner);
-			StringAssert.Contains ("MyCustomID", managedDesignerText, "");
-			StringAssert.Contains ("HelloWorldTextView", managedDesignerText, "");
-			StringAssert.Contains ("ACustomID", managedDesignerText, "");
-			StringAssert.Contains ("foo1", managedDesignerText, "");
-
 			Directory.Delete (Path.Combine (Root, path), recursive: true);
 		}
 

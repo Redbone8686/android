@@ -1,6 +1,15 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-	<!-- Android Sdk Tool versions are sourced from this file. This is maintained in the android-tools repo. -->
-	<Import Project="$(MSBuildThisFileDirectory)\Xamarin.Android.Tools.Versions.props" />
+	<PropertyGroup>
+		<AndroidSdkBuildToolsVersion Condition=" '$(AndroidSdkBuildToolsVersion)' == '' ">@SDK_BUILD_TOOLS_VERSION@</AndroidSdkBuildToolsVersion>
+		<AndroidSdkPlatformToolsVersion Condition="'$(AndroidSdkPlatformToolsVersion)' == ''">@SDK_PLATFORM_TOOLS_VERSION@</AndroidSdkPlatformToolsVersion>
+		<AndroidSdkPlatformVersion Condition=" '$(AndroidSdkPlatformVersion)' == '' ">@SDK_PLATFORM_VERSION@</AndroidSdkPlatformVersion>
+
+		<AndroidCommandLineToolsVersion Condition=" '$(AndroidCommandLineToolsVersion)' == '' ">@COMMAND_LINE_TOOLS_VERSION@</AndroidCommandLineToolsVersion>
+		<AndroidSdkEmulatorVersion Condition="'$(AndroidSdkEmulatorVersion)' == ''"></AndroidSdkEmulatorVersion>
+		<AndroidNdkVersion Condition="'$(AndroidNdkVersion)' == ''">@NDK_PKG_REVISION@</AndroidNdkVersion>
+		<JavaSdkVersion Condition="'$(JavaSdkVersion)' == ''">@JAVA_SDK_VERSION@</JavaSdkVersion>
+		<MinimumSupportedJavaVersion Condition="'$(MinimumSupportedJavaVersion)' == ''">@MIN_SUPPORTED_JDK_VERSION@</MinimumSupportedJavaVersion>
+	</PropertyGroup>
 	<PropertyGroup>
 		<_JavaInteropReferences>Java.Interop;System.Runtime</_JavaInteropReferences>
 		<Debugger Condition=" '$(Debugger)' == '' ">Xamarin</Debugger>
@@ -9,18 +18,16 @@
 		<CopyNuGetImplementations Condition=" '$(CopyNuGetImplementations)' == ''">true</CopyNuGetImplementations>
 		<YieldDuringToolExecution Condition="'$(YieldDuringToolExecution)' == ''">true</YieldDuringToolExecution>
 		<LatestSupportedJavaVersion Condition="'$(LatestSupportedJavaVersion)' == ''">17.0.99</LatestSupportedJavaVersion>
-		<MinimumSupportedJavaVersion Condition="'$(MinimumSupportedJavaVersion)' == ''">1.6.0</MinimumSupportedJavaVersion>
 		<AndroidVersionCodePattern Condition=" '$(AndroidUseLegacyVersionCode)' != 'True' And '$(AndroidVersionCodePattern)' == '' ">{abi}{versionCode:D5}</AndroidVersionCodePattern>
 		<AndroidResourceGeneratorTargetName>UpdateGeneratedFiles</AndroidResourceGeneratorTargetName>
 		<AndroidUseApkSigner Condition=" '$(AndroidUseApkSigner)' == '' ">True</AndroidUseApkSigner>
-		<AndroidUseAapt2 Condition=" '$(AndroidUseAapt2)' == '' ">True</AndroidUseAapt2>
 		<AndroidPackageNamingPolicy Condition=" '$(AndroidPackageNamingPolicy)' == '' ">LowercaseCrc64</AndroidPackageNamingPolicy>
 		<AndroidUseManagedDesignTimeResourceGenerator Condition=" '$(AndroidUseManagedDesignTimeResourceGenerator)' == '' And '$(OS)' != 'Windows_NT' ">False</AndroidUseManagedDesignTimeResourceGenerator>
 		<BundleToolVersion Condition="'$(BundleToolVersion)' == ''">@BUNDLETOOL_VERSION@</BundleToolVersion>
 		<_XamarinAndroidMSBuildDirectory>$(MSBuildThisFileDirectory)</_XamarinAndroidMSBuildDirectory>
 
-		<JavacSourceVersion Condition=" '$(JavacSourceVersion)' == '' ">1.8</JavacSourceVersion>
-		<JavacTargetVersion Condition=" '$(JavacTargetVersion)' == '' ">1.8</JavacTargetVersion>
+		<JavacSourceVersion Condition=" '$(JavacSourceVersion)' == '' ">17</JavacSourceVersion>
+		<JavacTargetVersion Condition=" '$(JavacTargetVersion)' == '' ">17</JavacTargetVersion>
 
 		<!-- Enable nuget package conflict resolution -->
 		<ResolveAssemblyConflicts>true</ResolveAssemblyConflicts>

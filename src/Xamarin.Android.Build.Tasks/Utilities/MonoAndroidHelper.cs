@@ -6,6 +6,7 @@ using System.IO;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text;
+using System.Threading;
 using Xamarin.Android.Tools;
 using Xamarin.Tools.Zip;
 
@@ -47,6 +48,67 @@ namespace Xamarin.Android.Tasks
 				foreach (string line in lines) {
 					sb.AppendLine ($"{prefix} | {line}");
 				}
+			}
+		}
+
+		public static int RunProcess (string command, string arguments, TaskLoggingHelper log, DataReceivedEventHandler? onOutput = null, DataReceivedEventHandler? onError = null)
+		{
+			var stdout_completed = new ManualResetEvent (false);
+			var stderr_completed = new ManualResetEvent (false);
+			var psi = new ProcessStartInfo () {
+				FileName = command,
+				Arguments = arguments,
+				UseShellExecute = false,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				CreateNoWindow = true,
+				WindowStyle = ProcessWindowStyle.Hidden,
+			};
+
+			var stdoutLines = new List<string> ();
+			var stderrLines = new List<string> ();
+
+			log.LogDebugMessage ($"Running process: {psi.FileName} {psi.Arguments}");
+			using var proc = new Process ();
+			proc.OutputDataReceived += (s, e) => {
+				if (e.Data != null) {
+					onOutput?.Invoke (s, e);
+					stdoutLines.Add (e.Data);
+				} else
+					stdout_completed.Set ();
+			};
+
+			proc.ErrorDataReceived += (s, e) => {
+				if (e.Data != null) {
+					onError?.Invoke (s, e);
+					stderrLines.Add (e.Data);
+				} else
+					stderr_completed.Set ();
+			};
+
+			proc.StartInfo = psi;
+			proc.Start ();
+			proc.BeginOutputReadLine ();
+			proc.BeginErrorReadLine ();
+			proc.WaitForExit ();
+
+			if (psi.RedirectStandardError) {
+				stderr_completed.WaitOne (TimeSpan.FromSeconds (30));
+			}
+
+			if (psi.RedirectStandardOutput) {
+				stdout_completed.WaitOne (TimeSpan.FromSeconds (30));
+			}
+
+			if (proc.ExitCode != 0) {
+				var sb = MergeStdoutAndStderrMessages (stdoutLines, stderrLines);
+				log.LogCodedError ("XA0142", Properties.Resources.XA0142, $"{psi.FileName} {psi.Arguments}", sb.ToString ());
+			}
+
+			try {
+				return proc.ExitCode;
+			} finally {
+				proc.Close ();
 			}
 		}
 
@@ -175,21 +237,9 @@ namespace Xamarin.Android.Tasks
 			{
 				if (x.Exists != y.Exists || x.Length != y.Length)
 					return false;
-				using (var f1 = File.OpenRead (x.FullName)) {
-					using (var f2 = File.OpenRead (y.FullName)) {
-						var b1 = new byte [0x1000];
-						var b2 = new byte [0x1000];
-						int total = 0;
-						while (total < x.Length) {
-							int size = f1.Read (b1, 0, b1.Length);
-							total += size;
-							f2.Read (b2, 0, b2.Length);
-							if (!b1.Take (size).SequenceEqual (b2.Take (size)))
-								return false;
-						}
-					}
-				}
-				return true;
+				string xHash = Files.HashFile (x.FullName);
+				string yHash = Files.HashFile (y.FullName);
+				return xHash == yHash;
 			}
 
 			public int GetHashCode (FileInfo obj)
@@ -314,7 +364,7 @@ namespace Xamarin.Android.Tasks
 			return false;
 		}
 
-		public static bool IsReferenceAssembly (string assembly)
+		public static bool IsReferenceAssembly (string assembly, TaskLoggingHelper log)
 		{
 			using (var stream = File.OpenRead (assembly))
 			using (var pe = new PEReader (stream)) {
@@ -322,7 +372,7 @@ namespace Xamarin.Android.Tasks
 				var assemblyDefinition = reader.GetAssemblyDefinition ();
 				foreach (var handle in assemblyDefinition.GetCustomAttributes ()) {
 					var attribute = reader.GetCustomAttribute (handle);
-					var attributeName = reader.GetCustomAttributeFullName (attribute);
+					var attributeName = reader.GetCustomAttributeFullName (attribute, log);
 					if (attributeName == "System.Runtime.CompilerServices.ReferenceAssemblyAttribute")
 						return true;
 				}
@@ -464,10 +514,13 @@ namespace Xamarin.Android.Tasks
 		{
 			var platformPath = MonoAndroidHelper.AndroidSdk.TryGetPlatformDirectoryFromApiLevel (platform, MonoAndroidHelper.SupportedVersions);
 			if (platformPath == null) {
-				if (!designTimeBuild) {
-					var expectedPath = MonoAndroidHelper.AndroidSdk.GetPlatformDirectoryFromId (platform);
-					var sdkManagerMenuPath = buildingInsideVisualStudio ? Properties.Resources.XA5207_SDK_Manager_Windows : Properties.Resources.XA5207_SDK_Manager_CLI;
-					log.LogCodedError ("XA5207", Properties.Resources.XA5207, platform, Path.Combine (expectedPath, "android.jar"), string.Format (sdkManagerMenuPath, targetFramework, androidSdkDirectory));
+				var expectedPath = Path.Combine (AndroidSdk.GetPlatformDirectoryFromId (platform), "android.jar");
+				var sdkManagerMenuPath = buildingInsideVisualStudio ? Properties.Resources.XA5207_SDK_Manager_Windows : Properties.Resources.XA5207_SDK_Manager_CLI;
+				var details = string.Format (sdkManagerMenuPath, targetFramework, androidSdkDirectory);
+				if (designTimeBuild) {
+					log.LogDebugMessage (string.Format(Properties.Resources.XA5207, platform, expectedPath, details));
+				} else {
+					log.LogCodedError ("XA5207", Properties.Resources.XA5207, platform, expectedPath, details);
 				}
 				return null;
 			}
@@ -570,6 +623,12 @@ namespace Xamarin.Android.Tasks
 		{
 			string relPath = GetToolsRootDirectoryRelativePath (androidBinUtilsDirectory);
 			return Path.GetFullPath (Path.Combine (androidBinUtilsDirectory, relPath, "libstubs"));
+		}
+
+		public static string GetDSOStubsRootDirectoryPath (string androidBinUtilsDirectory)
+		{
+			string relPath = GetToolsRootDirectoryRelativePath (androidBinUtilsDirectory);
+			return Path.GetFullPath (Path.Combine (androidBinUtilsDirectory, relPath, "dsostubs"));
 		}
 
 		public static string GetNativeLibsRootDirectoryPath (string androidBinUtilsDirectory)
@@ -727,6 +786,13 @@ namespace Xamarin.Android.Tasks
 				16 => needMask ? pageMask16k : pageSize16k,
 				_  => throw new InvalidOperationException ($"Internal error: unsupported zip page alignment value {alignment}")
 			};
+		}
+
+		public static string QuoteFileNameArgument (string fileName)
+		{
+			var builder = new CommandLineBuilder ();
+			builder.AppendFileNameIfNotNull (fileName);
+			return builder.ToString ();
 		}
 	}
 }

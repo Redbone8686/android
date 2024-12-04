@@ -23,7 +23,7 @@ jobs:
   ${{ if eq(parameters.testOS, 'macOS') }}:
     pool:
       name: Azure Pipelines
-      vmImage: $(HostedMacImage)
+      image: $(HostedMacImage)
       os: macOS
   timeoutInMinutes: 240
   cancelTimeoutInMinutes: 5
@@ -38,7 +38,6 @@ jobs:
   - template: /build-tools/automation/yaml-templates/setup-test-environment.yaml
     parameters:
       installTestSlicer: true
-      installLegacyXamarinAndroid: true
       xaSourcePath: ${{ parameters.xaSourcePath }}
       repositoryAlias: ${{ parameters.repositoryAlias }}
       commit: ${{ parameters.commit }}

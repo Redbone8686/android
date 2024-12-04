@@ -19,8 +19,6 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Java.Interop.Export", "exte
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "generator", "external\Java.Interop\tools\generator\generator.csproj", "{D14A1B5C-2060-4930-92BE-F7190256C735}"
 EndProject
-Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Java.Interop.NamingCustomAttributes", "external\Java.Interop\src\Java.Interop.NamingCustomAttributes\Java.Interop.NamingCustomAttributes.shproj", "{FE789F04-5E95-42C5-AEF1-E33F8DF06B3F}"
-EndProject
 Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Xamarin.Android.NamingCustomAttributes", "src\Xamarin.Android.NamingCustomAttributes\Xamarin.Android.NamingCustomAttributes.shproj", "{74598F5C-B8CC-4CE6-8EE2-AB9CA1400076}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Xamarin.Android.Tools.Aidl", "src\Xamarin.Android.Tools.Aidl\Xamarin.Android.Tools.Aidl.csproj", "{D27AD8F7-7710-40BE-B03B-55EFBEC13C44}"
@@ -120,6 +118,12 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "create-android-api", "build-tools\create-android-api\create-android-api.csproj", "{BA4D889D-066B-4C2C-A973-09E319CBC396}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Xamarin.Android.Tools.Aidl-Tests", "tests\Xamarin.Android.Tools.Aidl-Tests\Xamarin.Android.Tools.Aidl-Tests.csproj", "{A39B6D7C-6616-40D6-8AE4-C6CEE93D2708}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{FFCF518F-2A4A-40A2-9174-2EE13B76C723}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.Android.Sdk.Analysis", "src\Microsoft.Android.Sdk.Analysis\Microsoft.Android.Sdk.Analysis.csproj", "{5E806C9F-1B67-4B6B-A6AB-258834250DBB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "proguard-android", "src\proguard-android\proguard-android.csproj", "{5FD0133B-69E5-4474-9B67-9FD1D0150C70}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -335,6 +339,14 @@ Global
 		{A39B6D7C-6616-40D6-8AE4-C6CEE93D2708}.Debug|AnyCPU.Build.0 = Debug|Any CPU
 		{A39B6D7C-6616-40D6-8AE4-C6CEE93D2708}.Release|AnyCPU.ActiveCfg = Release|Any CPU
 		{A39B6D7C-6616-40D6-8AE4-C6CEE93D2708}.Release|AnyCPU.Build.0 = Release|Any CPU
+		{5E806C9F-1B67-4B6B-A6AB-258834250DBB}.Debug|AnyCPU.ActiveCfg = Debug|Any CPU
+		{5E806C9F-1B67-4B6B-A6AB-258834250DBB}.Debug|AnyCPU.Build.0 = Debug|Any CPU
+		{5E806C9F-1B67-4B6B-A6AB-258834250DBB}.Release|AnyCPU.ActiveCfg = Release|Any CPU
+		{5E806C9F-1B67-4B6B-A6AB-258834250DBB}.Release|AnyCPU.Build.0 = Release|Any CPU
+		{5FD0133B-69E5-4474-9B67-9FD1D0150C70}.Debug|AnyCPU.ActiveCfg = Debug|Any CPU
+		{5FD0133B-69E5-4474-9B67-9FD1D0150C70}.Debug|AnyCPU.Build.0 = Debug|Any CPU
+		{5FD0133B-69E5-4474-9B67-9FD1D0150C70}.Release|AnyCPU.ActiveCfg = Release|Any CPU
+		{5FD0133B-69E5-4474-9B67-9FD1D0150C70}.Release|AnyCPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -346,7 +358,6 @@ Global
 		{94BD81F7-B06F-4295-9636-F8A3B6BDC762} = {04E3E11E-B47D-4599-8AFC-50515A95E715}
 		{B501D075-6183-4E1D-92C9-F7B5002475B1} = {04E3E11E-B47D-4599-8AFC-50515A95E715}
 		{D14A1B5C-2060-4930-92BE-F7190256C735} = {04E3E11E-B47D-4599-8AFC-50515A95E715}
-		{FE789F04-5E95-42C5-AEF1-E33F8DF06B3F} = {04E3E11E-B47D-4599-8AFC-50515A95E715}
 		{74598F5C-B8CC-4CE6-8EE2-AB9CA1400076} = {04E3E11E-B47D-4599-8AFC-50515A95E715}
 		{D27AD8F7-7710-40BE-B03B-55EFBEC13C44} = {04E3E11E-B47D-4599-8AFC-50515A95E715}
 		{3F1F2F50-AF1A-4A5A-BEDB-193372F068D7} = {04E3E11E-B47D-4599-8AFC-50515A95E715}
@@ -393,6 +404,8 @@ Global
 		{C0E44558-FEE3-4DD3-986A-3F46DD1BF41B} = {04E3E11E-B47D-4599-8AFC-50515A95E715}
 		{BA4D889D-066B-4C2C-A973-09E319CBC396} = {E351F97D-EA4F-4E7F-AAA0-8EBB1F2A4A62}
 		{A39B6D7C-6616-40D6-8AE4-C6CEE93D2708} = {CAB438D8-B0F5-4AF0-BEBD-9E2ADBD7B483}
+		{5E806C9F-1B67-4B6B-A6AB-258834250DBB} = {FFCF518F-2A4A-40A2-9174-2EE13B76C723}
+		{5FD0133B-69E5-4474-9B67-9FD1D0150C70} = {FFCF518F-2A4A-40A2-9174-2EE13B76C723}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {53A1F287-EFB2-4D97-A4BB-4A5E145613F6}
@@ -403,7 +416,6 @@ Global
 		src\Xamarin.Android.NamingCustomAttributes\Xamarin.Android.NamingCustomAttributes.projitems*{74598f5c-b8cc-4ce6-8ee2-ab9ca1400076}*SharedItemsImports = 13
 		external\Java.Interop\src\Java.Interop.NamingCustomAttributes\Java.Interop.NamingCustomAttributes.projitems*{d1295a8f-4f42-461d-a046-564476c10002}*SharedItemsImports = 5
 		external\Java.Interop\src\Java.Interop.NamingCustomAttributes\Java.Interop.NamingCustomAttributes.projitems*{d18fcf91-8876-48a0-a693-2dc1e7d3d80a}*SharedItemsImports = 5
-		external\Java.Interop\src\Java.Interop.NamingCustomAttributes\Java.Interop.NamingCustomAttributes.projitems*{fe789f04-5e95-42c5-aef1-e33f8df06b3f}*SharedItemsImports = 13
 	EndGlobalSection
 	GlobalSection(MonoDevelopProperties) = preSolution
 		Policies = $0
