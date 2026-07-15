@@ -18,19 +18,29 @@ import android.util.Log;
 import mono.android.Runtime;
 import mono.android.DebugRuntime;
 import mono.android.BuildConfig;
+import net.dot.android.ApplicationRegistration;
 
 public class MonoPackageManager {
 
 	static Object lock = new Object ();
 	static boolean initialized;
 
-	static android.content.Context Context;
-
-	public static void LoadApplication (Context context, ApplicationInfo runtimePackage, String[] apks)
+	public static void LoadApplication (Context context)
 	{
 		synchronized (lock) {
+			android.content.pm.ApplicationInfo runtimePackage = context.getApplicationInfo ();
+			String[] apks = null;
+			String[] splitApks = runtimePackage.splitSourceDirs;
+			if (splitApks != null && splitApks.length > 0) {
+				apks = new String[splitApks.length + 1];
+				apks [0] = runtimePackage.sourceDir;
+				System.arraycopy (splitApks, 0, apks, 1, splitApks.length);
+			} else {
+				apks = new String[] { runtimePackage.sourceDir };
+			}
+
 			if (context instanceof android.app.Application) {
-				Context = context;
+				ApplicationRegistration.Context = context;
 			}
 			if (!initialized) {
 				android.content.IntentFilter timezoneChangedFilter  = new android.content.IntentFilter (
@@ -55,7 +65,8 @@ public class MonoPackageManager {
 				}
 
 				//
-				// Should the order change here, src/monodroid/jni/SharedConstants.hh must be updated accordingly
+				// Should the order change here, src/mono/native/runtime-base/shared-constants.hh and
+				// src/native/clr/include/constants.hh must be updated accordingly
 				//
 				String[] appDirs = new String[] {filesDir, cacheDir, dataDir};
 				boolean haveSplitApks = runtimePackage.splitSourceDirs != null && runtimePackage.splitSourceDirs.length > 0;
@@ -98,10 +109,6 @@ public class MonoPackageManager {
 				if (!BuildConfig.DotNetRuntime) {
 					// .net5+ APKs don't contain `libmono-native.so`
 					System.loadLibrary("mono-native");
-				} else {
-					// for .net6 we temporarily need to load the SSL DSO
-					// see: https://github.com/dotnet/runtime/issues/51274#issuecomment-832963657
-					System.loadLibrary("System.Security.Cryptography.Native.Android");
 				}
 
 				System.loadLibrary("monodroid");
@@ -118,7 +125,7 @@ public class MonoPackageManager {
 						haveSplitApks
 					);
 
-				mono.android.app.ApplicationRegistration.registerApplications ();
+				ApplicationRegistration.registerApplications ();
 
 				initialized = true;
 			}

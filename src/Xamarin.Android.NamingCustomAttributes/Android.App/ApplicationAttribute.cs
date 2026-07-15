@@ -48,6 +48,8 @@ public sealed partial class ApplicationAttribute : Attribute, Java.Interop.IJniN
 
 	public bool Enabled { get; set; }
 
+	public bool EnableOnBackInvokedCallback { get; set; }
+
 	public bool ExtractNativeLibs { get; set; }
 
 	public bool FullBackupContent { get; set; }
@@ -77,6 +79,8 @@ public sealed partial class ApplicationAttribute : Attribute, Java.Interop.IJniN
 	public string? Name { get; set; }
 
 	public string? NetworkSecurityConfig { get; set; }
+
+	public string? PageSizeCompat { get; set; }
 
 	public string? Permission { get; set; }
 
@@ -194,6 +198,12 @@ public sealed partial class ApplicationAttribute : Attribute, Java.Interop.IJniN
 			setter: (self, value) => self.Enabled = (bool) value
 		);
 		mapping.Add (
+			member: "EnableOnBackInvokedCallback",
+			attributeName: "enableOnBackInvokedCallback",
+			getter: self => self.EnableOnBackInvokedCallback,
+			setter: (self, value) => self.EnableOnBackInvokedCallback = (bool) value
+		);
+		mapping.Add (
 			member: "ExtractNativeLibs",
 			attributeName: "extractNativeLibs",
 			getter: self => self.ExtractNativeLibs,
@@ -270,6 +280,12 @@ public sealed partial class ApplicationAttribute : Attribute, Java.Interop.IJniN
 			attributeName: "networkSecurityConfig",
 			getter: self => self.NetworkSecurityConfig,
 			setter: (self, value) => self.NetworkSecurityConfig = (string?) value
+		);
+		mapping.Add (
+			member: "PageSizeCompat",
+			attributeName: "pageSizeCompat",
+			getter: self => self.PageSizeCompat,
+			setter: (self, value) => self.PageSizeCompat = (string?) value
 		);
 		mapping.Add (
 			member: "Permission",

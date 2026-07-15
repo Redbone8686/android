@@ -1,3 +1,5 @@
+#nullable enable
+
 using Microsoft.Android.Build.Tasks;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
@@ -11,9 +13,9 @@ namespace Xamarin.Android.Tasks {
 	{
 		public override string TaskPrefix => "AADB";
 
-		public string AdbTarget { get; set; }
-		public string Command { get; set; }
-		public string Arguments { get; set; }
+		public string? AdbTarget { get; set; }
+		public string? Command { get; set; }
+		public string? Arguments { get; set; }
 
 		public bool IgnoreErrors { get; set; } = false;
 
@@ -34,7 +36,7 @@ namespace Xamarin.Android.Tasks {
 		protected override string GenerateCommandLineCommands ()
 		{
 			var sb = new StringBuilder ();
-			if (!string.IsNullOrEmpty (AdbTarget))
+			if (!AdbTarget.IsNullOrEmpty ())
 				sb.Append ($" {AdbTarget} ");
 			sb.AppendFormat ("{0} {1}", Command, Arguments);
 			return sb.ToString ();

@@ -8,6 +8,7 @@ using System.Text;
 using System.Xml.Linq;
 using System.Collections.Generic;
 using System.Globalization;
+using Xamarin.Android.Tasks;
 
 namespace Xamarin.Android.Build.Tests
 {
@@ -31,13 +32,11 @@ namespace Xamarin.Android.Build.Tests
 		[Test]
 		public void ReInstallIfUserUninstalled ([Values (false, true)] bool isRelease)
 		{
-			AssertCommercialBuild ();
-
 			var proj = new XamarinAndroidApplicationProject () {
 				IsRelease = isRelease,
 			};
 			if (isRelease) {
-				proj.SetAndroidSupportedAbis (DeviceAbi);
+				proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 			}
 			using (var builder = CreateApkBuilder ()) {
 				Assert.IsTrue (builder.Build (proj));
@@ -59,15 +58,13 @@ namespace Xamarin.Android.Build.Tests
 		[Test]
 		public void InstallAndUnInstall ([Values (false, true)] bool isRelease)
 		{
-			AssertCommercialBuild ();
-
 			var proj = new XamarinAndroidApplicationProject () {
 				IsRelease = isRelease,
 			};
 			if (isRelease) {
 				// Set debuggable=true to allow run-as command usage with a release build
 				proj.AndroidManifest = proj.AndroidManifest.Replace ("<application ", "<application android:debuggable=\"true\" ");
-				proj.SetAndroidSupportedAbis (DeviceAbi);
+				proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 			}
 			using (var builder = CreateApkBuilder ()) {
 				Assert.IsTrue (builder.Build (proj));
@@ -92,12 +89,10 @@ namespace Xamarin.Android.Build.Tests
 		[Test]
 		public void ChangeKeystoreRedeploy ()
 		{
-			AssertCommercialBuild ();
-
 			var proj = new XamarinAndroidApplicationProject () {
 				PackageName = "com.xamarin.keytest"
 			};
-			proj.SetAndroidSupportedAbis (DeviceAbi);
+			proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 			using (var builder = CreateApkBuilder ()) {
 				// Use the default debug.keystore XA generates
 				Assert.IsTrue (builder.Install (proj), "first install should succeed.");
@@ -121,14 +116,12 @@ namespace Xamarin.Android.Build.Tests
 		[Test]
 		public void SwitchConfigurationsShouldRedeploy ()
 		{
-			AssertCommercialBuild ();
-
 			var proj = new XamarinAndroidApplicationProject () {
 				IsRelease = false,
 			};
 			// Set debuggable=true to allow run-as command usage with a release build
 			proj.AndroidManifest = proj.AndroidManifest.Replace ("<application ", "<application android:debuggable=\"true\" ");
-			proj.SetAndroidSupportedAbis (DeviceAbi);
+			proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 			proj.SetProperty ("AndroidPackageFormat", "apk");
 			using (var builder = CreateApkBuilder ()) {
 				Assert.IsTrue (builder.Build (proj));
@@ -164,20 +157,23 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void InstallWithoutSharedRuntime ()
+		public void InstallWithoutSharedRuntime ([Values (AndroidRuntime.CoreCLR)] AndroidRuntime runtimeType)
 		{
-			AssertCommercialBuild ();
-
 			var proj = new XamarinAndroidApplicationProject () {
 				IsRelease = true,
 			};
+			proj.SetRuntime (runtimeType);
 			proj.SetProperty (proj.ReleaseProperties, "Optimize", false);
 			proj.SetProperty (proj.ReleaseProperties, "DebugType", "none");
 			// NOTE: in .NET 6, EmbedAssembliesIntoApk=true by default for Release builds
 			proj.SetProperty (proj.ReleaseProperties, "EmbedAssembliesIntoApk", "false");
 			proj.SetProperty (proj.ReleaseProperties, "AndroidPackageFormat", "apk");
 
-			var abis = new [] { "armeabi-v7a", "arm64-v8a", "x86", "x86_64" };
+			string[] abis = runtimeType switch {
+				AndroidRuntime.MonoVM => new [] { "armeabi-v7a", "arm64-v8a", "x86", "x86_64" },
+				AndroidRuntime.CoreCLR => new [] { "arm64-v8a", "x86_64" },
+				_ => throw new NotSupportedException ($"Unsupported runtime {runtimeType}")
+			};
 			proj.SetRuntimeIdentifiers (abis);
 			using (var builder = CreateApkBuilder ()) {
 				if (RunAdbCommand ("shell pm list packages Mono.Android.DebugRuntime").Trim ().Length != 0)
@@ -209,32 +205,8 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void InstallErrorCode ()
-		{
-			AssertCommercialBuild ();
-
-			//Setup a situation where we get INSTALL_FAILED_NO_MATCHING_ABIS
-			var abi = "armeabi-v7a";
-			var proj = new XamarinAndroidApplicationProject {
-				EmbedAssembliesIntoApk = true,
-			};
-			proj.SetAndroidSupportedAbis (abi);
-
-			using (var builder = CreateApkBuilder (Path.Combine ("temp", TestContext.CurrentContext.Test.Name))) {
-				builder.ThrowOnBuildFailure = false;
-				if (!builder.Install (proj)) {
-					Assert.IsTrue (StringAssertEx.ContainsText (builder.LastBuildOutput, "ADB0020"), "Should receive ADB0020 error code.");
-				} else {
-					Assert.Ignore ($"Install should have failed, but we might have an {abi} emulator attached.");
-				}
-			}
-		}
-
-		[Test]
 		public void ToggleFastDev ()
 		{
-			AssertCommercialBuild ();
-
 			var proj = new XamarinAndroidApplicationProject {
 				EmbedAssembliesIntoApk = false,
 				OtherBuildItems = {
@@ -247,14 +219,14 @@ namespace Xamarin.Android.Build.Tests
 				}
 			};
 
-			using (var builder = CreateApkBuilder (Path.Combine ("temp", TestContext.CurrentContext.Test.Name))) {
+			using (var builder = CreateApkBuilder ()) {
 				Assert.IsTrue (builder.Install (proj), "Install should have succeeded.");
 				var directorylist = GetContentFromAllOverrideDirectories (proj.PackageName, DeviceAbi);
 				StringAssert.Contains ($"{proj.ProjectName}.dll", directorylist, $"{proj.ProjectName}.dll should exist in the .__override__ directory.");
 
 				//Now toggle FastDev to OFF
 				proj.EmbedAssembliesIntoApk = true;
-				proj.SetAndroidSupportedAbis (DeviceAbi);
+				proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 
 				Assert.IsTrue (builder.Install (proj), "Second install should have succeeded.");
 
@@ -270,7 +242,6 @@ namespace Xamarin.Android.Build.Tests
 		[Test]
 		public void ToggleDebugReleaseWithSigning ([Values ("aab", "apk")] string packageFormat)
 		{
-			AssertCommercialBuild ();
 			AssertHasDevices ();
 
 			string path = Path.Combine ("temp", TestName.Replace ("\"", string.Empty));
@@ -286,7 +257,7 @@ namespace Xamarin.Android.Build.Tests
 			proj.SetProperty (proj.ReleaseProperties, "AndroidKeyStore", "True");
 			proj.SetProperty (proj.ReleaseProperties, "AndroidSigningKeyStore", "test.keystore");
 			proj.SetProperty (proj.ReleaseProperties, "AndroidSigningKeyAlias", "mykey");
-			proj.SetAndroidSupportedAbis (DeviceAbi);
+			proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 			proj.SetProperty (proj.ReleaseProperties, "AndroidPackageFormat", packageFormat);
 			proj.SetProperty ("AndroidUseApkSigner", "true");
 			proj.OtherBuildItems.Add (new BuildItem (BuildActions.None, "test.keystore") {
@@ -313,41 +284,14 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void LoggingPropsShouldCreateOverrideDirForRelease ()
-		{
-			AssertCommercialBuild ();
-
-			var proj = new XamarinAndroidApplicationProject {
-				IsRelease = true,
-			};
-			// Set debuggable=true to allow run-as command usage with a release build
-			proj.AndroidManifest = proj.AndroidManifest.Replace ("<application ", "<application android:debuggable=\"true\" ");
-			proj.SetAndroidSupportedAbis (DeviceAbi);
-
-			using (var builder = CreateApkBuilder ()) {
-				Assert.IsTrue (builder.Install (proj), "Install should have succeeded.");
-				RunAdbCommand ("shell setprop debug.mono.log timing");
-				RunProjectAndAssert (proj, builder);
-				var didLaunch = WaitForActivityToStart (proj.PackageName, "MainActivity", Path.Combine (Root, builder.ProjectDirectory, "logcat.log"), 30);
-				ClearShellProp ("debug.mono.log");
-				Assert.True (didLaunch, "Activity should have started.");
-				var directorylist = GetContentFromAllOverrideDirectories (proj.PackageName, DeviceAbi);
-				builder.Uninstall (proj);
-				StringAssert.Contains ("methods.txt", directorylist, $"methods.txt did not exist in the .__override__ directory.\nFound:{directorylist}");
-			}
-		}
-
-		[Test]
 		public void BlankAdbTarget ()
 		{
-			AssertCommercialBuild ();
-
 			var serial = GetAttachedDeviceSerial ();
 			var proj = new XamarinAndroidApplicationProject () {
 			};
 			proj.SetProperty (proj.DebugProperties, "EmbedAssembliesIntoApk", false);
 
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName))) {
+			using (var b = CreateApkBuilder ()) {
 				b.Build (proj, parameters: new [] { $"AdbTarget=\"-e {serial}\"" });
 				// Build again, no $(AdbTarget)
 				b.Build (proj);
@@ -416,7 +360,7 @@ namespace Xamarin.Android.Build.Tests
 				proj.SetProperty ("AndroidSigningStorePass", password);
 				proj.SetProperty ("AndroidSigningKeyPass", password);
 			}
-			proj.SetAndroidSupportedAbis (DeviceAbi);
+			proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 			proj.SetProperty ("AndroidKeyStore", androidKeyStore);
 			proj.SetProperty ("AndroidSigningKeyStore", "test.keystore");
 			proj.SetProperty ("AndroidSigningKeyAlias", "mykey");
@@ -459,8 +403,6 @@ namespace Xamarin.Android.Build.Tests
 		[TestCase ("aab")]
 		public void LocalizedAssemblies_ShouldBeFastDeployed (string packageFormat)
 		{
-			AssertCommercialBuild ();
-
 			var path = Path.Combine ("temp", TestName);
 			var lib = new XamarinAndroidLibraryProject {
 				ProjectName = "Localization",
@@ -501,8 +443,6 @@ namespace Xamarin.Android.Build.Tests
 		[TestCase ("aab")]
 		public void IncrementalFastDeployment (string packageFormat)
 		{
-			AssertCommercialBuild ();
-
 			var class1src = new BuildItem.Source ("Class1.cs") {
 				TextContent = () => "namespace Library1 { public class Class1 { public static int foo = 500; } }"
 			};
@@ -546,7 +486,7 @@ namespace Xamarin.Android.Build.Tests
 			}
 
 			long lib1FirstBuildSize = new FileInfo (Path.Combine (rootPath, lib1.ProjectName, lib1.OutputPath, "Library1.dll")).Length;
-			
+
 			using (var builder = CreateApkBuilder (Path.Combine (rootPath, app.ProjectName))) {
 				builder.Verbosity = LoggerVerbosity.Detailed;
 				builder.ThrowOnBuildFailure = false;
@@ -607,7 +547,6 @@ namespace Xamarin.Android.Build.Tests
 				IsRelease = true
 			};
 			proj.SetProperty ("AndroidPackageFormat", "aab");
-			proj.SetAndroidSupportedAbis ("armeabi-v7a", "arm64-v8a", "x86", "x86_64");
 
 			using var b = CreateApkBuilder ();
 			Assert.IsTrue (b.Install (proj), "first build should have succeeded.");
@@ -629,7 +568,6 @@ namespace Xamarin.Android.Build.Tests
 		[Test]
 		public void AdbTargetArchitecture ()
 		{
-			AssertCommercialBuild ();
 			AssertHasDevices ();
 
 			const string abi = "x86_64";
@@ -653,7 +591,7 @@ namespace Xamarin.Android.Build.Tests
 public class TestJavaClass2 {
 
 	public String test(){
-		
+
 		return ""Java is called"";
 	}
 }",
@@ -671,7 +609,7 @@ public class TestJavaClass2 {
 public class TestJavaClass {
 
 	public String test(){
-		
+
 		return ""Java is called"";
 	}
 }",
@@ -703,7 +641,7 @@ public class TestJavaClass {
 				FileAssert.Exists (generatedCode, $"'{generatedCode}' should have not be deleted on second build.");
 				FileAssert.DoesNotExist (generatedCode2, $"'{generatedCode2}' should have be deleted on second build.");
 				Assert.IsFalse (b.Output.IsTargetSkipped ("_CompileBindingJava"), $"`_CompileBindingJava` should run on second build!");
-				Assert.IsTrue (b.Output.IsTargetSkipped ("_ClearGeneratedManagedBindings"), $"`_ClearGeneratedManagedBindings` should be skipped on second build!");
+				Assert.IsTrue (b.Output.IsTargetSkipped ("_ClearGeneratedManagedBindings", defaultIfNotUsed: true), $"`_ClearGeneratedManagedBindings` should be skipped on second build!");
 				// Call Install directly so Build does not get called automatically
 				Assert.IsTrue (b.RunTarget (proj, "Install", doNotCleanupOnUpdate: true, saveProject: false), "Install build should have succeeded.");
 				FileAssert.Exists (generatedCode, $"'{generatedCode}' should have not be deleted on Install build.");

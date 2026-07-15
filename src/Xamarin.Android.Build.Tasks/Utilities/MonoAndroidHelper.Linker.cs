@@ -1,64 +1,41 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
+using Mono.Cecil;
 
 namespace Xamarin.Android.Tasks
 {
 	public partial class MonoAndroidHelper
 	{
-		public static string [] TargetFrameworkDirectories;
-
-		internal static readonly string [] FrameworkEmbeddedJarLookupTargets = {
-			"Mono.Android.Support.v13.dll",
-			"Mono.Android.Support.v4.dll",
-			"Xamarin.Android.NUnitLite.dll", // AndroidResources
-		};
-		internal static readonly string [] FrameworkEmbeddedNativeLibraryAssemblies = {
-			"Mono.Data.Sqlite.dll",
-			"Mono.Posix.dll",
-		};
-		internal static readonly HashSet<string> FrameworkAssembliesToTreatAsUserAssemblies = new HashSet<string> (StringComparer.OrdinalIgnoreCase) {
-			"OpenTK-1.0.dll",
-			"Mono.Android.Support.v13.dll",
-			"Mono.Android.Support.v4.dll",
-			"Xamarin.Android.NUnitLite.dll",
+		static readonly HashSet<string> KnownAssemblyNames = new (StringComparer.OrdinalIgnoreCase) {
+			"Mono.Android",
+			"Mono.Android.Export",
+			"Mono.Android.Runtime",
+			"Java.Interop",
 		};
 
-		public static bool IsFrameworkAssembly (string assembly)
+		public static bool IsFrameworkAssembly (AssemblyDefinition assembly) =>
+			KnownAssemblyNames.Contains (assembly.Name.Name);
+
+		public static bool IsFrameworkAssembly (string assembly) =>
+			KnownAssemblyNames.Contains (Path.GetFileNameWithoutExtension (assembly));
+
+		// Is this assembly a .NET for Android assembly?
+		public static bool IsDotNetAndroidAssembly (AssemblyDefinition assembly)
 		{
-			return IsFrameworkAssembly (assembly, false);
-		}
+			foreach (var attribute in assembly.CustomAttributes.Where (a => a.AttributeType.FullName == "System.Runtime.Versioning.TargetPlatformAttribute")) {
+				foreach (var p in attribute.ConstructorArguments) {
+					// Of the form "android30"
+					var value = p.Value?.ToString ();
 
-		public static bool IsFrameworkAssembly (string assembly, bool checkSdkPath)
-		{
-			if (IsSharedRuntimeAssembly (assembly)) {
-#if MSBUILD
-				bool treatAsUser = FrameworkAssembliesToTreatAsUserAssemblies.Contains (Path.GetFileName (assembly));
-				// Framework assemblies don't come from outside the SDK Path;
-				// user assemblies do
-				if (checkSdkPath && treatAsUser && TargetFrameworkDirectories != null) {
-					return ExistsInFrameworkPath (assembly);
+					if (value is not null && value.StartsWith ("android", StringComparison.OrdinalIgnoreCase))
+						return true;
 				}
-#endif
-				return true;
 			}
-			return TargetFrameworkDirectories == null || !checkSdkPath ? false : ExistsInFrameworkPath (assembly);
-		}
 
-		public static bool IsSharedRuntimeAssembly (string assembly)
-		{
-			return Array.BinarySearch (Profile.SharedRuntimeAssemblies, Path.GetFileName (assembly), StringComparer.OrdinalIgnoreCase) >= 0;
-		}
-
-		public static bool ExistsInFrameworkPath (string assembly)
-		{
-			return TargetFrameworkDirectories
-					// TargetFrameworkDirectories will contain a "versioned" directory,
-					// e.g. $prefix/lib/xamarin.android/xbuild-frameworks/MonoAndroid/v1.0.
-					// Trim off the version.
-					.Select (p => Path.GetDirectoryName (p.TrimEnd (Path.DirectorySeparatorChar)))
-					.Any (p => assembly.StartsWith (p, StringComparison.OrdinalIgnoreCase));
+			return false;
 		}
 
 		static readonly char [] CustomViewMapSeparator = [';'];
@@ -72,7 +49,7 @@ namespace Xamarin.Android.Tasks
 				var items = s.Split (CustomViewMapSeparator, count: 2);
 				var key = items [0];
 				var value = items [1];
-				HashSet<string> set;
+				HashSet<string>? set;
 				if (!map.TryGetValue (key, out set))
 					map.Add (key, set = new HashSet<string> ());
 				set.Add (value);

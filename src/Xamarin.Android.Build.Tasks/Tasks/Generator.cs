@@ -1,5 +1,5 @@
 // Copyright (C) 2012 Xamarin, Inc. All rights reserved.
-
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -19,53 +19,53 @@ namespace Xamarin.Android.Tasks
 
 		public bool OnlyRunXmlAdjuster { get; set; }
 
-		public string XmlAdjusterOutput { get; set; }
+		public string? XmlAdjusterOutput { get; set; }
 
 		[Required]
-		public string OutputDirectory { get; set; }
+		public string OutputDirectory { get; set; } = "";
 
-		public string EnumDirectory { get; set; }
+		public string? EnumDirectory { get; set; }
 
-		public string EnumMetadataDirectory { get; set; }
-
-		[Required]
-		public string AndroidApiLevel { get; set; }
+		public string? EnumMetadataDirectory { get; set; }
 
 		[Required]
-		public string ApiXmlInput { get; set; }
+		public string AndroidApiLevel { get; set; } = "";
 
-		public string AssemblyName { get; set; }
+		[Required]
+		public string ApiXmlInput { get; set; } = "";
 
-		public string CodegenTarget { get; set; }
+		public string? AssemblyName { get; set; }
+
+		public string? CodegenTarget { get; set; }
 
 		public bool NoStdlib { get; set; }
 
-		public string TypeMappingReportFile { get; set; }
+		public string? TypeMappingReportFile { get; set; }
 
 		public bool UseShortFileNames { get; set; }
 
 		// apart from ReferencedManagedLibraries we need it to find mscorlib.dll.
 		[Required]
-		public string MonoAndroidFrameworkDirectories { get; set; }
+		public string MonoAndroidFrameworkDirectories { get; set; } = "";
 
-		public string LangVersion { get; set; }
+		public string? LangVersion { get; set; }
 
 		public bool EmitLegacyInterfaceInvokers { get; set; }
 
 		public bool EnableBindingStaticAndDefaultInterfaceMethods { get; set; }
 		public bool EnableBindingNestedInterfaceTypes { get; set; }
 		public bool EnableBindingInterfaceConstants { get; set; }
-		public string EnableRestrictToAttributes { get; set; }
+		public string? EnableRestrictToAttributes { get; set; }
 		public bool EnableObsoleteOverrideInheritance { get; set; }
-		public string Nullable { get; set; }
+		public string? Nullable { get; set; }
 
-		public ITaskItem[] TransformFiles { get; set; }
-		public ITaskItem[] ReferencedManagedLibraries { get; set; }
-		public ITaskItem[] AnnotationsZipFiles { get; set; }
-		public ITaskItem[] NamespaceTransforms { get; set; }
+		public ITaskItem[]? TransformFiles { get; set; }
+		public ITaskItem[]? ReferencedManagedLibraries { get; set; }
+		public ITaskItem[]? AnnotationsZipFiles { get; set; }
+		public ITaskItem[]? NamespaceTransforms { get; set; }
 
-		public ITaskItem[] JavadocXml { get; set; }
-		public string JavadocVerbosity { get; set; }
+		public ITaskItem[]? JavadocXml { get; set; }
+		public string? JavadocVerbosity { get; set; }
 
 		public bool UseJavaLegacyResolver { get; set; }
 
@@ -169,19 +169,19 @@ namespace Xamarin.Android.Tasks
 
 				if (OnlyRunXmlAdjuster)
 					WriteLine (sw, "--only-xml-adjuster");
-				if (!string.IsNullOrEmpty (XmlAdjusterOutput))
+				if (!XmlAdjusterOutput.IsNullOrEmpty ())
 					WriteLine (sw, $"--xml-adjuster-output=\"{XmlAdjusterOutput}\"");
 
-				if (!string.IsNullOrEmpty (CodegenTarget))
+				if (!CodegenTarget.IsNullOrEmpty ())
 					WriteLine (sw, $"--codegen-target={CodegenTarget}");
-				if (!string.IsNullOrEmpty (OutputDirectory))
+				if (!OutputDirectory.IsNullOrEmpty ())
 					WriteLine (sw, $"--csdir=\"{OutputDirectory}\"");
-				if (!string.IsNullOrEmpty (EnumDirectory))
+				if (!EnumDirectory.IsNullOrEmpty ())
 					WriteLine (sw, $"--enumdir=\"{EnumDirectory}\"");
-				if (!string.IsNullOrEmpty (EnumMetadataDirectory))
+				if (!EnumMetadataDirectory.IsNullOrEmpty ())
 					WriteLine (sw, $"--enummetadata=\"{EnumMetadataDirectory}\"");
-				if (!string.IsNullOrEmpty (AssemblyName))
-					WriteLine (sw, $"--assembly={AssemblyName}");
+				if (!AssemblyName.IsNullOrEmpty ())
+					WriteLine (sw, $"--assembly=\"{AssemblyName}\"");
 
 				if (!NoStdlib) {
 					string fxpath = MonoAndroidFrameworkDirectories.Split (';').First (p => new DirectoryInfo (p).GetFiles ("mscorlib.dll").Any ());
@@ -198,10 +198,10 @@ namespace Xamarin.Android.Tasks
 				foreach (var tf in transform_files)
 					WriteLine (sw, $"\"--{tf.Item2}={tf.Item1}\"");
 
-				if (!string.IsNullOrEmpty (AndroidApiLevel))
+				if (!AndroidApiLevel.IsNullOrEmpty ())
 					WriteLine (sw, $"--api-level={AndroidApiLevel}");
 
-				if (!string.IsNullOrEmpty (TypeMappingReportFile))
+				if (!TypeMappingReportFile.IsNullOrEmpty ())
 					WriteLine (sw, $"--type-map-report=\"{TypeMappingReportFile}\"");
 
 				WriteLine (sw, "--global");
@@ -239,7 +239,7 @@ namespace Xamarin.Android.Tasks
 						WriteLine (sw, $"--lang-features={string.Join (",", features)}");
 				}
 
-				if (!string.IsNullOrEmpty (JavadocVerbosity))
+				if (!JavadocVerbosity.IsNullOrEmpty ())
 					WriteLine (sw, $"\"--doc-comment-verbosity={JavadocVerbosity}\"");
 
 				if (JavadocXml != null) {

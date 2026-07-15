@@ -1,5 +1,4 @@
 #nullable enable
-
 using System;
 using System.IO;
 using Microsoft.Build.Framework;
@@ -47,7 +46,7 @@ public class GetMicrosoftNuGetPackagesMap : AsyncTask
 					all_files.Insert (0, packagesFile);  // Sorted so this one is first
 
 			} catch (Exception ex) {
-				Log.LogMessage ("Could not download microsoft-packages.json: {0}", ex.Message);
+				LogMessage ("Could not download microsoft-packages.json: {0}", ex.Message);
 			}
 		}
 
@@ -109,4 +108,3 @@ class PackagesFile
 		return true;
 	}
 }
-

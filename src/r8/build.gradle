@@ -9,13 +9,8 @@ java {
     targetCompatibility = ext.javaTargetVer
 }
 
-repositories {
-    google()
-    mavenCentral()
-}
-
 dependencies {
-    implementation 'com.android.tools:r8:8.5.35'
+    implementation 'com.android.tools:r8:9.1.31'
 }
 
 jar {

@@ -1,20 +1,15 @@
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
+#nullable enable
 
 using System;
-using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Threading;
-using System.Xml;
-using System.Xml.Linq;
 using System.Text;
 using Microsoft.Build.Utilities;
 using Microsoft.Build.Framework;
-using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using Xamarin.Android.Tools;
-using ThreadingTasks = System.Threading.Tasks;
 using Microsoft.Android.Build.Tasks;
 
 namespace Xamarin.Android.Tasks {
@@ -22,9 +17,8 @@ namespace Xamarin.Android.Tasks {
 	public abstract class Aapt2 : AsyncTask {
 
 		private const int MAX_PATH = 260;
-		private const int ASCII_MAX_CHAR = 127;
 		private static readonly int DefaultMaxAapt2Daemons = 6;
-		protected Dictionary<string, string> _resource_name_case_map;
+		protected Dictionary<string, string> _resource_name_case_map = null!;
 
 		Dictionary<string, string> resource_name_case_map => _resource_name_case_map ??= MonoAndroidHelper.LoadResourceCaseMap (BuildEngine4, ProjectSpecificTaskObjectKey);
 
@@ -34,23 +28,36 @@ namespace Xamarin.Android.Tasks {
 
 		public bool DaemonKeepInDomain { get; set; }
 
-		public ITaskItem [] ResourceDirectories { get; set; }
+		public ITaskItem []? ResourceDirectories { get; set; }
 
-		public ITaskItem AndroidManifestFile { get; set;}
+		public ITaskItem? AndroidManifestFile { get; set; }
 
-		public string ResourceSymbolsTextFile { get; set; }
+		public string? SupportedOSPlatformVersion { get; set; }
+
+		public string? ResourceSymbolsTextFile { get; set; }
 
 		protected string ToolName { get { return OS.IsWindows ? "aapt2.exe" : "aapt2"; } }
 
-		public string ToolPath { get; set; }
+		public string? ToolPath { get; set; }
 
-		public string ToolExe { get; set; }
+		public string? ToolExe { get; set; }
 
 		/// <summary>
 		/// Returns true if a filename starts with a . character.
 		/// </summary>
 		public static bool IsInvalidFilename (string path) =>
 			Path.GetFileName (path).StartsWith (".", StringComparison.Ordinal);
+
+		/// <summary>
+		/// Returns <see langword="true"/> if <paramref name="c"/> is an ASCII
+		/// character ([ U+0000..U+007F ]).
+		/// </summary>
+		/// <remarks>
+		/// Per http://www.unicode.org/glossary/#ASCII, ASCII is only U+0000..U+007F.
+		/// We cannot use Char.IsAscii cos we are .netstandard2.0
+		/// Source https://github.com/dotnet/runtime/blob/1d1bf92fcf43aa6981804dc53c5174445069c9e4/src/libraries/System.Private.CoreLib/src/System/Char.cs#L91
+		/// </remarks>
+		public static bool IsAscii(char c) => (uint)c <= '\x007f';
 
 		protected string ResourceDirectoryFullPath (string resourceDirectory)
 		{
@@ -64,7 +71,7 @@ namespace Xamarin.Android.Tasks {
 
 		protected string GenerateFullPathToTool ()
 		{
-			return Path.Combine (ToolPath, string.IsNullOrEmpty (ToolExe) ? ToolName : ToolExe);
+			return Path.Combine (ToolPath, ToolExe.IsNullOrEmpty () ? ToolName : ToolExe);
 		}
 
 		protected virtual int GetRequiredDaemonInstances ()
@@ -72,7 +79,8 @@ namespace Xamarin.Android.Tasks {
 			return 1;
 		}
 
-		Aapt2Daemon daemon;
+		// This is set in Execute()
+		Aapt2Daemon daemon = null!;
 
 		internal Aapt2Daemon Daemon => daemon;
 		public override bool Execute ()
@@ -114,16 +122,16 @@ namespace Xamarin.Android.Tasks {
 
 		protected bool LogAapt2EventsFromOutput (string singleLine, MessageImportance messageImportance, bool apptResult)
 		{
-			if (string.IsNullOrEmpty (singleLine))
+			if (singleLine.IsNullOrEmpty ())
 				return true;
 
 			var match = AndroidRunToolTask.AndroidErrorRegex.Match (singleLine.Trim ());
-			string file = string.Empty;
+			string file = "";
 
 			if (match.Success) {
 				file = match.Groups ["file"].Value;
 				int line = 0;
-				if (!string.IsNullOrEmpty (match.Groups ["line"]?.Value))
+				if (!match.Groups ["line"]?.Value.IsNullOrEmpty () == true)
 					line = int.Parse (match.Groups ["line"].Value.Trim ()) + 1;
 				var level = match.Groups ["level"].Value.ToLowerInvariant ();
 				var message = match.Groups ["message"].Value;
@@ -159,7 +167,7 @@ namespace Xamarin.Android.Tasks {
 						var resourceDirectoryFullPath = ResourceDirectoryFullPath (resourceDirectory);
 
 						string newfile = MonoAndroidHelper.FixUpAndroidResourcePath (file, resourceDirectory, resourceDirectoryFullPath, resource_name_case_map);
-						if (!string.IsNullOrEmpty (newfile)) {
+						if (!newfile.IsNullOrEmpty ()) {
 							file = newfile;
 							break;
 						}
@@ -175,12 +183,12 @@ namespace Xamarin.Android.Tasks {
 				if (message.StartsWith ("error: ", StringComparison.InvariantCultureIgnoreCase))
 					message = message.Substring ("error: ".Length);
 
-				if (level.Contains ("error") || (line != 0 && !string.IsNullOrEmpty (file))) {
+				if (level.Contains ("error") || (line != 0 && !file.IsNullOrEmpty ())) {
 					var errorCode = GetErrorCodeForFile (message, file);
 					if (manifestError)
-						LogCodedError (errorCode, string.Format (Xamarin.Android.Tasks.Properties.Resources.AAPTManifestError, message.TrimEnd('.')), AndroidManifestFile.ItemSpec, 0);
+						LogCodedError (errorCode, AndroidManifestFile?.ItemSpec ?? "", 0, string.Format (Xamarin.Android.Tasks.Properties.Resources.AAPTManifestError, message.TrimEnd('.')));
 					else
-						LogCodedError (errorCode, AddAdditionalErrorText (errorCode, message), file, line);
+						LogCodedError (errorCode, file, line, AddAdditionalErrorText (errorCode, message));
 					return true;
 				}
 			}
@@ -226,13 +234,13 @@ namespace Xamarin.Android.Tasks {
 			return false;
 		}
 
-		static bool IsPathOnlyASCII (string filePath)
+		static protected bool IsPathOnlyASCII (string filePath)
 		{
 			if (!OS.IsWindows)
 				return true;
 
 			foreach (var c in filePath)
-				if (c > ASCII_MAX_CHAR) // cannot use Char.IsAscii cos we are .netstandard2.0
+				if (!IsAscii (c))
 					return false;
 			return true;
 		}

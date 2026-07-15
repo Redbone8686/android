@@ -1,7 +1,6 @@
 name: 🤖 Android API
 description: Issues with the Android API exposed in Mono.Android.
 labels: ["Area: Mono.Android", "needs-triage"]
-assignees: ["jpobst"]
 body:
   - type: markdown
     attributes:
@@ -21,6 +20,8 @@ body:
       options:
       - net8.0-android
       - net9.0-android
+      - net10.0-android
+      - net11.0-android (Preview)
       - Other
     validations:
       required: true

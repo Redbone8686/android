@@ -1,9 +1,12 @@
+#nullable disable
+
 using System;
 using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Text;
 
 using Xamarin.Android.Tools;
@@ -28,12 +31,14 @@ namespace Xamarin.Android.Tasks.LLVMIR
 		public readonly LlvmIrModuleTarget Target;
 		public readonly LlvmIrMetadataManager MetadataManager;
 		public readonly LlvmIrTypeCache TypeCache;
+		public readonly LlvmIrGenerator Generator;
 		public string CurrentIndent { get; private set; } = String.Empty;
 		public bool InVariableGroup { get; set; }
 		public LlvmIrVariableNumberFormat NumberFormat { get; set; } = LlvmIrVariableNumberFormat.Default;
 
-		public GeneratorWriteContext (TextWriter writer, LlvmIrModule module, LlvmIrModuleTarget target, LlvmIrMetadataManager metadataManager, LlvmIrTypeCache cache)
+		public GeneratorWriteContext (LlvmIrGenerator generator, TextWriter writer, LlvmIrModule module, LlvmIrModuleTarget target, LlvmIrMetadataManager metadataManager, LlvmIrTypeCache cache)
 		{
+			Generator = generator;
 			Output = writer;
 			Module = module;
 			Target = target;
@@ -163,7 +168,7 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			LlvmIrMetadataManager metadataManager = module.GetMetadataManagerCopy ();
 			target.AddTargetSpecificMetadata (metadataManager);
 
-			var context = new GeneratorWriteContext (writer, module, target, metadataManager, module.TypeCache);
+			var context = new GeneratorWriteContext (this, writer, module, target, metadataManager, module.TypeCache);
 			if (!String.IsNullOrEmpty (FilePath)) {
 				WriteCommentLine (context, $" ModuleID = '{FileName}'");
 				context.Output.WriteLine ($"source_filename = \"{FileName}\"");
@@ -199,12 +204,22 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				}
 
 				foreach (LlvmIrStringVariable info in group.Strings) {
-					string s = QuoteString ((string)info.Value, out ulong size);
+					string s = QuoteString (info, out ulong size);
 
-					WriteGlobalVariableStart (context, info);
+					if (!info.IsConstantStringLiteral) {
+						WriteCommentLine (context, $" '{info.Value}'");
+					}
+
+					WriteGlobalVariableName (context, info);
+
+					// Strings must always be local symbols, global variables will point to them
+					WriteVariableOptions (context, LlvmIrVariableOptions.LocalString);
 					context.Output.Write ('[');
 					context.Output.Write (size.ToString (CultureInfo.InvariantCulture));
-					context.Output.Write (" x i8] c");
+					context.Output.Write ($" x {info.IrType}] ");
+					if (info.IsConstantStringLiteral) {
+						context.Output.Write ('c');
+					}
 					context.Output.Write (s);
 					context.Output.Write (", align ");
 					context.Output.WriteLine (target.GetAggregateAlignment (1, size).ToString (CultureInfo.InvariantCulture));
@@ -246,7 +261,7 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			}
 		}
 
-		void WriteGlobalVariableStart (GeneratorWriteContext context, LlvmIrGlobalVariable variable)
+		void WriteGlobalVariableName (GeneratorWriteContext context, LlvmIrGlobalVariable variable)
 		{
 			if (!String.IsNullOrEmpty (variable.Comment)) {
 				WriteCommentLine (context, variable.Comment);
@@ -254,13 +269,33 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			context.Output.Write ('@');
 			context.Output.Write (variable.Name);
 			context.Output.Write (" = ");
+		}
 
-			LlvmIrVariableOptions options = variable.Options ?? LlvmIrGlobalVariable.DefaultOptions;
+		void WriteVariableOptions (GeneratorWriteContext context, LlvmIrVariableOptions options)
+		{
 			WriteLinkage (context, options.Linkage);
 			WritePreemptionSpecifier (context, options.RuntimePreemption);
 			WriteVisibility (context, options.Visibility);
 			WriteAddressSignificance (context, options.AddressSignificance);
 			WriteWritability (context, options.Writability);
+		}
+
+		void WriteVariableOptions (GeneratorWriteContext context, LlvmIrGlobalVariable variable, LlvmIrVariableOptions? defaultOptions = null)
+		{
+			LlvmIrVariableOptions options = variable.Options ?? defaultOptions ?? LlvmIrGlobalVariable.DefaultOptions;
+			WriteVariableOptions (context, options);
+		}
+
+		void WriteVariableReference (GeneratorWriteContext context, LlvmIrVariableReference variable)
+		{
+			context.Output.Write (variable.Global ? '@' : '%');
+			context.Output.Write (variable.Name);
+		}
+
+		void WriteGlobalVariableStart (GeneratorWriteContext context, LlvmIrGlobalVariable variable)
+		{
+			WriteGlobalVariableName (context, variable);
+			WriteVariableOptions (context, variable, LlvmIrGlobalVariable.DefaultOptions);
 		}
 
 		void WriteGlobalVariable (GeneratorWriteContext context, LlvmIrGlobalVariable variable)
@@ -319,17 +354,38 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				throw new InvalidOperationException ($"Internal error: variable '{variable.Name}'' of type {variable.Type} must not have a null value");
 			}
 
-			if (valueType != variable.Type && !LlvmIrModule.NameValueArrayType.IsAssignableFrom (variable.Type)) {
+			if (!IsValueAssignableFrom (valueType, variable) && !IsValueAssignableFrom (LlvmIrModule.NameValueArrayType, variable)) {
 				throw new InvalidOperationException ($"Internal error: variable type '{variable.Type}' is different to its value type, '{valueType}'");
 			}
 
 			WriteValue (context, valueType, variable);
 		}
 
+		bool IsValueAssignableFrom (Type valueType, LlvmIrVariable variable)
+		{
+			if (valueType != typeof(string) && valueType != typeof(StringHolder)) {
+				return valueType.IsAssignableFrom (variable.Type);
+			}
+
+			return variable.Type == typeof(string) || variable.Type == typeof(StringHolder);
+		}
+
 		ulong GetAggregateValueElementCount (GeneratorWriteContext context, LlvmIrVariable variable) => GetAggregateValueElementCount (context, variable.Type, variable.Value, variable as LlvmIrGlobalVariable);
 
 		ulong GetAggregateValueElementCount (GeneratorWriteContext context, Type type, object? value, LlvmIrGlobalVariable? globalVariable = null)
 		{
+			if (type == typeof(LlvmIrStringBlob)) {
+				return 1; // String blobs are a collection of bytes
+			}
+
+			if (type.IsSubclassOf (typeof(LlvmIrSectionedArrayBase))) {
+				var sectionedArray = value as LlvmIrSectionedArrayBase;
+				if (sectionedArray == null) {
+					throw new InvalidOperationException ($"Internal error: null sectioned arrays aren't supported");
+				}
+				return sectionedArray.Count;
+			}
+
 			if (!type.IsArray ()) {
 				throw new InvalidOperationException ($"Internal error: unknown type {type} when trying to determine aggregate type element count");
 			}
@@ -351,6 +407,10 @@ namespace Xamarin.Android.Tasks.LLVMIR
 
 			if (type.ImplementsInterface (typeof(ICollection))) {
 				return (uint)((ICollection)value).Count;
+			}
+
+			if (type.ImplementsInterface (typeof(ICollection<>))) {
+				return (ulong)GetCollectionOfTCount (type, value);
 			}
 
 			throw new InvalidOperationException ($"Internal error: should never get here");
@@ -422,12 +482,34 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			string irType;
 			ulong size;
 			bool isPointer;
+			bool isStandardArray = type.IsArray ();
+			bool isSectionedArray = !isStandardArray && type.IsSubclassOf (typeof(LlvmIrSectionedArrayBase));
 
-			if (type.IsArray ()) {
-				Type elementType = type.GetArrayElementType ();
-				ulong elementCount = GetAggregateValueElementCount (context, type, value, globalVariable);
+			if (isStandardArray || isSectionedArray) {
+				Type elementType;
+				ulong elementCount;
+
+				if (isStandardArray) {
+					elementType = type.GetArrayElementType ();
+					elementCount = GetAggregateValueElementCount (context, type, value, globalVariable);
+				} else if (isSectionedArray) {
+					var sectionedArray = value as LlvmIrSectionedArrayBase;
+					if (sectionedArray == null) {
+						throw new InvalidOperationException ($"Internal error: sectioned array variables must have a value");
+					}
+
+					elementType = sectionedArray.ContainedType;
+					elementCount = GetAggregateValueElementCount (context, type, value, globalVariable);
+				} else {
+					throw new InvalidOperationException ("Internal error: should never get here (forgot to add a handler for another array type?)");
+				}
 
 				WriteArrayType (context, elementType, elementCount, globalVariable, out typeInfo);
+				return;
+			}
+
+			if (type == typeof(LlvmIrStringBlob)) {
+				WriteStringBlobType (context, (LlvmIrStringBlob?)value, out typeInfo);
 				return;
 			}
 
@@ -440,6 +522,21 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				maxFieldAlignment: size
 			);
 			context.Output.Write (irType);
+		}
+
+		void WriteStringBlobType (GeneratorWriteContext context, LlvmIrStringBlob? blob, out LlvmTypeInfo typeInfo)
+		{
+			long size = blob?.Size ?? 0;
+			// Blobs are always arrays of bytes
+			context.Output.Write ($"[{size} x i8]");
+
+			typeInfo = new LlvmTypeInfo (
+				isPointer: false,
+				isAggregate: true,
+				isStructure: false,
+				size: (ulong)size,
+				maxFieldAlignment: 1
+			);
 		}
 
 		void WriteArrayType (GeneratorWriteContext context, Type elementType, ulong elementCount, out LlvmTypeInfo typeInfo)
@@ -560,7 +657,7 @@ namespace Xamarin.Android.Tasks.LLVMIR
 		{
 			if (encodeAsASCII) {
 				context.Output.Write ('c');
-				context.Output.Write (QuoteString (bytes, bytes.Length, out _, nullTerminated: false));
+				context.Output.Write (QuoteUtf8String (bytes, bytes.Length, out _, nullTerminated: false));
 				return;
 			}
 
@@ -616,7 +713,7 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				return;
 			}
 
-			WriteValue (context, smi.MemberType, value);
+			WriteValue (context, smi.MemberType, value, smi.Info.GetStringEncoding (context.TypeCache));
 		}
 
 		bool WriteNativePointerValue (GeneratorWriteContext context, StructureInstance si, StructureMemberInfo smi, object? value)
@@ -670,7 +767,7 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			return $"{(basicTypeDesc.IsUnsigned ? prefixUnsigned : prefixSigned)}0x{hex}";
 		}
 
-		void WriteValue (GeneratorWriteContext context, Type type, object? value)
+		public void WriteValue (GeneratorWriteContext context, Type type, object? value, LlvmIrStringEncoding stringEncoding = LlvmIrStringEncoding.UTF8)
 		{
 			if (value is LlvmIrVariable variableRef) {
 				context.Output.Write (variableRef.Reference);
@@ -710,14 +807,19 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				return;
 			}
 
-			if (type == typeof(string)) {
+			if (type == typeof(string) || type == typeof(StringHolder)) {
 				if (value == null) {
 					context.Output.Write ("null");
 					return;
 				}
 
-				LlvmIrStringVariable sv = context.Module.LookupRequiredVariableForString ((string)value);
+				LlvmIrStringVariable sv = context.Module.LookupRequiredVariableForString (StringHolder.AsHolder (value, stringEncoding));
 				context.Output.Write (sv.Reference);
+				return;
+			}
+
+			if (type == typeof(LlvmIrStringBlob)) {
+				WriteStringBlobArray (context, (LlvmIrStringBlob)value);
 				return;
 			}
 
@@ -730,7 +832,126 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				throw new NotSupportedException ($"Internal error: array of type {type} is unsupported");
 			}
 
+			if (type.IsSubclassOf (typeof(LlvmIrSectionedArrayBase))) {
+				WriteSectionedArrayValue (context, (LlvmIrSectionedArrayBase)value);
+				return;
+			}
+
+			if (type == typeof (LlvmIrVariableReference) || type.IsSubclassOf (typeof (LlvmIrVariableReference))) {
+				WriteVariableReference (context, (LlvmIrVariableReference)value);
+				return;
+			}
+
 			throw new NotSupportedException ($"Internal error: value type '{type}' is unsupported");
+		}
+
+		void WriteSectionedArrayValue (GeneratorWriteContext context, LlvmIrSectionedArrayBase? array)
+		{
+			if (array == null) {
+				context.Output.Write (" zeroinitializer");
+				return;
+			}
+
+			Type elementType = array.ContainedType;
+			WriteArrayValueStart (context);
+			ulong globalCounter = 0;
+			int lastSectionIndex = array.Sections.Count - 1;
+
+			for (int i = 0; i < array.Sections.Count; i++) {
+				LlvmIrArraySectionBase section = array.Sections[i];
+
+				if (i > 0) {
+					context.Output.WriteLine ();
+				}
+
+				if (!String.IsNullOrEmpty (section.Header)) {
+					context.Output.Write (context.CurrentIndent);
+					WriteCommentLine (context, $" Module map index: {globalCounter}");
+					context.Output.Write (context.CurrentIndent);
+					WriteCommentLine (context, section.Header);
+				}
+
+				WriteArrayEntries (
+					context,
+					variable: null,
+					section.Data,
+					section.DataType,
+					stride: 1,
+					writeIndices: true,
+					terminateWithComma: i < lastSectionIndex
+				);
+				globalCounter += (ulong)section.Data.Count;
+			}
+
+			WriteArrayValueEnd (context);
+		}
+
+		void WriteStringBlobArray (GeneratorWriteContext context, LlvmIrStringBlob blob)
+		{
+			// The stride determines how many elements are written on a single line before a newline is added.
+			const uint stride = 16;
+			Type elementType = typeof(byte);
+
+			LlvmIrVariableNumberFormat oldNumberFormat = context.NumberFormat;
+			context.NumberFormat = LlvmIrVariableNumberFormat.Hexadecimal;
+			WriteArrayValueStart (context);
+			foreach (LlvmIrStringBlob.StringInfo si in blob.GetSegments ()) {
+				if (si.Offset > 0) {
+					context.Output.Write (',');
+					context.Output.WriteLine ();
+					context.Output.WriteLine ();
+				}
+
+				context.Output.Write (context.CurrentIndent);
+				WriteCommentLine (context, $" '{si.Value}' @ {si.Offset}");
+				WriteBytes (si.Bytes);
+			}
+			context.Output.WriteLine ();
+			WriteArrayValueEnd (context);
+			context.NumberFormat = oldNumberFormat;
+
+			void WriteBytes (byte[] bytes)
+			{
+				ulong counter = 0;
+				bool first = true;
+				foreach (byte b in bytes) {
+					if (!first) {
+						WriteCommaWithStride (counter);
+					} else {
+						context.Output.Write (context.CurrentIndent);
+						first = false;
+					}
+
+					counter++;
+					WriteByteTypeAndValue (b);
+				}
+
+				if (bytes.Length > 0) {
+					WriteCommaWithStride (counter);
+				} else {
+					context.Output.Write (context.CurrentIndent);
+				}
+				WriteByteTypeAndValue (0); // Terminating NUL is counted for each string, but not included in its bytes
+			}
+
+			void WriteCommaWithStride (ulong counter)
+			{
+				context.Output.Write (',');
+				if (stride == 1 || counter % stride == 0) {
+					context.Output.WriteLine ();
+					context.Output.Write (context.CurrentIndent);
+				} else {
+					context.Output.Write (' ');
+				}
+			}
+
+			void WriteByteTypeAndValue (byte v)
+			{
+				WriteType (context, elementType, v, out _);
+
+				context.Output.Write (' ');
+				WriteValue (context, elementType, v);
+			}
 		}
 
 		void WriteStructureValue (GeneratorWriteContext context, StructureInstance? instance)
@@ -748,6 +969,9 @@ namespace Xamarin.Android.Tasks.LLVMIR
 
 			for (int i = 0; i < info.Members.Count; i++) {
 				StructureMemberInfo smi = info.Members[i];
+				if (!smi.IsSupportedForTarget (context.Target)) {
+					continue;
+				}
 
 				context.Output.Write (context.CurrentIndent);
 				WriteType (context, instance, smi, out _);
@@ -775,9 +999,9 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				string? comment = info.GetCommentFromProvider (smi, instance);
 				if (String.IsNullOrEmpty (comment)) {
 					var sb = new StringBuilder (" ");
-					sb.Append (MapManagedTypeToNative (smi));
+					sb.Append (MapManagedTypeToNative (context, smi));
 					sb.Append (' ');
-					sb.Append (smi.Info.Name);
+					sb.Append (smi.MappedName);
 					comment = sb.ToString ();
 				}
 				WriteCommentLine (context, comment);
@@ -809,12 +1033,13 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			return 1;
 		}
 
-		void WriteArrayEntries (GeneratorWriteContext context, LlvmIrVariable variable, ICollection? entries, Type elementType, uint stride, bool writeIndices, bool terminateWithComma = false)
+		void WriteArrayEntries (GeneratorWriteContext context, LlvmIrVariable? variable, ICollection? entries, Type elementType, uint stride, bool writeIndices, bool terminateWithComma = false)
 		{
 			bool first = true;
 			bool ignoreComments = stride > 1;
 			string? prevItemComment = null;
 			ulong counter = 0;
+			bool writeStringInComment = !ignoreComments && (elementType == typeof(string) || elementType == typeof(StringHolder));
 
 			if (entries != null) {
 				foreach (object entry in entries) {
@@ -833,12 +1058,18 @@ namespace Xamarin.Android.Tasks.LLVMIR
 
 					if (!ignoreComments) {
 						prevItemComment = null;
-						if (variable.GetArrayItemCommentCallback != null) {
+						if (variable != null && variable.GetArrayItemCommentCallback != null) {
 							prevItemComment = variable.GetArrayItemCommentCallback (variable, target, counter, entry, variable.GetArrayItemCommentCallbackCallerState);
 						}
 
 						if (writeIndices && String.IsNullOrEmpty (prevItemComment)) {
-							prevItemComment = $" {counter}";
+							string stringComment = String.Empty;
+							if (writeStringInComment) {
+								var holder = StringHolder.AsHolder (entry);
+								stringComment = $" ('{holder.Data}')";
+							}
+
+							prevItemComment = $" {counter}{stringComment}";
 						}
 					}
 
@@ -938,8 +1169,19 @@ namespace Xamarin.Android.Tasks.LLVMIR
 					list.Add (kvp.Value);
 				}
 				entries = list;
-			} else {
+			} else if (variable.Type.ImplementsInterface (typeof (ICollection))) {
 				entries = (ICollection)variable.Value;
+			} else if (variable.Type.ImplementsInterface (typeof (ICollection<>))) {
+				// This is slow and messy, but should work for a wide range of types without us having to add
+				// any explicit support
+				Type elementType = variable.Type.GetArrayElementType ();
+				int elementCount = GetCollectionOfTCount (variable.Type, variable.Value);
+				Array array = Array.CreateInstance (elementType, elementCount);
+				MethodInfo copyTo = variable.Type.GetMethod ("CopyTo", new Type[] { array.GetType (), typeof (int) });
+				copyTo.Invoke (variable.Value, new object[] { array, (int)0 });
+				entries = array;
+			} else {
+				throw new NotSupportedException ($"Unsupported array value type '{variable.Type}'");
 			}
 
 			if (entries.Count == 0) {
@@ -1065,6 +1307,10 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			context.IncreaseIndent ();
 			for (int i = 0; i < si.Members.Count; i++) {
 				StructureMemberInfo info = si.Members[i];
+				if (!info.IsSupportedForTarget (context.Target)) {
+					continue;
+				}
+
 				string nativeType = MapManagedTypeToNative (info.MemberType);
 
 				// TODO: nativeType can be an array, update to indicate that (and get the size)
@@ -1075,7 +1321,7 @@ namespace Xamarin.Android.Tasks.LLVMIR
 					arraySize = String.Empty;
 				}
 
-				var comment = $" {nativeType} {info.Info.Name}{arraySize}";
+				var comment = $" {nativeType} {info.MappedName}{arraySize}";
 				WriteStructureDeclarationField (info.IRType, comment, i == si.Members.Count - 1);
 			}
 			context.DecreaseIndent ();
@@ -1226,6 +1472,11 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				context.Output.Write (llvmVisibility[func.Visibility]);
 				context.Output.Write (' ');
 			}
+
+			if (func.CallingConvention != LlvmIrCallingConvention.Default) {
+				context.Output.Write (llvmCallingConvention[func.CallingConvention]);
+				context.Output.Write (' ');
+			}
 		}
 
 		void WriteFunctionDeclarationTrailingDecorations (GeneratorWriteContext context, LlvmIrFunction func)
@@ -1251,6 +1502,10 @@ namespace Xamarin.Android.Tasks.LLVMIR
 
 		public static void WriteReturnAttributes (GeneratorWriteContext context, LlvmIrFunctionSignature.ReturnTypeAttributes returnAttrs)
 		{
+			if (AttributeIsSet (returnAttrs.InReg)) {
+				context.Output.Write ("inreg");
+			}
+
 			if (AttributeIsSet (returnAttrs.NoUndef)) {
 				context.Output.Write ("noundef ");
 			}
@@ -1347,6 +1602,10 @@ namespace Xamarin.Android.Tasks.LLVMIR
 
 			if (AttributeIsSet (parameter.ZeroExt)) {
 				attributes.Add ("zeroext");
+			}
+
+			if (AttributeIsSet (parameter.WriteOnly)) {
+				attributes.Add ("writeonly");
 			}
 
 			if (parameter.Align.HasValue) {
@@ -1460,8 +1719,12 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			return type.GetShortName ();
 		}
 
-		static string MapManagedTypeToNative (StructureMemberInfo smi)
+		static string MapManagedTypeToNative (GeneratorWriteContext context, StructureMemberInfo smi)
 		{
+			if (smi.Info.IsUnicodeString (context.TypeCache)) {
+				return "char16_t*";
+			}
+
 			string nativeType = MapManagedTypeToNative (smi.MemberType);
 			// Silly, but effective
 			if (nativeType[nativeType.Length - 1] == '*') {
@@ -1487,8 +1750,9 @@ namespace Xamarin.Android.Tasks.LLVMIR
 				throw new InvalidOperationException ($"Field '{smi.Info.Name}' of structure '{info.Name}' should have a value of '{expectedType}' type, instead it had a '{value.GetType ()}'");
 			}
 
-			if (valueType == typeof(string)) {
-				return context.Module.LookupRequiredVariableForString ((string)value);
+			if (valueType == typeof(string) || valueType == typeof(StringHolder)) {
+				var encoding = smi.Info.GetStringEncoding (context.TypeCache);
+				return context.Module.LookupRequiredVariableForString (StringHolder.AsHolder (value, encoding));
 			}
 
 			return value;
@@ -1555,30 +1819,63 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			return $"\"{s}\"";
 		}
 
-		public static string QuoteString (string value, bool nullTerminated = true)
+		public static string QuoteString (LlvmIrStringVariable variable, out ulong stringSize, bool nullTerminated = true)
 		{
-			return QuoteString (value, out _, nullTerminated);
-		}
+			if (variable.Encoding == LlvmIrStringEncoding.UTF8) {
+				var value = (StringHolder)variable.Value;
+				if (value.Data == null) {
+					throw new InvalidOperationException ("Internal error: null strings not supported here, they should be handled elsewhere.");
+				}
 
-		public static string QuoteString (byte[] bytes)
-		{
-			return QuoteString (bytes, bytes.Length, out _, nullTerminated: false);
-		}
+				int byteCount = Encoding.UTF8.GetByteCount (value.Data);
+				var bytes = ArrayPool<byte>.Shared.Rent (byteCount);
 
-		public static string QuoteString (string value, out ulong stringSize, bool nullTerminated = true)
-		{
-			var encoding = Encoding.UTF8;
-			int byteCount = encoding.GetByteCount (value);
-			var bytes = ArrayPool<byte>.Shared.Rent (byteCount);
-			try {
-				encoding.GetBytes (value, 0, value.Length, bytes, 0);
-				return QuoteString (bytes, byteCount, out stringSize, nullTerminated);
-			} finally {
-				ArrayPool<byte>.Shared.Return (bytes);
+				try {
+					Encoding.UTF8.GetBytes (value.Data, 0, value.Data.Length, bytes, 0);
+					return QuoteUtf8String (bytes, byteCount, out stringSize, nullTerminated);
+				} finally {
+					ArrayPool<byte>.Shared.Return (bytes);
+				}
 			}
+
+			if (variable.Encoding == LlvmIrStringEncoding.Unicode) {
+				return QuoteUnicodeString (variable, out stringSize, nullTerminated);
+			}
+
+			throw new InvalidOperationException ($"Internal error: unsupported string encoding {variable.Encoding}");
 		}
 
-		public static string QuoteString (byte[] bytes, int byteCount, out ulong stringSize, bool nullTerminated = true)
+		static string QuoteUnicodeString (LlvmIrStringVariable variable, out ulong stringSize, bool nullTerminated = true)
+		{
+			var value = (StringHolder)variable.Value;
+			if (value.Data == null) {
+				throw new InvalidOperationException ("Internal error: null strings not supported here, they should be handled elsewhere.");
+			}
+
+			// Each character/lexeme is encoded as iXY u0xVXYZ + comma and a space, and on top of that we have two square brackets and a trailing nul
+			var sb = new StringBuilder ((value.Data.Length * 13) + 3); // rough estimate of capacity
+			sb.Append ('[');
+			for (int i = 0; i < value.Data.Length; i++) {
+				var ch = (short)value.Data[i];
+				if (i > 0) {
+					sb.Append (", ");
+				}
+				sb.Append ($"{variable.IrType} u0x{ch:X2}");
+			}
+
+			if (nullTerminated) {
+				if (value.Data.Length > 0) {
+					sb.Append (", ");
+				}
+				sb.Append ($"{variable.IrType} 0");
+			}
+			sb.Append (']');
+
+			stringSize = (ulong)value.Data.Length + (nullTerminated ? 1u : 0u);
+			return sb.ToString ();
+		}
+
+		static string QuoteUtf8String (byte[] bytes, int byteCount, out ulong stringSize, bool nullTerminated = true)
 		{
 			var sb = new StringBuilder (byteCount * 2); // rough estimate of capacity
 
@@ -1601,6 +1898,22 @@ namespace Xamarin.Android.Tasks.LLVMIR
 			}
 
 			return QuoteStringNoEscape (sb.ToString ());
+		}
+
+		static int GetCollectionOfTCount (Type type, object instance)
+		{
+			if (!type.ImplementsInterface (typeof (ICollection<>))) {
+				throw new ArgumentException ("Must implement the ICollection<T> interface", nameof (type));
+			}
+
+			PropertyInfo countProperty = type.GetProperty ("Count");
+			var ret = (int)countProperty.GetValue (instance);
+
+			if (ret < 0) {
+				throw new InvalidOperationException ($"Collection count is negative: {ret}");
+			}
+
+			return ret;
 		}
 	}
 }

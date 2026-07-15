@@ -1,7 +1,6 @@
+#nullable enable
 using System;
-using System.Collections.Concurrent;
 using System.IO;
-using System.Text;
 
 using ELFSharp;
 using ELFSharp.ELF;
@@ -18,17 +17,30 @@ namespace Xamarin.Android.Tasks
 {
 	static class ELFHelper
 	{
+		public static ELFInfo? GetInfo (TaskLoggingHelper log, string path)
+		{
+			try {
+				using IELF elf = ELFReader.Load (path);
+				return new ELFInfo (elf);
+			} catch (Exception ex) {
+				log.LogDebugMessage ($"Attempt to check whether '{path}' has debug symbols failed with exception.");
+				log.LogDebugMessage (ex.ToString ());
+				return null;
+			}
+		}
+
 		public static void AssertValidLibraryAlignment (TaskLoggingHelper log, int alignmentInPages, string path, ITaskItem? item)
 		{
-			if (String.IsNullOrEmpty (path) || !File.Exists (path)) {
+			if (path.IsNullOrEmpty () || !File.Exists (path)) {
 				return;
 			}
 
 			log.LogDebugMessage ($"Checking alignment to {alignmentInPages}k page boundary in shared library {path}");
 			try {
-				AssertValidLibraryAlignment (log, MonoAndroidHelper.ZipAlignmentToPageSize (alignmentInPages), path, ELFReader.Load (path), item);
+				using IELF elf = ELFReader.Load (path);
+				AssertValidLibraryAlignment (log, MonoAndroidHelper.ZipAlignmentToPageSize (alignmentInPages), path, elf, item);
 			} catch (Exception ex) {
-				log.LogWarning ($"Attempt to check whether '{path}' is a correctly aligned ELF file failed with exception, ignoring alignment check for the file.");
+				log.LogCodedWarning ("XA0146", Properties.Resources.XA0146, path);
 				log.LogWarningFromException (ex, showStackTrace: true);
 			}
 		}
@@ -56,56 +68,65 @@ namespace Xamarin.Android.Tasks
 					throw new InvalidOperationException ($"Internal error: {segment} is not Segment<ulong>");
 				}
 
-				// TODO: what happens if the library is aligned at, say, 64k while 16k is required? Should we erorr out?
-				//       We will need more info about that, have to wait till Google formally announce the requirement.
-				//       At this moment the script https://developer.android.com/guide/practices/page-sizes#test they
-				//       provide suggests it's a strict requirement, so we test for equality below.
-				if (segment64.Alignment == pageSize) {
+				// Android allows alignment higher than the page size, as long as it's a power of two. See:
+				//
+				// https://android.googlesource.com/platform//system/extras/+/3c784e9fd9f4e3f8e363a023939567c41c19d634%5E%21/#F0
+				//
+				if (segment64.Alignment >= pageSize && (segment64.Alignment % 2 == 0)) {
 					continue;
 				}
-				log.LogDebugMessage ($"    expected segment alignment of 0x{pageSize:x}, found 0x{segment64.Alignment:x}");
+				log.LogDebugMessage ($"    expected segment alignment of at least 0x{pageSize:x} and a power of two, found 0x{segment64.Alignment:x}");
 
-				(string packageId, string packageVersion) = GetNugetPackageInfo ();
-				log.LogCodedWarning ("XA0141", Properties.Resources.XA0141, packageId, packageVersion, Path.GetFileName (path));
+				(string packageId, string packageVersion, string originalFile) = GetNugetPackageInfo ();
+				log.LogCodedWarning ("XA0141", Properties.Resources.XA0141, packageId, packageVersion, originalFile, Path.GetFileName (path));
 				break;
 			}
 
-			(string packageId, string packageVersion) GetNugetPackageInfo ()
+			(string packageId, string packageVersion, string originalFile) GetNugetPackageInfo ()
 			{
 				const string Unknown = "<unknown>";
 
 				if (item == null) {
-					return (Unknown, Unknown);
+					return (Unknown, Unknown, Unknown);
 				}
 
-				string? metaValue = item.GetMetadata ("NuGetPackageId");
-				if (String.IsNullOrEmpty (metaValue)) {
-					return (Unknown, Unknown);
+				string? metaValue = item.GetMetadata ("PathInPackage");
+				if (metaValue.IsNullOrEmpty ()) {
+					metaValue = item.GetMetadata ("OriginalFile");
+					if (metaValue.IsNullOrEmpty ()) {
+						metaValue = item.ItemSpec;
+					}
+				}
+				string originalFile = metaValue;
+				metaValue = item.GetMetadata ("NuGetPackageId");
+				if (metaValue.IsNullOrEmpty ()) {
+					return (Unknown, Unknown, originalFile);
 				}
 
 				string id = metaValue;
 				string version;
 				metaValue = item.GetMetadata ("NuGetPackageVersion");
-				if (!String.IsNullOrEmpty (metaValue)) {
+				if (!metaValue.IsNullOrEmpty ()) {
 					version = metaValue;
 				} else {
 					version = Unknown;
 				}
 
-				return (id, version);
+				return (id, version, originalFile);
 			}
 		}
 
 		public static bool IsEmptyAOTLibrary (TaskLoggingHelper log, string path)
 		{
-			if (String.IsNullOrEmpty (path) || !File.Exists (path)) {
+			if (path.IsNullOrEmpty () || !File.Exists (path)) {
 				return false;
 			}
 
 			try {
-				return IsEmptyAOTLibrary (log, path, ELFReader.Load (path));
+				using IELF elf = ELFReader.Load (path);
+				return IsEmptyAOTLibrary (log, path, elf);
 			} catch (Exception ex) {
-				log.LogWarning ($"Attempt to check whether '{path}' is a valid ELF file failed with exception, ignoring AOT check for the file.");
+				log.LogCodedWarning ("XA0147", Properties.Resources.XA0147, path);
 				log.LogWarningFromException (ex, showStackTrace: true);
 				return false;
 			}
@@ -113,11 +134,11 @@ namespace Xamarin.Android.Tasks
 
 		public static bool ReferencesLibrary (string libraryPath, string referencedLibraryName)
 		{
-			if (String.IsNullOrEmpty (libraryPath) || !File.Exists (libraryPath)) {
+			if (libraryPath.IsNullOrEmpty () || !File.Exists (libraryPath)) {
 				return false;
 			}
 
-			IELF elf = ELFReader.Load (libraryPath);
+			using IELF elf = ELFReader.Load (libraryPath);
 			var dynstr = GetSection (elf, ".dynstr") as IStringTable;
 			if (dynstr == null) {
 				return false;
@@ -134,6 +155,44 @@ namespace Xamarin.Android.Tasks
 			return false;
 		}
 
+		public static bool LibraryHasSymbol (TaskLoggingHelper log, string elfPath, string sectionName, string symbolName, ELFSymbolType symbolType = ELFSymbolType.NotSpecified)
+		{
+			if (elfPath.IsNullOrEmpty () || !File.Exists (elfPath)) {
+				return false;
+			}
+
+			try {
+				using IELF elf = ELFReader.Load (elfPath);
+				return HasSymbol (elf, sectionName, symbolName, symbolType);
+			} catch (Exception ex) {
+				log.LogCodedWarning ("XA0148", Properties.Resources.XA0148, elfPath, symbolName, sectionName);
+				log.LogWarningFromException (ex, showStackTrace: true);
+				return false;
+			}
+		}
+
+		public static bool LibraryHasPublicSymbol (TaskLoggingHelper log, string elfPath, string symbolName, ELFSymbolType symbolType = ELFSymbolType.NotSpecified) => LibraryHasSymbol (log, elfPath, ".dynsym", symbolName, symbolType);
+
+		public static bool HasSymbol (IELF elf, string sectionName, string symbolName, ELFSymbolType symbolType = ELFSymbolType.NotSpecified)
+		{
+			ISymbolTable? symtab = GetSymbolTable (elf, sectionName);
+			if (symtab == null) {
+				return false;
+			}
+
+			foreach (var entry in symtab.Entries) {
+				if (MonoAndroidHelper.StringEquals (symbolName, entry.Name) && (symbolType == ELFSymbolType.NotSpecified || entry.Type == symbolType)) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		public static bool HasPublicSymbol (IELF elf, string symbolName, ELFSymbolType symbolType = ELFSymbolType.NotSpecified) => HasSymbol (elf, ".dynsym", symbolName, symbolType);
+
+		public static bool IsJniLibrary (TaskLoggingHelper log, string elfPath) => LibraryHasPublicSymbol (log, elfPath, "JNI_OnLoad", ELFSymbolType.Function);
+
 		static bool IsLibraryReference (IStringTable stringTable, IDynamicEntry dynEntry, string referencedLibraryName)
 		{
 			if (dynEntry.Tag != DynamicTag.Needed) {
@@ -149,31 +208,17 @@ namespace Xamarin.Android.Tasks
 				return false;
 			}
 
-			return String.Compare (referencedLibraryName, stringTable[(long)index], StringComparison.Ordinal) == 0;
+			return MonoAndroidHelper.StringEquals (referencedLibraryName, stringTable[(long)index]);
 		}
 
 		static bool IsEmptyAOTLibrary (TaskLoggingHelper log, string path, IELF elf)
 		{
-			ISymbolTable? symtab = GetSymbolTable (elf, ".dynsym");
-			if (symtab == null) {
-				// We can't be sure what the DSO is, play safe
-				return false;
-			}
-
-			bool mono_aot_file_info_found = false;
-			foreach (var entry in symtab.Entries) {
-				if (String.Compare ("mono_aot_file_info", entry.Name, StringComparison.Ordinal) == 0 && entry.Type == ELFSymbolType.Object) {
-					mono_aot_file_info_found = true;
-					break;
-				}
-			}
-
-			if (!mono_aot_file_info_found) {
+			if (!HasPublicSymbol (elf, "mono_aot_file_info", ELFSymbolType.Object)) {
 				// Not a MonoVM AOT assembly
 				return false;
 			}
 
-			symtab = GetSymbolTable (elf, ".symtab");
+			ISymbolTable? symtab = GetSymbolTable (elf, ".symtab");
 			if (symtab == null) {
 				// The DSO is stripped, we can't tell if there are any functions defined (.text will be present anyway)
 				// We perhaps **can** take a look at the .text section size, but it's not a solid check...

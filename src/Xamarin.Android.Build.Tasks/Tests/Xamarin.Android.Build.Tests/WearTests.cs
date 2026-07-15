@@ -1,5 +1,6 @@
 using System.IO;
 using NUnit.Framework;
+using Xamarin.Android.Tasks;
 using Xamarin.ProjectTools;
 
 namespace Xamarin.Android.Build.Tests
@@ -8,24 +9,36 @@ namespace Xamarin.Android.Build.Tests
 	public class WearTests : BaseTest
 	{
 		[Test]
-		public void BasicProject ([Values (true, false)] bool isRelease)
+		public void BasicProject ([Values] bool isRelease, [Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinAndroidWearApplicationProject {
 				IsRelease = isRelease,
 			};
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName))) {
+			proj.SetRuntime (runtime);
+			using (var b = CreateApkBuilder ()) {
 				Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
 			}
 		}
 
 		[Test]
-		public void BundledWearApp ()
+		public void BundledWearApp ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var path = Path.Combine ("temp", TestName);
 			var app = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
 				ProjectName = "MyApp",
 				EmbedAssembliesIntoApk = true,
 			};
+			app.SetRuntime (runtime);
+
 			var wear = new XamarinAndroidWearApplicationProject {
 				EmbedAssembliesIntoApk = true,
 			};
@@ -43,10 +56,15 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void WearProjectJavaBuildFailure ()
+		public void WearProjectJavaBuildFailure ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var proj = new XamarinAndroidApplicationProject {
-				IsRelease = true,
+				IsRelease = isRelease,
 				EnableDefaultItems = true,
 				PackageReferences = {
 					KnownPackages.XamarinAndroidXWear,
@@ -54,8 +72,9 @@ namespace Xamarin.Android.Build.Tests
 					new Package { Id = "Xamarin.AndroidX.PercentLayout", Version = "1.0.0.14" },
 					new Package { Id = "Xamarin.AndroidX.Legacy.Support.Core.UI", Version = "1.0.0.14" },
 				},
-				SupportedOSPlatformVersion = "23",
+				SupportedOSPlatformVersion = "24",
 			};
+			proj.SetRuntime (runtime);
 			var builder = CreateApkBuilder ();
 			builder.ThrowOnBuildFailure = false;
 			Assert.IsFalse (builder.Build (proj), $"{proj.ProjectName} should fail.");

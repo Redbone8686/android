@@ -2,13 +2,18 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Security.Cryptography;
+using NUnit.Framework;
 
 namespace Xamarin.ProjectTools
 {
 	public class DownloadedCache
 	{
 		static readonly ConcurrentDictionary<string, object> locks = new ConcurrentDictionary<string, object> ();
+		static readonly HttpClient httpClient = new HttpClient ();
 
 		public DownloadedCache ()
 			: this (Path.Combine (Environment.GetFolderPath (Environment.SpecialFolder.LocalApplicationData), "Xamarin.ProjectTools"))
@@ -33,9 +38,54 @@ namespace Xamarin.ProjectTools
 				if (File.Exists (filename))
 					return filename;
 				// FIXME: should be clever enough to resolve name conflicts.
-				new System.Net.WebClient ().DownloadFile (url, filename);
+				try {
+					using (var response = httpClient.GetAsync (url).GetAwaiter ().GetResult ()) {
+						response.EnsureSuccessStatusCode ();
+						using (var fileStream = File.Create (filename))
+						using (var httpStream = response.Content.ReadAsStreamAsync ().GetAwaiter ().GetResult ()) {
+							httpStream.CopyTo (fileStream);
+						}
+					}
+				} catch (HttpRequestException ex) when (IsTransientError (ex)) {
+					TestContext.WriteLine ($"Transient network error downloading '{url}':");
+					TestContext.WriteLine ($"  Message: {ex.Message}");
+					if (ex.StatusCode.HasValue) {
+						TestContext.WriteLine ($"  HTTP Status Code: {(int)ex.StatusCode.Value} ({ex.StatusCode.Value})");
+					}
+					TestContext.WriteLine ($"  URL: {url}");
+					TestContext.WriteLine ($"  Stack Trace: {ex.StackTrace}");
+					Assert.Inconclusive ($"Test skipped due to transient network error: {ex.Message}");
+					try {
+						File.Delete (filename);
+					} catch {
+						// Ignore any errors cleaning up the partially written file.
+					}
+				}
 				return filename;
 			}
+		}
+
+		static bool IsTransientError (HttpRequestException ex)
+		{
+			// Check for common transient HTTP status codes
+			if (ex.StatusCode is HttpStatusCode statusCode) {
+				return statusCode == HttpStatusCode.RequestTimeout ||
+						statusCode == HttpStatusCode.GatewayTimeout ||
+						statusCode == HttpStatusCode.ServiceUnavailable ||
+						statusCode == HttpStatusCode.BadGateway;
+			}
+
+			// Check for socket/DNS errors (e.g., "nodename nor servname provided, or not known")
+			if (ex.InnerException is SocketException) {
+				return true;
+			}
+
+			// Check for SSL/TLS errors (e.g., "Received an unexpected EOF or 0 bytes from the transport stream")
+			if (ex.InnerException is IOException) {
+				return true;
+			}
+
+			return false;
 		}
 	}
 }

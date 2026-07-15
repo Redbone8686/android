@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -66,7 +67,7 @@ namespace Xamarin.Android.Tasks
 		long jobsRunning = 0;
 		long jobId = 0;
 		int maxInstances = 0;
-		Action<string> logger = null;
+		Action<string>? logger = null;
 
 		public CancellationToken Token => tcs.Token;
 
@@ -252,7 +253,7 @@ namespace Xamarin.Android.Tasks
 						}
 						// wait for the file we expect to be created. There can be a delay between
 						// the daemon saying "Done" and the file finally being written to disk.
-						if (!string.IsNullOrEmpty (job.OutputFile) && !errored) {
+						if (!job.OutputFile.IsNullOrEmpty () && !errored) {
 							while (!File.Exists (job.OutputFile)) {
 								// If either the AsyncTask.CancellationToken or tcs.Token are cancelled, we need to abort
 								tcs.Token.ThrowIfCancellationRequested ();

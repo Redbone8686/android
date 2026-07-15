@@ -2,7 +2,9 @@ using System;
 using System.Net;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Http;
 using System.Net.Security;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
@@ -17,15 +19,13 @@ using Javax.Net.Ssl;
 
 namespace Android.Runtime {
 
-	public static class AndroidEnvironment {
+	public static partial class AndroidEnvironment {
 
 		public const string AndroidLogAppName = "Mono.Android";
 
 		static IX509TrustManager? sslTrustManager;
 		static KeyStore? certStore;
 		static object lock_ = new object ();
-		[DynamicallyAccessedMembers (DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
-		static Type? httpMessageHandlerType;
 
 		static void SetupTrustManager ()
 		{
@@ -64,8 +64,9 @@ namespace Android.Runtime {
 			}
 		}
 
-		[DllImport ("libc")]
-		static extern void exit (int status);
+		[LibraryImport ("libc")]
+		[UnmanagedCallConv (CallConvs = new[] { typeof (CallConvCdecl) })]
+		private static partial void exit (int status);
 
 		public static void FailFast (string? message)
 		{
@@ -108,17 +109,25 @@ namespace Android.Runtime {
 
 		internal static void UnhandledException (Exception e)
 		{
-			var raisers         = UnhandledExceptionRaiser;
+			if (TryRaiseUnhandledException (e))
+				return;
+
+			RaiseThrowable (Java.Lang.Throwable.FromException (e));
+		}
+
+		// Returns true if the exception was handled by a subscriber.
+		internal static bool TryRaiseUnhandledException (Exception e)
+		{
+			var raisers          = UnhandledExceptionRaiser;
 			if (raisers != null) {
 				var info    = new RaiseThrowableEventArgs (e);
 				foreach (EventHandler<RaiseThrowableEventArgs> handler in raisers.GetInvocationList ()) {
 					handler (null, info);
 					if (info.Handled)
-						return;
+						return true;
 				}
 			}
-
-			RaiseThrowable (Java.Lang.Throwable.FromException (e));
+			return false;
 		}
 
 		// This is invoked by
@@ -227,85 +236,6 @@ namespace Android.Runtime {
 			}
 		}
 
-		// This is invoked by
-		// System.Drawing!System.Drawing.GraphicsAndroid.FromAndroidSurface ()
-		// DO NOT REMOVE
-		//
-		// Exception audit:
-		//
-		//  Verdict
-		//     No need to wrap thrown exceptions in a BCL class
-		//
-		//  Rationale
-		//     No longer called by the indicated caller, however we keep it for backward compatibility.
-		[global::System.Runtime.Versioning.ObsoletedOSPlatform ("android31.0")]
-		static void GetDisplayDPI (out float x_dpi, out float y_dpi)
-		{
-			var wm = Application.Context.GetSystemService (Context.WindowService).JavaCast <IWindowManager> ();
-			var metrics = new DisplayMetrics ();
-#if ANDROID_17
-			wm?.DefaultDisplay?.GetRealMetrics (metrics);
-#else
-			wm.DefaultDisplay.GetMetrics (metrics);
-#endif
-			x_dpi = metrics.Xdpi;
-			y_dpi = metrics.Ydpi;
-		}
-
-		// This is invoked by
-		// System.Core!System.AndroidPlatform.GetDefaultTimeZone ()
-		// DO NOT REMOVE
-		//
-		// Exception audit:
-		//
-		//  Verdict
-		//    No need to wrap thrown exceptions in a BCL class
-		//
-		//  Rationale
-		//    Java code (invoked from our native runtime) will always return the default timezone and no
-		//    exceptions are documented for the Java API.
-		//
-		static string GetDefaultTimeZone ()
-		{
-			IntPtr id = RuntimeNativeMethods._monodroid_timezone_get_default_id ();
-			try {
-				return Marshal.PtrToStringAnsi (id)!;
-			} finally {
-				RuntimeNativeMethods.monodroid_free (id);
-			}
-		}
-
-		// This is invoked by
-		// mscorlib.dll!System.AndroidPlatform.GetDefaultSyncContext()
-		// DO NOT REMOVE
-		static SynchronizationContext? GetDefaultSyncContext ()
-		{
-			var looper = Android.OS.Looper.MainLooper;
-			try {
-				if (Android.OS.Looper.MyLooper() == looper)
-					return Android.App.Application.SynchronizationContext;
-			} catch (System.Exception ex) {
-				Logger.Log (LogLevel.Warn, "MonoAndroid", $"GetDefaultSyncContext caught a Java exception: {ex}");
-			}
-			return null;
-		}
-
-		// These are invoked by
-		// System.dll!System.AndroidPlatform.getifaddrs
-		// DO NOT REMOVE
-		static int GetInterfaceAddresses (out IntPtr ifap)
-		{
-			return RuntimeNativeMethods._monodroid_getifaddrs (out ifap);
-		}
-
-		// These are invoked by
-		// System.dll!System.AndroidPlatform.freeifaddrs
-		// DO NOT REMOVE
-		static void FreeInterfaceAddresses (IntPtr ifap)
-		{
-			RuntimeNativeMethods._monodroid_freeifaddrs (ifap);
-		}
-
 		static void DetectCPUAndArchitecture (out ushort builtForCPU, out ushort runningOnCPU, out bool is64bit)
 		{
 			ushort built_for_cpu = 0;
@@ -319,137 +249,11 @@ namespace Android.Runtime {
 		}
 
 		// This is invoked by
-		// System.dll!System.AndroidPlatform.GetDefaultProxy()
-		// DO NOT REMOVE
-		static IWebProxy GetDefaultProxy ()
-		{
-#if ANDROID_14
-			return new _Proxy ();
-#else
-			return null;
-#endif
-		}
-
-		// This is invoked by
 		// System.Net.Http.dll!System.Net.Http.HttpClient.cctor
 		// DO NOT REMOVE
-		[DynamicDependency (DynamicallyAccessedMemberTypes.PublicParameterlessConstructor, typeof (Xamarin.Android.Net.AndroidMessageHandler))]
-		static object GetHttpMessageHandler ()
+		static HttpMessageHandler GetHttpMessageHandler ()
 		{
-			[UnconditionalSuppressMessage ("Trimming", "IL2057", Justification = "Preserved by the MarkJavaObjects trimmer step.")]
-			[return: DynamicallyAccessedMembers (DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
-			static Type TypeGetType (string typeName) =>
-				Type.GetType (typeName, throwOnError: false);
-
-			if (httpMessageHandlerType is null) {
-				var handlerTypeName = Environment.GetEnvironmentVariable ("XA_HTTP_CLIENT_HANDLER_TYPE")?.Trim ();
-				Type? handlerType = null;
-				if (!String.IsNullOrEmpty (handlerTypeName))
-					handlerType = TypeGetType (handlerTypeName);
-
-				// We don't do any type checking or casting here to avoid dependency on System.Net.Http in Mono.Android.dll
-				if (handlerType is null || !IsAcceptableHttpMessageHandlerType (handlerType)) {
-					handlerType = GetFallbackHttpMessageHandlerType ();
-				}
-
-				httpMessageHandlerType = handlerType;
-			}
-
-			return Activator.CreateInstance (httpMessageHandlerType)
-				?? throw new InvalidOperationException ($"Could not create an instance of HTTP message handler type {httpMessageHandlerType.AssemblyQualifiedName}");
-		}
-
-		static bool IsAcceptableHttpMessageHandlerType (Type handlerType)
-		{
-			if (Extends (handlerType, "System.Net.Http.HttpClientHandler, System.Net.Http")) {
-				// It's not possible to construct HttpClientHandler in this method because it would cause infinite recursion
-				// as HttpClientHandler's constructor calls the GetHttpMessageHandler function
-				Logger.Log (LogLevel.Warn, "MonoAndroid", $"The type {handlerType.AssemblyQualifiedName} cannot be used as the native HTTP handler because it is derived from System.Net.Htt.HttpClientHandler. Use a type that extends System.Net.Http.HttpMessageHandler instead.");
-				return false;
-			}
-			if (!Extends (handlerType, "System.Net.Http.HttpMessageHandler, System.Net.Http")) {
-				Logger.Log (LogLevel.Warn, "MonoAndroid", $"The type {handlerType.AssemblyQualifiedName} set as the default HTTP handler is invalid. Use a type that extends System.Net.Http.HttpMessageHandler.");
-				return false;
-			}
-
-			return true;
-		}
-
-		static bool Extends (
-				Type handlerType,
-				[DynamicallyAccessedMembers (DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
-				string baseTypeName)
-		{
-			var baseType = Type.GetType (baseTypeName, throwOnError: false);
-			return baseType?.IsAssignableFrom (handlerType) ?? false;
-		}
-
-		[return: DynamicallyAccessedMembers (DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
-		static Type GetFallbackHttpMessageHandlerType ()
-		{
-			const string typeName = "Xamarin.Android.Net.AndroidMessageHandler, Mono.Android";
-			var handlerType = Type.GetType (typeName, throwOnError: false)
-				?? throw new InvalidOperationException ($"The {typeName} was not found. The type was probably linked away.");
-
-			Logger.Log (LogLevel.Info, "MonoAndroid", $"Using {typeName} as the native HTTP message handler.");
-			return handlerType;
-		}
-
-		class _Proxy : IWebProxy {
-			readonly ProxySelector selector = ProxySelector.Default!;
-
-			// Exception audit:
-			//
-			//  Verdict
-			//    Exception wrapping required
-			//
-			//  Rationale
-			//    Java code may throw URISyntaxException which we map to the managed UriFormatException
-			//
-			static URI CreateJavaUri (Uri destination)
-			{
-				try {
-					return new URI (destination.Scheme, destination.UserInfo, destination.Host, destination.Port, destination.AbsolutePath, destination.Query, destination.Fragment);
-				} catch (Java.Lang.Throwable ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
-					throw new UriFormatException (ex.Message, ex);
-				}
-			}
-
-			public Uri GetProxy (Uri destination)
-			{
-				IList<Java.Net.Proxy> list;
-				using (var uri = CreateJavaUri (destination))
-					list = selector.Select (uri)!;
-				if (list.Count < 1)
-					return destination;
-
-				var proxy = list [0];
-				if (proxy.Equals (Proxy.NoProxy))
-					return destination;
-
-				var address = proxy.Address () as InetSocketAddress;
-				if (address == null) // FIXME
-					return destination;
-
-				return new Uri (FormattableString.Invariant ($"http://{address.HostString}:{address.Port}/"));
-			}
-
-			public bool IsBypassed (Uri host)
-			{
-				IList<Java.Net.Proxy> list;
-				using (var uri = CreateJavaUri (host))
-					list = selector.Select (uri)!;
-
-				if (list.Count < 1)
-					return true;
-
-				return list [0].Equals (Proxy.NoProxy);
-			}
-
-			public ICredentials? Credentials {
-				get;
-				set;
-			}
+			return new Xamarin.Android.Net.AndroidMessageHandler ();
 		}
 	}
 }

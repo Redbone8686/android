@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http;
 using System.Net.Security;
@@ -28,6 +27,7 @@ namespace Xamarin.Android.Net
 
 		public ITrustManager[] ReplaceX509TrustManager (ITrustManager[]? trustManagers, HttpRequestMessage requestMessage)
 		{
+			trustManagers ??= [];
 			var originalX509TrustManager = FindX509TrustManager(trustManagers, out int originalTrustManagerIndex);
 			var trustManagerWithCallback = new TrustManager (originalX509TrustManager, requestMessage, Callback);
 			return ModifyTrustManagersArray (trustManagers, originalTrustManagerIndex, trustManagerWithCallback);
@@ -49,13 +49,15 @@ namespace Xamarin.Android.Net
 				_serverCertificateCustomValidationCallback = serverCertificateCustomValidationCallback;
 			}
 
-			public void CheckServerTrusted (JavaX509Certificate[] javaChain, string authType)
+			public void CheckServerTrusted (JavaX509Certificate[]? javaChain, string? authType)
 			{
+				ArgumentNullException.ThrowIfNull (javaChain);
+				ArgumentNullException.ThrowIfNull (authType);
 				var sslPolicyErrors = SslPolicyErrors.None;
 
 				try {
 					var trustManagerExtensions = new X509TrustManagerExtensions (_internalTrustManager);
-					trustManagerExtensions.CheckServerTrusted (javaChain, authType, _request.RequestUri.Host);
+					trustManagerExtensions.CheckServerTrusted (javaChain, authType, _request.RequestUri?.Host);
 				} catch (JavaCertificateException) {
 					sslPolicyErrors |= SslPolicyErrors.RemoteCertificateChainErrors;
 				}
@@ -78,16 +80,25 @@ namespace Xamarin.Android.Net
 				}
 			}
 
-			public void CheckClientTrusted (JavaX509Certificate[] chain, string authType)
-				=> _internalTrustManager?.CheckClientTrusted (chain, authType);
+			public void CheckClientTrusted (JavaX509Certificate[]? chain, string? authType)
+			{
+				ArgumentNullException.ThrowIfNull (chain);
+				ArgumentNullException.ThrowIfNull (authType);
+				_internalTrustManager.CheckClientTrusted (chain, authType);
+			}
 
 			public JavaX509Certificate[] GetAcceptedIssuers ()
-				=> _internalTrustManager?.GetAcceptedIssuers () ?? Array.Empty<JavaX509Certificate> ();
+				=> _internalTrustManager.GetAcceptedIssuers () ?? Array.Empty<JavaX509Certificate> ();
 
 			private bool VerifyHostname (JavaX509Certificate[] javaChain)
 			{
 				var sslSession = new FakeSSLSession (javaChain);
-				return HttpsURLConnection.DefaultHostnameVerifier.Verify(_request.RequestUri.Host, sslSession);
+				var hostnameVerifier = HttpsURLConnection.DefaultHostnameVerifier;
+				if (hostnameVerifier is null) {
+					return false;
+				}
+				
+				return hostnameVerifier.Verify(_request.RequestUri?.Host, sslSession);
 			}
 
 			private static X509Chain CreateChain (X509Certificate2[] certificates)
@@ -106,8 +117,10 @@ namespace Xamarin.Android.Net
 			private static X509Certificate2[] Convert (JavaX509Certificate[] certificates)
 			{
 				var convertedCertificates = new X509Certificate2 [certificates.Length];
-				for (int i = 0; i < certificates.Length; i++)
-					convertedCertificates [i] = new X509Certificate2 (certificates [i].GetEncoded ()!);
+				for (int i = 0; i < certificates.Length; i++) {
+					var data = certificates [i].GetEncoded () ?? throw new InvalidOperationException ("The remote certificate was not available.");
+					convertedCertificates [i] = X509CertificateLoader.LoadCertificate (data);
+				}
 
 				return convertedCertificates;
 			}
@@ -143,11 +156,11 @@ namespace Xamarin.Android.Net
 				public byte[] GetId () => throw new InvalidOperationException ();
 				public Java.Security.Cert.Certificate[] GetLocalCertificates () => throw new InvalidOperationException ();
 				public Javax.Security.Cert.X509Certificate[] GetPeerCertificateChain () => throw new InvalidOperationException ();
-				public Java.Lang.Object GetValue(string name) => throw new InvalidOperationException ();
+				public Java.Lang.Object GetValue(string? name) => throw new InvalidOperationException ();
 				public string[] GetValueNames () => throw new InvalidOperationException ();
 				public void Invalidate () => throw new InvalidOperationException ();
-				public void PutValue(string name, Java.Lang.Object value) => throw new InvalidOperationException ();
-				public void RemoveValue(string name) => throw new InvalidOperationException ();
+				public void PutValue(string? name, Java.Lang.Object? value) => throw new InvalidOperationException ();
+				public void RemoveValue(string? name) => throw new InvalidOperationException ();
 			}
 		}
 
@@ -173,25 +186,9 @@ namespace Xamarin.Android.Net
 					index = i;
 					return x509TrustManager;
 				}
-
-				// On API 21-23, the default Java trust manager is TrustManagerImpl from Conscrypt. The class implements X509TrustManager
-				// but the .NET pattern matching will fail in this case and we need to cast it explicitly.
-				int apiLevel = (int)Build.VERSION.SdkInt;
-				if (apiLevel <= 23) {
-					if (IsTrustManagerImpl (trustManager)) {
-						index = i;
-						return trustManager.JavaCast<IX509TrustManager> ();
-					}
-				}
 			}
 
 			throw new InvalidOperationException($"Could not find {nameof(IX509TrustManager)} in {nameof(ITrustManager)} array.");
-
-			static bool IsTrustManagerImpl (ITrustManager trustManager)
-			{
-				var javaClassName = JNIEnv.GetClassNameFromInstance (trustManager.Handle);
-				return javaClassName.Equals ("com/android/org/conscrypt/TrustManagerImpl", StringComparison.Ordinal);
-			}
 		}
 
 		private static ITrustManager[] ModifyTrustManagersArray (ITrustManager[] trustManagers, int originalTrustManagerIndex, IX509TrustManager replacement)

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using Microsoft.Build.Framework;
@@ -13,17 +15,17 @@ namespace Xamarin.Android.Tasks
 		bool hasWarnings;
 
 		[Required]
-		public string UnsignedApk { get; set; }
+		public string UnsignedApk { get; set; } = "";
 
 		[Required]
-		public string SignedApkDirectory { get; set; }
+		public string SignedApkDirectory { get; set; } = "";
 
 		[Required]
 		[Output]
-		public string KeyStore { get; set; }
+		public string KeyStore { get; set; } = "";
 
 		[Required]
-		public string KeyAlias { get; set; }
+		public string KeyAlias { get; set; } = "";
 
 		/// <summary>
 		/// The Password for the Key.
@@ -35,7 +37,7 @@ namespace Xamarin.Android.Tasks
 		///   file:<PasswordFile>
 		/// </summary>
 		[Required]
-		public string KeyPass { get; set; }
+		public string KeyPass { get; set; } = "";
 
 		/// <summary>
 		/// The Password for the Keystore.
@@ -47,25 +49,25 @@ namespace Xamarin.Android.Tasks
 		///   file:<PasswordFile>
 		/// </summary>
 		[Required]
-		public string StorePass { get; set; }
+		public string StorePass { get; set; } = "";
 
-		public string TimestampAuthorityUrl { get; set; }
+		public string? TimestampAuthorityUrl { get; set; }
 
-		public string TimestampAuthorityCertificateAlias { get; set; }
+		public string? TimestampAuthorityCertificateAlias { get; set; }
 
 		/// <summary>
 		/// -sigalg switch, which is SHA256withRSA by default. Previous versions of XA was md5withRSA.
 		/// </summary>
 		[Required]
-		public string SigningAlgorithm { get; set; }
+		public string SigningAlgorithm { get; set; } = "";
 
 		/// <summary>
 		/// -digestalg switch, which is SHA-256 by default. Previous versions of XA was SHA1.
 		/// </summary>
 		[Required]
-		public string DigestAlgorithm { get; set; }
+		public string DigestAlgorithm { get; set; } = "";
 
-		public string FileSuffix { get; set; }
+		public string? FileSuffix { get; set; }
 
 		protected override string DefaultErrorCode => "ANDJS0000";
 
@@ -152,7 +154,7 @@ namespace Xamarin.Android.Tasks
 
 		protected override bool ValidateParameters ()
 		{
-			if (!string.IsNullOrEmpty (KeyStore) && !File.Exists (KeyStore)) {
+			if (!KeyStore.IsNullOrEmpty () && !File.Exists (KeyStore)) {
 				Log.LogCodedError ("XA4310", Properties.Resources.XA4310, "$(AndroidSigningKeyStore)", KeyStore);
 				return false;
 			}

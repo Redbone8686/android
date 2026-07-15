@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -18,16 +20,16 @@ namespace Xamarin.Android.Tasks {
 		public override string TaskPrefix => "A2LAP";
 
 		[Required]
-		public ITaskItem Manifest { get; set; }
+		public ITaskItem Manifest { get; set; } = null!;  // NRT - guarded by [Required]
 
 		[Required]
-		public ITaskItem[] AssetDirectories { get; set; }
+		public ITaskItem[] AssetDirectories { get; set; } = [];
 
 		[Required]
-		public string PackageName { get; set; }
+		public string PackageName { get; set; } = "";
 
 		[Required]
-		public ITaskItem OutputArchive { get; set; }
+		public ITaskItem OutputArchive { get; set; } = null!;  // NRT - guarded by [Required]
 
 		protected override int GetRequiredDaemonInstances ()
 		{
@@ -44,7 +46,7 @@ namespace Xamarin.Android.Tasks {
 					zip.MoveEntry ("AndroidManifest.xml", "manifest/AndroidManifest.xml");
 					zip.Archive.DeleteEntry ("resources.pb");
 					// Fix up aapt2 not dealing with '\' in subdirectories for assets.
-					zip.FixupWindowsPathSeparators ((a, b) => Log.LogDebugMessage ($"Fixing up malformed entry `{a}` -> `{b}`"));
+					zip.FixupWindowsPathSeparators ((a, b) => LogDebugMessage ($"Fixing up malformed entry `{a}` -> `{b}`"));
 				}
 			}
 			await System.Threading.Tasks.Task.CompletedTask;
@@ -63,8 +65,13 @@ namespace Xamarin.Android.Tasks {
 			cmd.Add ("--custom-package");
 			cmd.Add (PackageName);
 			foreach (var assetDirectory in AssetDirectories) {
+				var fullPath = GetFullPath (assetDirectory.ItemSpec);
+				if (OS.IsWindows && !IsPathOnlyASCII (fullPath)) {
+					LogCodedError ("APT2265", Properties.Resources.APT2265, fullPath);
+					continue;
+				}
 				cmd.Add ("-A");
-				cmd.Add (GetFullPath (assetDirectory.ItemSpec));
+				cmd.Add (fullPath);
 			}
 			cmd.Add ($"-o");
 			cmd.Add (GetFullPath (output.ItemSpec));

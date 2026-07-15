@@ -14,8 +14,6 @@ namespace Android.Runtime {
 	// java.util.Collection allows null values
 	public class JavaCollection : Java.Lang.Object, System.Collections.ICollection {
 
-		internal const DynamicallyAccessedMemberTypes Constructors = DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors;
-
 		internal static IntPtr collection_class = JNIEnv.FindClass ("java/util/Collection");
 
 		internal static IntPtr id_add;
@@ -150,11 +148,6 @@ namespace Android.Runtime {
 		//
 		public void CopyTo (Array array, int array_index)
 		{
-			[UnconditionalSuppressMessage ("Trimming", "IL2073", Justification = "JavaCollection<T> constructors are preserved by the MarkJavaObjects trimmer step.")]
-			[return: DynamicallyAccessedMembers (Constructors)]
-			static Type GetElementType (Array array) =>
-				array.GetType ().GetElementType ();
-
 			if (array == null)
 				throw new ArgumentNullException ("array");
 			if (array_index < 0)
@@ -165,13 +158,13 @@ namespace Android.Runtime {
 			if (id_toArray == IntPtr.Zero)
 				id_toArray = JNIEnv.GetMethodID (collection_class, "toArray", "()[Ljava/lang/Object;");
 
+			var converter = new JavaConvert.ArrayElementConverter (array);
 			IntPtr lrefArray = JNIEnv.CallObjectMethod (Handle, id_toArray);
 			for (int i = 0; i < Count; i++)
 				array.SetValue (
-						JavaConvert.FromJniHandle (
+						converter.FromJniHandle (
 							JNIEnv.GetObjectArrayElement (lrefArray, i),
-							JniHandleOwnership.TransferLocalRef,
-							GetElementType (array)),
+							JniHandleOwnership.TransferLocalRef),
 						array_index + i);
 			JNIEnv.DeleteLocalRef (lrefArray);
 		}
@@ -186,7 +179,7 @@ namespace Android.Runtime {
 			if (handle == IntPtr.Zero)
 				return null;
 
-			var inst = (IJavaObject?) Java.Lang.Object.PeekObject (handle);
+			var inst = (IJavaObject?) Java.Lang.Object.PeekObject (handle, typeof (ICollection));
 			if (inst == null)
 				inst = new JavaCollection (handle, transfer);
 			else
@@ -396,17 +389,17 @@ namespace Android.Runtime {
 			return GetEnumerator ()!;
 		}
 
-		public IEnumerator<T?> GetEnumerator ()
+		public new IEnumerator<T?> GetEnumerator ()
 		{
 			return System.Linq.Extensions.ToEnumerator_Dispose<T> (Iterator());
 		}
 		
-		public static ICollection<T>? FromJniHandle (IntPtr handle, JniHandleOwnership transfer)
+		public new static ICollection<T>? FromJniHandle (IntPtr handle, JniHandleOwnership transfer)
 		{
 			if (handle == IntPtr.Zero)
 				return null;
 
-			var inst = (IJavaObject?) Java.Lang.Object.PeekObject (handle);
+			var inst = (IJavaObject?) Java.Lang.Object.PeekObject (handle, typeof (ICollection<T>));
 			if (inst == null)
 				inst = new JavaCollection<T> (handle, transfer);
 			else

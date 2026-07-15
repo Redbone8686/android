@@ -15,6 +15,44 @@ an [MSBuild ItemGroup](/visualstudio/msbuild/itemgroup-element-msbuild).
 > [!NOTE]
 > In .NET for Android there is technically no distinction between an application and a bindings project, so build items will work in both. In practice it is highly recommended to create separate application and bindings projects. Build items that are primarily used in bindings projects are documented in the [MSBuild bindings project items](../binding-libs/msbuild-reference/build-items.md) reference guide.
 
+## ApplicationArtifact
+
+`@(ApplicationArtifact)` contains the final application artifact files produced
+by package, signing, and publish targets. This item group can be used by
+custom MSBuild targets to discover APK and Android App Bundle outputs without
+recalculating the final file names. .NET for Android populates this item group
+with Android-specific artifacts, and other .NET mobile platforms can use the
+same item name for their final application artifacts.
+
+Each item includes the following metadata:
+
+- `%(PackageFormat)`: `apk` or `aab`.
+- `%(Signed)`: `true` when the package is signed.
+- `%(PackageId)`: The resolved Android package name.
+- `%(Abi)`: The Android ABI for a per-ABI APK output. This metadata is only
+  set for per-ABI APKs.
+
+MSBuild also provides well-known metadata for each item. For example,
+`%(Filename)%(Extension)` is the package file name and `%(FullPath)` is the
+full package path.
+
+Use the [`GetApplicationArtifacts`](build-targets.md#getapplicationartifacts)
+target when another target needs to query the application artifacts directly.
+Targets appended to `$(GetApplicationArtifactsDependsOn)` run after .NET for
+Android populates this item group, so they can update the existing items with
+additional metadata before `GetApplicationArtifacts` or `Publish` returns them.
+
+For example:
+
+```xml
+<Target Name="WriteApplicationArtifacts" AfterTargets="Publish">
+  <WriteLinesToFile
+      File="$(PublishDir)application-artifacts.txt"
+      Lines="@(ApplicationArtifact->'%(FullPath)|%(Filename)%(Extension)|%(PackageFormat)|%(Signed)|%(PackageId)|%(Abi)')"
+      Overwrite="true" />
+</Target>
+```
+
 ## AndroidAdditionalJavaManifest
 
 `<AndroidAdditionalJavaManifest>` is used in conjunction with
@@ -33,7 +71,7 @@ The following MSBuild metadata are required:
 - `%(JavaArtifact)`: The group and artifact id of the Java library matching the specifed POM
   file in the form `{GroupId}:{ArtifactId}`.
 - `%(JavaVersion)`: The version of the Java library matching the specified POM file.
-  
+
 See the [Java Dependency Resolution documentation](../features/maven/java-dependency-verification.md)
 for more details.
 
@@ -279,9 +317,9 @@ installing app bundles.
 
 ## AndroidMavenLibrary
 
-`<AndroidMavenLibrary>` allows a Maven artifact to be specified which will 
-automatically be downloaded and added to a .NET for Android binding project. 
-This can be useful to simplify maintenance of .NET for Android bindings for artifacts 
+`<AndroidMavenLibrary>` allows a Maven artifact to be specified which will
+automatically be downloaded and added to a .NET for Android binding project.
+This can be useful to simplify maintenance of .NET for Android bindings for artifacts
 hosted in Maven.
 
 ```xml
@@ -296,6 +334,9 @@ The following MSBuild metadata are supported:
 - `%(Version)`: Required version of the Java library referenced by `%(Include)`.
 - `%(Repository)`: Optional Maven repository to use. Supported values are `Central` (default),
    `Google`, or an `https` URL to a Maven repository.
+- `%(AllowInsecureHttp)`: Optional boolean. When `%(Repository)` is an `http://` URL, this must be
+   set to `true` to allow the insecure connection. Defaults to `false`. Using HTTPS is strongly
+   recommended for supply-chain security.
 
 The `<AndroidMavenLibrary>` item is translated to
 [`AndroidLibrary`](#androidlibrary), so any metadata supported by
@@ -335,6 +376,20 @@ used to specify the ABI that the library targets. Thus, if you add
   </AndroidNativeLibrary>
 </ItemGroup>
 ```
+
+## AndroidNativeLibraryNoJniPreload
+
+Every native library included in this item group will be exempt from the
+JNI library preload mechanism. By default, all such libraries will be loaded
+by the runtime early during application startup in order to assure their
+proper initialization. However, in some cases it might not be the desired
+behavior and this item group allows exclusion of libraries from this process
+on an individual basis.
+
+Some framework libraries which must be loaded at application startup will not
+be affected if included in this item group.
+
+See also [`$(AndroidIgnoreAllJniPreload)`](build-properties.md#androidignorealljnipreload)
 
 ## AndroidPackagingOptionsExclude
 
@@ -567,3 +622,29 @@ this build action, see
 These files are ignored unless the
 [`$(EnableProguard)`](/xamarin/android/deploy-test/building-apps/build-properties#enableproguard)
 MSBuild property is `True`.
+
+## RuntimeEnvironmentVariable
+
+`@(RuntimeEnvironmentVariable)` items allow environment variables to be
+passed to the Android application at runtime via `dotnet run -e`. For example:
+
+```sh
+dotnet run -e DOTNET_RUN_FOO=TestValue123 -e DOTNET_RUN_BAR=AnotherValue456
+```
+
+These items are automatically populated by the .NET SDK when using
+`dotnet run -e NAME=VALUE` and are included in the generated
+environment file during the build. Each item's `%(Identity)` is the
+variable name and `%(Value)` is the variable value.
+
+```xml
+<ItemGroup>
+  <RuntimeEnvironmentVariable Include="DOTNET_RUN_FOO" Value="TestValue123" />
+</ItemGroup>
+```
+
+This feature is only available for Android application projects and
+requires a .NET SDK that supports the
+`RuntimeEnvironmentVariableSupport` project capability.
+
+This build item was introduced in .NET 10.0.300 SDK and .NET 11.

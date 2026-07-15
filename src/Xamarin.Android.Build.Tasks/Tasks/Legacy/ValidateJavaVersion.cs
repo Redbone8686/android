@@ -1,3 +1,5 @@
+#nullable enable
+
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 using System;
@@ -11,9 +13,9 @@ namespace Xamarin.Android.Tasks.Legacy
 	/// </summary>
 	public class ValidateJavaVersion : Xamarin.Android.Tasks.ValidateJavaVersion
 	{
-		public string AndroidSdkBuildToolsVersion { get; set; }
+		public string? AndroidSdkBuildToolsVersion { get; set; }
 
-		public string TargetFrameworkVersion { get; set; }
+		public string? TargetFrameworkVersion { get; set; }
 
 		protected override bool ValidateJava (string javaExe, Regex versionRegex)
 		{
@@ -31,7 +33,7 @@ namespace Xamarin.Android.Tasks.Legacy
 						Log.LogCodedError ("XA0031", Properties.Resources.XA0031, requiredJavaForFrameworkVersion, $"$(TargetFrameworkVersion) {TargetFrameworkVersion}");
 					}
 					if (versionNumber < requiredJavaForBuildTools) {
-						Log.LogCodedError ("XA0032", Properties.Resources.XA0032, requiredJavaForBuildTools, AndroidSdkBuildToolsVersion);
+						Log.LogCodedError ("XA0032", Properties.Resources.XA0032, requiredJavaForBuildTools, AndroidSdkBuildToolsVersion ?? "");
 					}
 					var latest = Version.Parse (LatestSupportedJavaVersion);
 					if (versionNumber > latest) {
@@ -49,7 +51,7 @@ namespace Xamarin.Android.Tasks.Legacy
 
 		Version GetJavaVersionForFramework ()
 		{
-			var apiLevel = MonoAndroidHelper.SupportedVersions.GetApiLevelFromFrameworkVersion (TargetFrameworkVersion);
+			var apiLevel = MonoAndroidHelper.SupportedVersions.GetApiLevelFromFrameworkVersion (TargetFrameworkVersion ?? "");
 			if (apiLevel >= 31)
 				return new Version (11, 0);
 			if (apiLevel >= 24)
@@ -62,7 +64,7 @@ namespace Xamarin.Android.Tasks.Legacy
 
 		Version GetJavaVersionForBuildTools ()
 		{
-			string buildToolsVersionString = AndroidSdkBuildToolsVersion;
+			string? buildToolsVersionString = AndroidSdkBuildToolsVersion;
 			if (buildToolsVersionString != null) {
 				int index = buildToolsVersionString.IndexOf ('-');
 				if (index != -1)

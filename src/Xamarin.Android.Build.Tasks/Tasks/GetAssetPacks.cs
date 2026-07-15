@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -19,15 +21,15 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "GAP";
 
 		[Required]
-		public ITaskItem[] Assets { get; set; }
+		public ITaskItem[] Assets { get; set; } = [];
 
 		[Required]
-		public ITaskItem IntermediateDir { get; set; }
+		public ITaskItem IntermediateDir { get; set; } = null!;  // NRT - guarded by [Required]
 
 		public string[] MetadataToCopy { get; set; } = { "DeliveryType" };
 
 		[Output]
-		public ITaskItem[] AssetPacks { get; set; }
+		public ITaskItem[]? AssetPacks { get; set; }
 
 		public override bool RunTask ()
 		{
@@ -35,10 +37,10 @@ namespace Xamarin.Android.Tasks
 			Dictionary<string, List<string>> files = new Dictionary<string, List<string>> ();
 			foreach (var asset in Assets) {
 				var assetPack = asset.GetMetadata ("AssetPack");
-				if (string.IsNullOrEmpty (assetPack) || string.Compare (assetPack, "base", StringComparison.OrdinalIgnoreCase) == 0)
+				if (assetPack.IsNullOrEmpty () || string.Compare (assetPack, "base", StringComparison.OrdinalIgnoreCase) == 0)
 					continue;
 				if (!IsAssetPackNameValid (assetPack)) {
-					Log.LogCodedError ("XA0140", $"The AssetPack value defined for {asset.ItemSpec} is invalid. '{assetPack}' should match the following Regex '[A-Za-z0-9_]'.");
+					Log.LogCodedError ("XA0140", string.Format (Properties.Resources.XA0140, asset.ItemSpec, assetPack));
 					continue;
 				}
 				if (!assetPacks.TryGetValue (assetPack, out ITaskItem item)) {
@@ -48,7 +50,7 @@ namespace Xamarin.Android.Tasks
 					assetPacks[assetPack] = item;
 				}
 				foreach (var metadata in MetadataToCopy) {
-					if (string.IsNullOrEmpty (item.GetMetadata (metadata)))
+					if (item.GetMetadata (metadata).IsNullOrEmpty ())
 						item.SetMetadata (metadata, asset.GetMetadata (metadata));
 				}
 				if (!files.ContainsKey (assetPack)) {

@@ -4,10 +4,9 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Net;
-using Mono.Debugging.Client;
-using Mono.Debugging.Soft;
 using NUnit.Framework;
 using Xamarin.ProjectTools;
+using Xamarin.Android.Tasks;
 
 namespace Xamarin.Android.Build.Tests
 {
@@ -15,38 +14,26 @@ namespace Xamarin.Android.Build.Tests
 	[Category ("UsesDevice")]
 	public class MonoAndroidExportTest : DeviceTest
 	{
-#pragma warning disable 414
-		static object [] MonoAndroidExportTestCases = new object [] {
-			new object[] {
-				/* embedAssemblies */    true,
-				/* isRelease */          false,
-			},
-			new object[] {
-				/* embedAssemblies */    false,
-				/* isRelease */          false,
-			},
-			new object[] {
-				/* embedAssemblies */    true,
-				/* isRelease */          false,
-			},
-			new object[] {
-				/* embedAssemblies */    true,
-				/* isRelease */          true,
-			},
-		};
-#pragma warning restore 414
-
 		[Test]
-		[TestCaseSource (nameof (MonoAndroidExportTestCases))]
-		public void MonoAndroidExportReferencedAppStarts (bool embedAssemblies, bool isRelease)
+		public void MonoAndroidExportReferencedAppStarts (
+			[Values] bool embedAssemblies,
+			[Values] bool isRelease,
+			[Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-			AssertCommercialBuild ();
-			var proj = new XamarinAndroidApplicationProject () {
+			if (runtime == AndroidRuntime.NativeAOT) {
+				Assert.Ignore ("NativeAOT does not support Mono.Android.Export");
+			}
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			var proj = new XamarinAndroidApplicationProject (packageName: PackageUtils.MakePackageName (runtime)) {
 				IsRelease = isRelease,
 				References = {
 					new BuildItem.Reference ("Mono.Android.Export"),
 				},
 			};
+			proj.SetRuntime (runtime);
 			proj.Sources.Add (new BuildItem.Source ("ContainsExportedMethods.cs") {
 				TextContent = () => @"using System;
 using Java.Interop;
@@ -93,10 +80,10 @@ namespace UnnamedProject
 			}
 		}
 	}";
-			proj.SetAndroidSupportedAbis (DeviceAbi);
+			proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 			proj.SetProperty ("EmbedAssembliesIntoApk", embedAssemblies.ToString ());
 			proj.SetDefaultTargetDevice ();
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName))) {
+			using (var b = CreateApkBuilder ()) {
 				b.LatestTargetFrameworkVersion (out string apiLevel);
 				proj.SupportedOSPlatformVersion = "24.0";
 				proj.AndroidManifest = $@"<?xml version=""1.0"" encoding=""utf-8""?>
@@ -108,8 +95,96 @@ namespace UnnamedProject
 				Assert.True (b.Install (proj), "Project should have installed.");
 				RunProjectAndAssert (proj, b, doNotCleanupOnUpdate: true);
 				Assert.True (WaitForActivityToStart (proj.PackageName, "MainActivity",
-					Path.Combine (Root, b.ProjectDirectory, "logcat.log"), 30), "Activity should have started.");
+					Path.Combine (Root, b.ProjectDirectory, "logcat.log"), InstallAndRunTests.ActivityStartTimeoutInSeconds), "Activity should have started.");
 				string expectedLogcatOutput = "ContainsExportedMethods: constructed! Handle=";
+				Assert.IsTrue (MonitorAdbLogcat ((line) => {
+					return line.Contains (expectedLogcatOutput);
+				}, Path.Combine (Root, b.ProjectDirectory, "startup-logcat.log"), 45), $"Output did not contain {expectedLogcatOutput}!");
+				Assert.True (b.Uninstall (proj), "Project should have uninstalled.");
+			}
+		}
+
+		[Test]
+		public void ExportedMembersSurviveGarbageCollection (
+			[Values] bool isRelease,
+			[Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
+		{
+			if (runtime == AndroidRuntime.NativeAOT) {
+				Assert.Ignore ("NativeAOT does not support Mono.Android.Export");
+			}
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			var proj = new XamarinAndroidApplicationProject (packageName: PackageUtils.MakePackageName (runtime)) {
+				IsRelease = isRelease,
+				References = {
+					new BuildItem.Reference ("Mono.Android.Export"),
+				},
+			};
+			proj.SetRuntime (runtime);
+			proj.Sources.Add (new BuildItem.Source ("ContainsExportedMethods.cs") {
+				TextContent = () => @"using System;
+using Java.Interop;
+
+namespace UnnamedProject {
+	class ContainsExportedMethods : Java.Lang.Object {
+		[Export]
+		public void Exported ()
+		{
+			Console.WriteLine (""# ExportedCallbackInvoked"");
+		}
+	}
+}
+",
+			});
+			proj.MainActivity = @"using System;
+using Android.App;
+using Android.OS;
+using Android.Runtime;
+
+namespace UnnamedProject
+{
+	[Activity (Label = ""UnnamedProject"", MainLauncher = true, Icon = ""@drawable/icon"")]
+	public class MainActivity : Activity {
+		protected override void OnCreate (Bundle bundle)
+		{
+			base.OnCreate (bundle);
+
+			var foo = new ContainsExportedMethods ();
+
+			// Force GC to collect any unrooted delegates
+			for (int i = 0; i < 10; i++) {
+				GC.Collect ();
+				GC.WaitForPendingFinalizers ();
+			}
+
+			// Invoke the [Export] method through JNI (Java -> native delegate -> C#)
+			// This path crashes with SIGABRT if the delegate was garbage collected
+			IntPtr klass = JNIEnv.GetObjectClass (foo.Handle);
+			IntPtr methodId = JNIEnv.GetMethodID (klass, ""Exported"", ""()V"");
+			JNIEnv.CallVoidMethod (foo.Handle, methodId);
+
+			Console.WriteLine (""# ExportCallbackSurvivedGC"");
+		}
+	}
+}";
+			proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
+			proj.SetDefaultTargetDevice ();
+			using (var b = CreateApkBuilder ()) {
+				b.LatestTargetFrameworkVersion (out string apiLevel);
+				proj.SupportedOSPlatformVersion = "24.0";
+				proj.AndroidManifest = $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<manifest xmlns:android=""http://schemas.android.com/apk/res/android"" android:versionCode=""1"" android:versionName=""1.0"" package=""{proj.PackageName}"">
+	<uses-sdk android:targetSdkVersion=""{apiLevel}"" />
+	<application android:label=""${{PROJECT_NAME}}"">
+	</application >
+</manifest>";
+				Assert.True (b.Install (proj), "Project should have installed.");
+				RunProjectAndAssert (proj, b, doNotCleanupOnUpdate: true);
+				Assert.True (WaitForActivityToStart (proj.PackageName, "MainActivity",
+					Path.Combine (Root, b.ProjectDirectory, "logcat.log"), InstallAndRunTests.ActivityStartTimeoutInSeconds), "Activity should have started.");
+				string expectedLogcatOutput = "ExportCallbackSurvivedGC";
 				Assert.IsTrue (MonitorAdbLogcat ((line) => {
 					return line.Contains (expectedLogcatOutput);
 				}, Path.Combine (Root, b.ProjectDirectory, "startup-logcat.log"), 45), $"Output did not contain {expectedLogcatOutput}!");

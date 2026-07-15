@@ -1,15 +1,8 @@
+#nullable enable
 using System;
-using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Xml;
-using System.Xml.Linq;
-using Microsoft.Build.Utilities;
 using Microsoft.Build.Framework;
 using System.Text.RegularExpressions;
-using System.Collections.Generic;
-using Xamarin.Android.Tasks;
 using Microsoft.Android.Build.Tasks;
 
 namespace Xamarin.Android.Tasks {
@@ -17,13 +10,13 @@ namespace Xamarin.Android.Tasks {
 		public override string TaskPrefix => "CFI";
 
 		[Required]
-		public ITaskItem[] Resources { get; set; }
+		public ITaskItem[] Resources { get; set; } = [];
 
 		Regex fileNameCheck = new Regex ("[^a-zA-Z0-9_.]+", RegexOptions.Compiled);
 		Regex fileNameWithHyphenCheck = new Regex ("[^a-zA-Z0-9_.-]+", RegexOptions.Compiled);
 
 		// Source https://docs.oracle.com/javase/tutorial/java/nutsandbolts/_keywords.html
-		static string [] javaKeywords = {
+		static readonly string [] javaKeywords = {
 			"abstract",
 			"assert",
 			"boolean",
@@ -84,7 +77,7 @@ namespace Xamarin.Android.Tasks {
 		{
 			foreach (var resource in Resources) {
 				var resourceFile = resource.GetMetadata ("LogicalName").Replace ('\\', Path.DirectorySeparatorChar);
-				if (string.IsNullOrEmpty (resourceFile))
+				if (resourceFile.IsNullOrEmpty ())
 					resourceFile = resource.ItemSpec;
 				var fileName = Path.GetFileName (resourceFile);
 				var directory = Path.GetFileName (Path.GetDirectoryName (resourceFile));

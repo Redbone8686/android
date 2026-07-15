@@ -133,7 +133,7 @@ namespace Java.Interop
 		static void CheckReflection (MethodInfo mi, string name)
 		{
 			if (mi == null)
-				throw new InvalidOperationException ("Mono for Android bug: JNIEnv type contains incompatible method signatures : " + name);
+				throw new InvalidOperationException (".NET for Android bug: JNIEnv type contains incompatible method signatures : " + name);
 		}
 
 		public static DynamicInvokeTypeInfo Get (Type type, ExportParameterKind kind)
@@ -167,7 +167,7 @@ namespace Java.Interop
 			return GetCallbackPrep (type, parameter_kind, arg);
 		}
 	
-		public CodeExpression CleanupCallback (CodeExpression arg, CodeExpression orgArg)
+		public CodeItem CleanupCallback (CodeExpression arg, CodeExpression orgArg)
 		{
 			return GetCallbackCleanup (type, arg, orgArg);
 		}
@@ -190,7 +190,7 @@ namespace Java.Interop
 			// ArraySymbol:
 			//	return new string[] { String.Format ("{0}[] {1} = ({0}[]) JNIEnv.GetArray ({2}, JniHandleOwnership.DoNotTransfer, typeof ({3}));", ElementType, var_name, SymbolTable.GetNativeName (var_name), sym.FullName) };
 			case SymbolKind.Array:
-				return new CodeMethodCall (jnienv_getarray, arg, do_not_transfer_literal, new CodeLiteral (type)).CastTo (type);
+				return new CodeMethodCall (jnienv_getarray.MakeGenericMethod (type.GetElementType ()), arg).CastTo (type);
 
 			// CharSequenceSymbol:
 			//	return new string[] { String.Format ("Java.Lang.ICharSequence {0} = Java.Lang.Object.GetObject<Java.Lang.ICharSequence> ({1}, JniHandleOwnership.DoNotTransfer);", var_name, SymbolTable.GetNativeName (var_name)) };
@@ -239,7 +239,7 @@ namespace Java.Interop
 			return arg;
 		}
 		
-		public static CodeExpression GetCallbackCleanup (Type type, CodeExpression arg, CodeExpression orgArg)
+		public static CodeItem GetCallbackCleanup (Type type, CodeExpression arg, CodeExpression orgArg)
 		{
 			switch (GetKind (type)) {
 			// ArraySymbol:
@@ -249,13 +249,14 @@ namespace Java.Interop
 			//	return result;
 			case SymbolKind.Array:
 				MethodInfo copyArrayMethod;
-				switch (Type.GetTypeCode (type)) {
+				Type elementType = type.GetElementType ();
+				switch (Type.GetTypeCode (elementType)) {
 				case TypeCode.Empty:
 				case TypeCode.DBNull:
 					throw new NotSupportedException ("Only primitive types and IJavaObject is supported in array type in callback method parameter or return value");
 				case TypeCode.Object:
-					if (typeof (IJavaObject).IsAssignableFrom (type))
-						copyArrayMethod = typeof (JNIEnv).GetMethod ("CopyArray", new Type [] { typeof (IJavaObject), typeof (IntPtr) });
+					if (typeof (IJavaObject).IsAssignableFrom (elementType))
+						copyArrayMethod = typeof (JNIEnv).GetMethod ("CopyArray", new Type [] { typeof (IJavaObject[]), typeof (IntPtr) });
 					else
 						goto case TypeCode.Empty;
 					break;
@@ -263,7 +264,13 @@ namespace Java.Interop
 					copyArrayMethod = typeof (JNIEnv).GetMethod ("CopyArray", new Type [] { type, typeof (IntPtr) });
 					break;
 				}
-				return new CodeWhen (arg.IsNull, arg, new CodeMethodCall (copyArrayMethod, arg, orgArg));
+				if (copyArrayMethod == null)
+					throw new NotSupportedException ($"JNIEnv.CopyArray does not support array type '{type}'.");
+				CodeBlock copyArrayBlock = new CodeBlock ();
+				copyArrayBlock.Add (new CodeMethodCall (copyArrayMethod, arg, orgArg));
+				return new CodeIf (CodeExpression.Not (arg.IsNull)) {
+					TrueBlock = copyArrayBlock,
+				};
 			
 			// CharSequenceSymbol:
 			// 	return new string[] { String.Format ("Java.Lang.ICharSequence {0} = Java.Lang.Object.GetObject<Java.Lang.ICharSequence> ({1}, JniHandleOwnership.DoNotTransfer);", var_name, SymbolTable.GetNativeName (var_name)) };
@@ -560,62 +567,82 @@ namespace Java.Interop
 				lpgen.Add (DynamicInvokeTypeInfo.Get (p.ParameterType, GetExportKind (p)));
 			parameter_type_infos = lpgen;
 		}
-		
-		static Type GetActionFuncType (int count, bool func)
-		{
-			if (func) {
-				switch (count) {
-				case 1: return typeof (Func<>);
-				case 2: return typeof (Func<,>);
-				case 3: return typeof (Func<,,>);
-				case 4: return typeof (Func<,,,>);
-				case 5: return typeof (Func<,,,,>);
-				case 6: return typeof (Func<,,,,,>);
-				case 7: return typeof (Func<,,,,,,>);
-				case 8: return typeof (Func<,,,,,,,>);
-				case 9: return typeof (Func<,,,,,,,,>);
-				case 10: return typeof (Func<,,,,,,,,,>);
-				case 11: return typeof (Func<,,,,,,,,,,>);
-				case 12: return typeof (Func<,,,,,,,,,,,>);
-				case 13: return typeof (Func<,,,,,,,,,,,,>);
-				default: throw new NotSupportedException ();
-				}
-			} else {
-				switch (count) {
-				case 1: return typeof (Action<>);
-				case 2: return typeof (Action<,>);
-				case 3: return typeof (Action<,,>);
-				case 4: return typeof (Action<,,,>);
-				case 5: return typeof (Action<,,,,>);
-				case 6: return typeof (Action<,,,,,>);
-				case 7: return typeof (Action<,,,,,,>);
-				case 8: return typeof (Action<,,,,,,,>);
-				case 9: return typeof (Action<,,,,,,,,>);
-				case 10: return typeof (Action<,,,,,,,,,>);
-				case 11: return typeof (Action<,,,,,,,,,,>);
-				case 12: return typeof (Action<,,,,,,,,,,,>);
-				case 13: return typeof (Action<,,,,,,,,,,,,>);
-				default: throw new NotSupportedException ();
-				}
-			}
-		}
 
 		Type delegate_type;
+		static readonly Type[] DelegateCtorSignature = [typeof (object), typeof (IntPtr)];
+
 		public override Type GetDelegateType ()
 		{
 			if (delegate_type == null) {
-				var parms = new List<Type> ();
-				parms.Add (typeof (IntPtr));
-				parms.Add (typeof (IntPtr));
-				parms.AddRange (parameter_type_infos.ConvertAll<Type> (p => p.NativeType));
-				if (method.ReturnType == typeof (void))
-					delegate_type = parms.Count == 0 ? typeof (Action) : GetActionFuncType (parms.Count, false).MakeGenericType (parms.ToArray ());
-				else {
-					parms.Add (return_type_info.NativeType);
-					delegate_type = GetActionFuncType (parms.Count, true).MakeGenericType (parms.ToArray ());
+				string delegateTypeName = $"callback_delegate_{EncodeMethodSignature (parameter_type_infos, return_type_info)}";
+				lock (DynamicCallbackFactory.Module) {
+					delegate_type = DynamicCallbackFactory.Module.GetType (delegateTypeName)
+						?? CreateDelegateType (delegateTypeName);
 				}
 			}
+
 			return delegate_type;
+
+			// Based on https://github.com/dotnet/java-interop/blob/02bceb03f7c07858590d930ef507745a88200a48/src/Java.Interop.Export/Java.Interop/MarshalMemberBuilder.cs#L274-L311
+			Type CreateDelegateType (string delegateTypeName)
+			{
+				const TypeAttributes        TypeAttributes      = TypeAttributes.Class | TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.AnsiClass | TypeAttributes.AutoClass;
+				const MethodAttributes      CtorAttributes      = MethodAttributes.RTSpecialName | MethodAttributes.HideBySig | MethodAttributes.Public;
+				const MethodImplAttributes  ImplAttributes      = MethodImplAttributes.Runtime | MethodImplAttributes.Managed;
+				const MethodAttributes      InvokeAttributes    = MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.NewSlot | MethodAttributes.Virtual;
+
+				TypeBuilder typeBuilder = DynamicCallbackFactory.Module.DefineType (
+					delegateTypeName, TypeAttributes, typeof (MulticastDelegate));
+
+				Type[] parms = new Type [parameter_type_infos.Count + 2];
+				parms [0] = typeof (IntPtr);
+				parms [1] = typeof (IntPtr);
+				for (int i = 0; i < parameter_type_infos.Count; i++) {
+					parms [i + 2] = parameter_type_infos [i].NativeType;
+				}
+
+				typeBuilder.DefineConstructor (CtorAttributes, CallingConventions.Standard, DelegateCtorSignature)
+					.SetImplementationFlags (ImplAttributes);
+				typeBuilder.DefineMethod ("Invoke", InvokeAttributes, return_type_info.NativeType, parms)
+					.SetImplementationFlags (ImplAttributes);
+
+				return typeBuilder.CreateTypeInfo ();
+			}
+
+			// This "signature" is inspired by JNI signatures, but the only purpose it has is to create unique keys for
+			// different delegate types. It is not a valid JNI signature.
+			static string EncodeMethodSignature (List<DynamicInvokeTypeInfo> parameter_types, DynamicInvokeTypeInfo return_type)
+			{
+				return string.Create (
+					length: parameter_types.Count + 2,
+					state: (parameter_types, return_type),
+					static (span, state) => {
+						int pos = 0;
+						foreach (var p in state.parameter_types) {
+							span [pos++] = EncodeType (p.NativeType);
+						}
+						span [pos++] = '_';
+						span [pos++] = EncodeType (state.return_type.NativeType);
+					});
+
+				static char EncodeType (Type type)
+				{
+					if (type == typeof (bool))      return 'Z';
+					if (type == typeof (byte))      return 'B';
+					if (type == typeof (sbyte))     return 'B';
+					if (type == typeof (char))      return 'C';
+					if (type == typeof (short))     return 'S';
+					if (type == typeof (ushort))    return 's';
+					if (type == typeof (int))       return 'I';
+					if (type == typeof (uint))      return 'i';
+					if (type == typeof (long))      return 'J';
+					if (type == typeof (ulong))     return 'j';
+					if (type == typeof (float))     return 'F';
+					if (type == typeof (double))    return 'D';
+					if (type == typeof (void))      return 'V';
+					return 'L';
+				}
+			}
 		}
 		
 		static int gen_count;
@@ -691,10 +718,12 @@ namespace Java.Interop
 			//		sw.WriteLine ("{0}\t{1} {2};", indent, Parameters.HasCleanup ? RetVal.NativeType + " __ret =" : "return", RetVal.ToNative (opt, call));
 			var callArgs = new List<CodeExpression> ();
 			for (int i = 0; i < parameter_type_infos.Count; i++) {
-				if (parameter_type_infos [i].NeedsPrep)
-					callArgs.Add (parameter_type_infos [i].PrepareCallback (mgen.GetArg (i + 2)));
-				else
+				if (parameter_type_infos [i].NeedsPrep) {
+					var preparedArg = parameter_type_infos [i].PrepareCallback (mgen.GetArg (i + 2));
+					callArgs.Add (builder.DeclareVariable (method.GetParameters () [i].ParameterType, preparedArg));
+				} else {
 					callArgs.Add (parameter_type_infos [i].FromNative (mgen.GetArg (i + 2)));
+				}
 			}
 			CodeMethodCall call;
 			if (method.IsStatic)
@@ -720,7 +749,7 @@ namespace Java.Interop
 			//	sw.WriteLine ("{0}\t{1}", indent, cleanup);
 			var callbackCleanup = new List<CodeStatement> ();
 			for (int i = 0; i < parameter_type_infos.Count; i++)
-				builder.CurrentBlock.Add (parameter_type_infos [i].CleanupCallback (callArgs [i], mgen.GetArg (i)));
+				builder.CurrentBlock.Add (parameter_type_infos [i].CleanupCallback (callArgs [i], mgen.GetArg (i + 2)));
 
 			//if (!IsVoid && Parameters.HasCleanup)
 			//	sw.WriteLine ("{0}\treturn __ret;", indent);

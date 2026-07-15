@@ -1,9 +1,8 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
-using System.Text;
 
 using Java.Interop.Tools.Cecil;
 using Java.Interop.Tools.Diagnostics;
@@ -21,21 +20,19 @@ namespace Xamarin.Android.Tasks;
 
 class JCWGeneratorContext
 {
-	public bool UseMarshalMethods                    { get; }
 	public AndroidTargetArch Arch                    { get; }
 	public TypeDefinitionCache TypeDefinitionCache   { get; }
 	public XAAssemblyResolver Resolver               { get; }
 	public IList<TypeDefinition> JavaTypes           { get; }
 	public ICollection<ITaskItem> ResolvedAssemblies { get; }
 
-	public JCWGeneratorContext (AndroidTargetArch arch, XAAssemblyResolver res, ICollection<ITaskItem> resolvedAssemblies, List<TypeDefinition> javaTypesForJCW, TypeDefinitionCache tdCache, bool useMarshalMethods)
+	public JCWGeneratorContext (AndroidTargetArch arch, XAAssemblyResolver res, ICollection<ITaskItem> resolvedAssemblies, List<TypeDefinition> javaTypesForJCW, TypeDefinitionCache tdCache)
 	{
 		Arch = arch;
 		Resolver = res;
 		ResolvedAssemblies = resolvedAssemblies;
 		JavaTypes = javaTypesForJCW.AsReadOnly ();
 		TypeDefinitionCache = tdCache;
-		UseMarshalMethods = useMarshalMethods;
 	}
 }
 
@@ -44,7 +41,7 @@ class JCWGenerator
 	readonly TaskLoggingHelper log;
 	readonly JCWGeneratorContext context;
 
-	public MarshalMethodsClassifier? Classifier { get; private set; }
+	public JavaPeerStyle CodeGenerationTarget { get; set; } = JavaPeerStyle.XAJavaInterop1;
 
 	public JCWGenerator (TaskLoggingHelper log, JCWGeneratorContext context)
 	{
@@ -52,52 +49,24 @@ class JCWGenerator
 		this.context = context;
 	}
 
-	/// <summary>
-	/// Performs marshal method classification, if marshal methods are used, but does not generate any code.
-	/// If marshal methods are used, this method will set the <see cref="Classifier"/> property to a valid
-	/// classifier instance on return.  If marshal methods are disabled, this call is a no-op but it will
-	/// return <c>true</c>.
-	/// </summary>
-	public bool Classify (string androidSdkPlatform)
+	public List<string> GeneratedJavaFiles { get; } = [];
+
+	public bool Generate (string outputPath, string applicationJavaClass)
 	{
-		if (!context.UseMarshalMethods) {
-			return true;
-		}
-
-		Classifier = MakeClassifier ();
-		return ProcessTypes (
-			generateCode: false,
-			androidSdkPlatform,
-			Classifier,
-			outputPath: null,
-			applicationJavaClass: null
-		);
-	}
-
-	public bool GenerateAndClassify (string androidSdkPlatform, string outputPath, string applicationJavaClass)
-	{
-		if (context.UseMarshalMethods) {
-			Classifier = MakeClassifier ();
-		}
-
 		return ProcessTypes (
 			generateCode: true,
-			androidSdkPlatform,
-			Classifier,
 			outputPath,
 			applicationJavaClass
 		);
 	}
 
-	MarshalMethodsClassifier MakeClassifier () => new MarshalMethodsClassifier (context.Arch, context.TypeDefinitionCache, context.Resolver, log);
-
-	bool ProcessTypes (bool generateCode, string androidSdkPlatform, MarshalMethodsClassifier? classifier, string? outputPath, string? applicationJavaClass)
+	bool ProcessTypes (bool generateCode, string? outputPath, string? applicationJavaClass)
 	{
-		if (generateCode && String.IsNullOrEmpty (outputPath)) {
+		if (generateCode && outputPath.IsNullOrEmpty ()) {
 			throw new ArgumentException ("must not be null or empty", nameof (outputPath));
 		}
 
-		string monoInit = GetMonoInitSource (androidSdkPlatform);
+		string monoInit = "mono.MonoPackageManager.LoadApplication (context);";
 		bool hasExportReference = context.ResolvedAssemblies.Any (assembly => Path.GetFileName (assembly.ItemSpec) == "Mono.Android.Export.dll");
 		bool ok = true;
 
@@ -107,12 +76,12 @@ class JCWGenerator
 				continue;
 			}
 
-			CallableWrapperType generator = CreateGenerator (type, classifier, monoInit, hasExportReference, applicationJavaClass);
+			CallableWrapperType generator = CreateGenerator (type, monoInit, hasExportReference, applicationJavaClass);
 			if (!generateCode) {
 				continue;
 			}
 
-			if (!GenerateCode (generator, type, outputPath, hasExportReference, classifier)) {
+			if (!GenerateCode (generator, type, outputPath!, hasExportReference)) {  // NRT - Guarded above by IsNullOrEmpty and generateCode checks
 				ok = false;
 			}
 		}
@@ -120,25 +89,27 @@ class JCWGenerator
 		return ok;
 	}
 
-	bool GenerateCode (CallableWrapperType generator, TypeDefinition type, string outputPath, bool hasExportReference, MarshalMethodsClassifier? classifier)
+	public bool GenerateCode (CallableWrapperType generator, TypeDefinition type, string outputPath, bool hasExportReference)
 	{
 		bool ok = true;
 		using var writer = MemoryStreamPool.Shared.CreateStreamWriter ();
 		var writer_options = new CallableWrapperWriterOptions {
-			CodeGenerationTarget    = JavaPeerStyle.XAJavaInterop1
+			CodeGenerationTarget    = CodeGenerationTarget
 		};
 
 		try {
 			generator.Generate (writer, writer_options);
-			if (context.UseMarshalMethods) {
-				if (classifier.FoundDynamicallyRegisteredMethods (type)) {
-					log.LogWarning ($"Type '{type.GetAssemblyQualifiedName (context.TypeDefinitionCache)}' will register some of its Java override methods dynamically. This may adversely affect runtime performance. See preceding warnings for names of dynamically registered methods.");
-				}
-			}
 			writer.Flush ();
 
 			string path = generator.GetDestinationPath (outputPath);
-			Files.CopyIfStreamChanged (writer.BaseStream, path);
+			var changed = Files.CopyIfStreamChanged (writer.BaseStream, path);
+
+			if (changed) {
+				log.LogCodedError ("XA4253", Properties.Resources.XA4253, path);
+			} else {
+				log.LogMessage ($"Java callable wrapper code already up to date: '{path}'");
+			}
+			GeneratedJavaFiles.Add (path);
 			if (generator.HasExport && !hasExportReference) {
 				Diagnostic.Error (4210, Properties.Resources.XA4210);
 			}
@@ -154,7 +125,7 @@ class JCWGenerator
 				endLineNumber: 0,
 				endColumnNumber: 0,
 				message: xae.MessageWithoutCode,
-				messageArgs: Array.Empty<object> ()
+				messageArgs: []
 			);
 		} catch (DirectoryNotFoundException ex) {
 			ok = false;
@@ -171,54 +142,15 @@ class JCWGenerator
 		return ok;
 	}
 
-	CallableWrapperType CreateGenerator (TypeDefinition type, MarshalMethodsClassifier? classifier, string monoInit, bool hasExportReference, string? applicationJavaClass)
+	CallableWrapperType CreateGenerator (TypeDefinition type, string monoInit, bool hasExportReference, string? applicationJavaClass)
 	{
 		var reader_options = new CallableWrapperReaderOptions {
 			DefaultApplicationJavaClass         = applicationJavaClass,
 			DefaultGenerateOnCreateOverrides    = false, // this was used only when targetting Android API <= 10, which is no longer supported
 			DefaultMonoRuntimeInitialization    = monoInit,
-			MethodClassifier                    = classifier,
 		};
 
 		return CecilImporter.CreateType (type, context.TypeDefinitionCache, reader_options);
-	}
-
-	static string GetMonoInitSource (string androidSdkPlatform)
-	{
-		if (String.IsNullOrEmpty (androidSdkPlatform)) {
-			throw new ArgumentException ("must not be null or empty", nameof (androidSdkPlatform));
-		}
-
-		// Lookup the mono init section from MonoRuntimeProvider:
-		// Mono Runtime Initialization {{{
-		// }}}
-		var builder = new StringBuilder ();
-		var runtime = "Bundled";
-		var api = "";
-		if (int.TryParse (androidSdkPlatform, out int apiLevel) && apiLevel < 21) {
-			api = ".20";
-		}
-
-		var assembly = Assembly.GetExecutingAssembly ();
-		using var s = assembly.GetManifestResourceStream ($"MonoRuntimeProvider.{runtime}{api}.java");
-		using var reader = new StreamReader (s);
-		bool copy = false;
-		string? line;
-		while ((line = reader.ReadLine ()) != null) {
-			if (string.CompareOrdinal ("\t\t// Mono Runtime Initialization {{{", line) == 0) {
-				copy = true;
-			}
-
-			if (copy) {
-				builder.AppendLine (line);
-			}
-
-			if (string.CompareOrdinal ("\t\t// }}}", line) == 0) {
-				break;
-			}
-		}
-
-		return builder.ToString ();
 	}
 
 	public static void EnsureAllArchitecturesAreIdentical (TaskLoggingHelper logger, ConcurrentDictionary<AndroidTargetArch, NativeCodeGenState> javaStubStates)
@@ -254,27 +186,24 @@ class JCWGenerator
 		}
 
 		if (!typesSet.SetEquals (templateSet)) {
-			logger.LogError ($"Architecture '{state.TargetArch}' has Java types which have no counterparts in template architecture '{templateState.TargetArch}':");
-
 			typesSet.ExceptWith (templateSet);
-
-			foreach (var type in typesSet)
-				logger.LogError ($"  {type}");
+			var typesList = string.Join (", ", typesSet.OrderBy (t => t, StringComparer.Ordinal));
+			logger.LogCodedError ("XA4217", Properties.Resources.XA4217, state.TargetArch, templateState.TargetArch, typesList);
 		}
 	}
 
 	static bool CheckWhetherTypesMatch (TypeDefinition templateType, TypeDefinition type)
 	{
 		// TODO: should we compare individual methods, fields, properties?
-		return String.Compare (templateType.FullName, type.FullName, StringComparison.Ordinal) == 0;
+		return MonoAndroidHelper.StringEquals (templateType.FullName, type.FullName);
 	}
 
 	static void EnsureClassifiersMatch (TaskLoggingHelper logger, NativeCodeGenState templateState, NativeCodeGenState state)
 	{
 		logger.LogDebugMessage ($"Ensuring marshal method classifier in architecture '{state.TargetArch}' matches the one in architecture '{templateState.TargetArch}'");
 
-		MarshalMethodsClassifier? templateClassifier = templateState.Classifier;
-		MarshalMethodsClassifier? classifier = state.Classifier;
+		MarshalMethodsCollection? templateClassifier = templateState.Classifier;
+		MarshalMethodsCollection? classifier = state.Classifier;
 
 		if (templateClassifier == null) {
 			if (classifier != null) {
@@ -334,7 +263,7 @@ class JCWGenerator
 			return;
 		}
 
-		logger.LogError ($"Architecture '{state.TargetArch}' doesn't match all marshal methods in architecture '{templateState.TargetArch}'. Please see detailed MSBuild logs for more information.");
+		logger.LogCodedError ("XA4227", Properties.Resources.XA4227, state.TargetArch, templateState.TargetArch);
 	}
 
 	static bool CheckWhetherMethodsMatch (TaskLoggingHelper logger, MarshalMethodEntry templateMethod, AndroidTargetArch templateArch, MarshalMethodEntry method, AndroidTargetArch arch)
@@ -356,19 +285,19 @@ class JCWGenerator
 		}
 
 		if (!skipJniCheck) {
-			if (String.Compare (templateMethod.JniMethodName, method.JniMethodName, StringComparison.Ordinal) != 0) {
+			if (!MonoAndroidHelper.StringEquals (templateMethod.JniMethodName, method.JniMethodName)) {
 				logger.LogDebugMessage ($"Marshal method '{methodName}' for architecture '{arch}' has a different JNI method name than architecture '{templateArch}':");
 				logger.LogDebugMessage ($"  Expected: '{templateMethod.JniMethodName}', found: '{method.JniMethodName}'");
 				success = false;
 			}
 
-			if (String.Compare (templateMethod.JniMethodSignature, method.JniMethodSignature, StringComparison.Ordinal) != 0) {
+			if (!MonoAndroidHelper.StringEquals (templateMethod.JniMethodSignature, method.JniMethodSignature)) {
 				logger.LogDebugMessage ($"Marshal method '{methodName}' for architecture '{arch}' has a different JNI method signature than architecture '{templateArch}':");
 				logger.LogDebugMessage ($"  Expected: '{templateMethod.JniMethodSignature}', found: '{method.JniMethodSignature}'");
 				success = false;
 			}
 
-			if (String.Compare (templateMethod.JniTypeName, method.JniTypeName, StringComparison.Ordinal) != 0) {
+			if (!MonoAndroidHelper.StringEquals (templateMethod.JniTypeName, method.JniTypeName)) {
 				logger.LogDebugMessage ($"Marshal method '{methodName}' for architecture '{arch}' has a different JNI type name than architecture '{templateArch}':");
 				logger.LogDebugMessage ($"  Expected: '{templateMethod.JniTypeName}', found: '{method.JniTypeName}'");
 				success = false;
@@ -415,6 +344,6 @@ class JCWGenerator
 			return false;
 		}
 
-		return String.Compare (templateMethod.FullName, method.FullName, StringComparison.Ordinal) == 0;
+		return MonoAndroidHelper.StringEquals (templateMethod.FullName, method?.FullName);
 	}
 }

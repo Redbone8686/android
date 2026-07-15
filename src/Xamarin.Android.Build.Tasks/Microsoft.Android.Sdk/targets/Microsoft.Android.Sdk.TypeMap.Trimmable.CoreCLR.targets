@@ -1,0 +1,176 @@
+<!-- Trimmable typemap: CoreCLR-specific (ILLink integration). -->
+<Project>
+
+  <UsingTask TaskName="Xamarin.Android.Tasks.GenerateMissingTypeMapStubs" AssemblyFile="$(_XamarinAndroidBuildTasksAssembly)" />
+
+  <PropertyGroup>
+    <_TrimmableRuntimeProviderJavaName Condition=" '$(_TrimmableRuntimeProviderJavaName)' == '' ">mono.MonoRuntimeProvider</_TrimmableRuntimeProviderJavaName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_GenerateProguardAfterTargets Condition=" '$(_GenerateProguardAfterTargets)' == '' ">ILLink</_GenerateProguardAfterTargets>
+  </PropertyGroup>
+
+  <!-- Add TypeMap DLLs to ILLink input. ILLink natively understands TypeMapAttribute<T>. -->
+  <Target Name="_AddTrimmableTypeMapToLinker"
+      BeforeTargets="PrepareForILLink;_RunILLink"
+      DependsOnTargets="_GenerateTrimmableTypeMap">
+    <ItemGroup>
+      <ManagedAssemblyToLink Include="$(_TypeMapOutputDirectory)*.dll">
+        <DestinationSubPath>%(Filename)%(Extension)</DestinationSubPath>
+        <IsTrimmable>true</IsTrimmable>
+      </ManagedAssemblyToLink>
+    </ItemGroup>
+  </Target>
+
+  <!-- Pass TypeMap entry assembly name to ILLink -->
+  <Target Name="_ConfigureTrimmableTypeMapForLinker"
+      BeforeTargets="PrepareForILLink;_RunILLink"
+      DependsOnTargets="_GenerateTrimmableTypeMap">
+    <PropertyGroup>
+      <_ExtraTrimmerArgs>$(_ExtraTrimmerArgs) --typemap-entry-assembly "$(_TypeMapAssemblyName)"</_ExtraTrimmerArgs>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="_PrepareLinkedAssembliesForProguard"
+      AfterTargets="$(_GenerateProguardAfterTargets)"
+      Condition=" '$(PublishTrimmed)' == 'true' and '$(_ProguardProjectConfiguration)' != '' ">
+    <ItemGroup>
+      <_LinkedAssemblyForProguard Include="@(ResolvedFileToPublish)" Condition=" '%(Extension)' == '.dll' " />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_GenerateProguardConfiguration"
+      AfterTargets="_PrepareLinkedAssembliesForProguard"
+      Condition=" '$(PublishTrimmed)' == 'true' and '$(_ProguardProjectConfiguration)' != '' "
+      Inputs="@(_LinkedAssemblyForProguard)"
+      Outputs="$(_ProguardProjectConfiguration)">
+    <GenerateProguardConfiguration
+        LinkedAssemblies="@(_LinkedAssemblyForProguard)"
+        OutputFile="$(_ProguardProjectConfiguration)" />
+  </Target>
+
+  <Target Name="_ComputePostTrimTrimmableTypeMapInputs"
+      Condition=" '$(_AndroidTypeMapImplementation)' == 'trimmable' and '$(PublishTrimmed)' == 'true' and '$(_ComputeFilesToPublishForRuntimeIdentifiers)' != 'true' "
+      AfterTargets="_ResolveAssemblies">
+    <ItemGroup>
+      <_PostTrimTrimmableTypeMapInputAssemblies Remove="@(_PostTrimTrimmableTypeMapInputAssemblies)" />
+      <!-- Only the linked .dll assemblies that already exist on disk are valid inputs.
+           @(ResolvedFileToPublish) also contains non-assembly publish outputs (e.g.
+           runtimeconfig.json) whose paths do not exist when this target runs; declaring a
+           non-existent file as an Input would make MSBuild consider the target perpetually
+           out-of-date and run it on every build. -->
+      <_PostTrimTrimmableTypeMapInputAssemblies Include="@(ResolvedFileToPublish)"
+          Condition=" '%(Extension)' == '.dll' and Exists('%(FullPath)') and ('%(RuntimeIdentifier)' == '' or '$(_PostTrimTypeMapFirstRuntimeIdentifier)' == '' or '%(RuntimeIdentifier)' == '$(_PostTrimTypeMapFirstRuntimeIdentifier)') " />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_GeneratePostTrimTrimmableTypeMapJavaSources"
+      Condition=" '$(_AndroidTypeMapImplementation)' == 'trimmable' and '$(PublishTrimmed)' == 'true' and '$(_ComputeFilesToPublishForRuntimeIdentifiers)' != 'true' "
+      DependsOnTargets="_ComputePostTrimTrimmableTypeMapInputs"
+      AfterTargets="_ResolveAssemblies"
+      BeforeTargets="_GenerateJavaStubs;_CompileJava;_CompileToDalvik"
+      Inputs="@(_PostTrimTrimmableTypeMapInputAssemblies)"
+      Outputs="$(_PostTrimTrimmableTypeMapJavaStamp)">
+
+    <GenerateTrimmableTypeMap
+        ResolvedAssemblies="@(_PostTrimTrimmableTypeMapInputAssemblies)"
+        FrameworkAssemblyNames="@(ResolvedFrameworkAssemblies->'%(Filename)')"
+        OutputDirectory="$(_TypeMapOutputDirectory)"
+        JavaSourceOutputDirectory="$(_PostTrimTypeMapJavaOutputDirectory)"
+        JavaSourceInputDirectory="$(_TypeMapJavaOutputDirectory)"
+        TargetFrameworkVersion="$(TargetFrameworkVersion)"
+        PackageNamingPolicy="$(_TrimmableTypeMapPackageNamingPolicy)"
+        MaxArrayRank="$(_AndroidTrimmableTypeMapMaxArrayRank)"
+        GenerateTypeMapAssemblies="false"
+        CleanJavaSourceOutputDirectory="true"
+        AcwMapOutputFile="$(IntermediateOutputPath)acw-map.txt"
+        ApplicationRegistrationOutputFile="$(IntermediateOutputPath)android/src/net/dot/android/ApplicationRegistration.java">
+      <Output TaskParameter="GeneratedJavaFiles" ItemName="_PostTrimGeneratedJavaFiles" />
+      <Output TaskParameter="DeletedJavaFiles" ItemName="_PostTrimDeletedJavaFiles" />
+    </GenerateTrimmableTypeMap>
+
+    <!-- Mirror any JCWs the post-trim pass no longer produces (e.g. trimmed-away types) into
+         the android/src copies so a stale .java (and stale .class) is not left behind. Busting
+         the Java compile stamp forces _CompileJava to drop the corresponding class output. -->
+    <ItemGroup>
+      <_PostTrimDeletedCopiedJavaFiles Remove="@(_PostTrimDeletedCopiedJavaFiles)" />
+      <_PostTrimDeletedCopiedJavaFiles Include="@(_PostTrimDeletedJavaFiles->'$(IntermediateOutputPath)android/src/%(RelativePath)')" />
+    </ItemGroup>
+    <Delete Files="@(_PostTrimDeletedCopiedJavaFiles)" />
+    <Delete Files="$(_AndroidCompileJavaStampFile)" Condition=" '@(_PostTrimDeletedCopiedJavaFiles->Count())' != '0' " />
+
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(_PostTrimTrimmableTypeMapJavaStamp)'))" />
+    <Touch Files="$(_PostTrimTrimmableTypeMapJavaStamp)" AlwaysCreate="true" />
+
+    <ItemGroup>
+      <FileWrites Remove="@(_PostTrimDeletedJavaFiles)" />
+      <FileWrites Remove="@(_PostTrimDeletedCopiedJavaFiles)" />
+      <FileWrites Include="@(_PostTrimGeneratedJavaFiles)" />
+      <FileWrites Include="$(IntermediateOutputPath)acw-map.txt" />
+      <FileWrites Include="$(IntermediateOutputPath)android/src/net/dot/android/ApplicationRegistration.java" />
+      <FileWrites Include="$(_PostTrimTrimmableTypeMapJavaStamp)" />
+      <_PostTrimTrimmableTypeMapInputAssemblies Remove="@(_PostTrimTrimmableTypeMapInputAssemblies)" />
+      <_PostTrimGeneratedJavaFiles Remove="@(_PostTrimGeneratedJavaFiles)" />
+      <_PostTrimDeletedJavaFiles Remove="@(_PostTrimDeletedJavaFiles)" />
+      <_PostTrimDeletedCopiedJavaFiles Remove="@(_PostTrimDeletedCopiedJavaFiles)" />
+    </ItemGroup>
+  </Target>
+  <!-- After ILLink trims per-assembly _X.TypeMap assemblies whose target Java binding was unused,
+       the root _Microsoft.Android.TypeMaps assembly still carries
+       [assembly: TypeMapAssemblyTarget<T>("_X.TypeMap")] attributes pointing at the trimmed
+       assemblies. Those attributes reference the assembly by an opaque name string, so ILLink cannot
+       follow (or prune) them, and at startup CoreCLR's TypeMapping would Assembly.Load each one and
+       throw FileNotFoundException. Emit an empty stub for each trimmed typemap so Assembly.Load
+       succeeds (contributing no mappings) while leaving the linked root - and ILLink's reconciled
+       assembly references in it - untouched. Runs before the linked TypeMap DLLs are handed to the
+       publish/ReadyToRun pipeline. -->
+  <Target Name="_GenerateMissingTrimmableTypeMapStubs"
+      Condition=" '$(_AndroidTypeMapImplementation)' == 'trimmable' and '$(PublishTrimmed)' == 'true' and '$(RuntimeIdentifier)' != '' "
+      AfterTargets="ILLink"
+      BeforeTargets="_AddTrimmableTypeMapToResolvedFileToPublish;CreateReadyToRunImages">
+    <GenerateMissingTypeMapStubs
+        Condition="Exists('$(IntermediateOutputPath)linked')"
+        TypeMapDirectory="$(_TypeMapOutputDirectory)"
+        LinkedAssembliesDirectory="$(IntermediateOutputPath)linked"
+        RootTypeMapAssemblyName="$(_TypeMapAssemblyName)"
+        TargetFrameworkVersion="$(TargetFrameworkVersion)" />
+  </Target>
+
+  <!-- Add linked TypeMap DLLs to the normal publish assembly pipeline.  The SDK R2R
+       target only compiles ResolvedFileToPublish items with PostprocessAssembly=true. -->
+  <Target Name="_AddTrimmableTypeMapToResolvedFileToPublish"
+      Condition=" '$(RuntimeIdentifier)' != '' "
+      AfterTargets="ILLink"
+      BeforeTargets="CreateReadyToRunImages"
+      DependsOnTargets="_ReadGeneratedTrimmableTypeMapAssemblies">
+    <ItemGroup>
+      <_TrimmableTypeMapLinkedAssemblies Include="$(IntermediateOutputPath)linked\_*.TypeMap.dll;$(IntermediateOutputPath)linked\_Microsoft.Android.TypeMap*.dll" />
+      <_TrimmableTypeMapAssembliesToPublish Include="@(_TrimmableTypeMapLinkedAssemblies)" />
+      <_TrimmableTypeMapAssembliesToPublish Include="@(_GeneratedTypeMapAssembliesFromList)" Condition=" '@(_TrimmableTypeMapLinkedAssemblies->Count())' == '0' " />
+      <ResolvedFileToPublish Include="@(_TrimmableTypeMapAssembliesToPublish)">
+        <RelativePath>%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <PostprocessAssembly>true</PostprocessAssembly>
+        <RuntimeIdentifier>$(RuntimeIdentifier)</RuntimeIdentifier>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_UseReadyToRunTrimmableTypeMapAssembliesForPublish"
+      Condition=" '$(RuntimeIdentifier)' != '' and '$(PublishReadyToRun)' == 'true' "
+      AfterTargets="CreateReadyToRunImages">
+    <ItemGroup>
+      <_TrimmableTypeMapLinkedAssemblies Include="$(IntermediateOutputPath)linked\_*.TypeMap.dll;$(IntermediateOutputPath)linked\_Microsoft.Android.TypeMap*.dll" />
+      <_TrimmableTypeMapReadyToRunAssemblies Include="$(IntermediateOutputPath)R2R\_*.TypeMap.dll;$(IntermediateOutputPath)R2R\_Microsoft.Android.TypeMap*.dll" />
+      <ResolvedFileToPublish Remove="@(_TrimmableTypeMapLinkedAssemblies)" />
+      <ResolvedFileToPublish Remove="@(_TrimmableTypeMapReadyToRunAssemblies)" />
+      <ResolvedFileToPublish Include="@(_TrimmableTypeMapReadyToRunAssemblies)">
+        <RelativePath>%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <RuntimeIdentifier>$(RuntimeIdentifier)</RuntimeIdentifier>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+</Project>

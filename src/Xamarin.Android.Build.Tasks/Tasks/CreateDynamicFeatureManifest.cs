@@ -1,11 +1,6 @@
+#nullable enable
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Xml;
 using System.Xml.Linq;
-using Microsoft.Build.Utilities;
 using Microsoft.Build.Framework;
 
 using Xamarin.Android.Tools;
@@ -22,25 +17,25 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "CDFM";
 
 		[Required]
-		public string FeatureSplitName { get; set; }
+		public string FeatureSplitName { get; set; } = "";
 
 		[Required]
-		public string FeatureDeliveryType { get; set; }
+		public string FeatureDeliveryType { get; set; } = "";
 
 		[Required]
-		public string FeatureType { get; set; }
+		public string FeatureType { get; set; } = "";
 
 		[Required]
-		public string PackageName { get; set; }
+		public string PackageName { get; set; } = "";
 
 		[Required]
-		public ITaskItem OutputFile { get; set; }
+		public ITaskItem OutputFile { get; set; } = null!; // NRT - guarded by [Required]
 
-		public string FeatureTitleResource { get; set; }
+		public string? FeatureTitleResource { get; set; }
 
-		public string MinSdkVersion { get; set; }
+		public string? MinSdkVersion { get; set; }
 
-		public string TargetSdkVersion { get; set; }
+		public string? TargetSdkVersion { get; set; }
 
 		public bool IsFeatureSplit { get; set; } = false;
 		public bool IsInstant { get; set; } = false;
@@ -63,13 +58,13 @@ namespace Xamarin.Android.Tasks
 
 		void GenerateFeatureManifest (XDocument doc)
 		{
-			XAttribute featureTitleResource = null;
-			if (!string.IsNullOrEmpty (FeatureTitleResource))
+			XAttribute? featureTitleResource = null;
+			if (!FeatureTitleResource.IsNullOrEmpty ())
 				featureTitleResource = new XAttribute (distNS + "title", FeatureTitleResource);
 			XElement usesSdk = new XElement ("uses-sdk");
-			if (!string.IsNullOrEmpty (MinSdkVersion))
+			if (!MinSdkVersion.IsNullOrEmpty ())
 				usesSdk.Add (new XAttribute (androidNS + "minSdkVersion", MinSdkVersion));
-			if (!string.IsNullOrEmpty (MinSdkVersion))
+			if (!MinSdkVersion.IsNullOrEmpty ())
 				usesSdk.Add (new XAttribute (androidNS + "targetSdkVersion", TargetSdkVersion));
 			doc.Add (new XElement ("manifest",
 					new XAttribute (XNamespace.Xmlns + "android", androidNS),

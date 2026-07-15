@@ -10,8 +10,32 @@ using Xamarin.Android.Tools;
 
 namespace Xamarin.ProjectTools
 {
+	/// <summary>
+	/// Represents a Xamarin.Android application project for testing purposes.
+	/// This class provides a concrete implementation of an Android application project
+	/// with default templates, resources, and configuration suitable for test scenarios.
+	/// </summary>
+	/// <remarks>
+	/// This class extends <see cref="XamarinAndroidCommonProject"/> to provide a complete
+	/// Android application project setup including:
+	/// - Default MainActivity template
+	/// - Default layout resources
+	/// - Android manifest configuration
+	/// - Application-specific MSBuild properties
+	/// Used for testing build scenarios, deployment, and application-level functionality.
+	/// </remarks>
+	/// <seealso cref="XamarinAndroidCommonProject"/>
+	/// <seealso cref="XamarinAndroidLibraryProject"/>
+	/// <seealso cref="XamarinAndroidBindingProject"/>
 	public class XamarinAndroidApplicationProject : XamarinAndroidCommonProject
 	{
+		// Workaround for AndroidX, see: https://github.com/xamarin/AndroidSupportComponents/pull/239
+		protected override string ExtraDirectoryBuildTargetsContent => """
+			<PropertyGroup>
+				<VectorDrawableCheckBuildToolsVersionTaskBeforeTargets />
+			</PropertyGroup>
+		""";
+
 		const string default_strings_xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
 <resources>
 	<string name=""hello"">Hello World, Click Me!</string>
@@ -36,6 +60,17 @@ namespace Xamarin.ProjectTools
 
 		}
 
+		/// <summary>
+		/// Initializes a new instance of the XamarinAndroidApplicationProject class.
+		/// Creates a complete Android application project with default templates and configuration.
+		/// </summary>
+		/// <param name="debugConfigurationName">The name for the debug configuration (default: "Debug").</param>
+		/// <param name="releaseConfigurationName">The name for the release configuration (default: "Release").</param>
+		/// <param name="packageName">The Android package name for the application. If empty, uses the caller's method name.</param>
+		/// <remarks>
+		/// Sets up the project as an executable (OutputType = "Exe") with nullable reference types enabled,
+		/// default Android support properties, and includes standard application templates.
+		/// </remarks>
 		public XamarinAndroidApplicationProject (string debugConfigurationName = "Debug", string releaseConfigurationName = "Release", [CallerMemberName] string packageName = "")
 			: base (debugConfigurationName, releaseConfigurationName)
 		{
@@ -44,17 +79,7 @@ namespace Xamarin.ProjectTools
 			SetProperty (KnownProperties.ImplicitUsings, "enable");
 			SetProperty ("XamarinAndroidSupportSkipVerifyVersions", "True");
 			SetProperty ("_FastDeploymentDiagnosticLogging", "True");
-			SupportedOSPlatformVersion = "21.0";
-
-			// Workaround for AndroidX, see: https://github.com/xamarin/AndroidSupportComponents/pull/239
-			Imports.Add (new Import (() => "Directory.Build.targets") {
-				TextContent = () =>
-					@"<Project>
-						<PropertyGroup>
-							<VectorDrawableCheckBuildToolsVersionTaskBeforeTargets />
-						</PropertyGroup>
-					</Project>"
-			});
+			SupportedOSPlatformVersion = "24.0";
 
 			AndroidManifest = default_android_manifest;
 			LayoutMain = default_layout_main;
@@ -87,7 +112,7 @@ namespace Xamarin.ProjectTools
 		public string MinSdkVersion { get; set; }
 
 		/// <summary>
-		/// Defaults to 21.0
+		/// Defaults to 24.0
 		/// </summary>
 		public string SupportedOSPlatformVersion {
 			get { return GetProperty (KnownProperties.SupportedOSPlatformVersion); }
@@ -134,6 +159,11 @@ namespace Xamarin.ProjectTools
 			set { SetProperty (KnownProperties.UseJackAndJill, value.ToString ()); }
 		}
 
+		public string RuntimeIdentifier {
+			get { return GetProperty (KnownProperties.RuntimeIdentifier); }
+			set { SetProperty (KnownProperties.RuntimeIdentifier, value); }
+		}
+
 		public AndroidLinkMode AndroidLinkModeDebug {
 			get {
 				AndroidLinkMode m;
@@ -158,6 +188,22 @@ namespace Xamarin.ProjectTools
 		public bool EnableMarshalMethods {
 			get { return string.Equals (GetProperty (KnownProperties.AndroidEnableMarshalMethods), "True", StringComparison.OrdinalIgnoreCase); }
 			set { SetProperty (KnownProperties.AndroidEnableMarshalMethods, value.ToString ()); }
+		}
+
+		private bool PublishAot {
+			get { return string.Equals (GetProperty (KnownProperties.PublishAot), "True", StringComparison.OrdinalIgnoreCase); }
+			set { SetProperty (KnownProperties.PublishAot, value.ToString ()); }
+		}
+
+		/// <summary>
+		/// Sets properties required for $(PublishAot)=true
+		/// </summary>
+		public void SetPublishAot (bool value)
+		{
+			// Only toggle IsRelease=true when value is true
+			if (value)
+				IsRelease = true;
+			PublishAot = value;
 		}
 
 		public string AndroidManifest { get; set; }

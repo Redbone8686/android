@@ -1,3 +1,5 @@
+#nullable disable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -29,14 +31,15 @@ namespace Xamarin.Android.Tasks {
 
 	internal class ManifestDocument
 	{
-		public static XNamespace AndroidXmlNamespace = "http://schemas.android.com/apk/res/android";
-		public static XNamespace AndroidXmlToolsNamespace = "http://schemas.android.com/tools";
+		public static readonly XNamespace AndroidXmlNamespace = "http://schemas.android.com/apk/res/android";
+		public static readonly XNamespace AndroidXmlToolsNamespace = "http://schemas.android.com/tools";
 
 		const int maxVersionCode = 2100000000;
 
-		static XNamespace androidNs = AndroidXmlNamespace;
-		static XNamespace androidToolsNs = AndroidXmlToolsNamespace;
+		static readonly XNamespace androidNs = AndroidXmlNamespace;
+		static readonly XNamespace androidToolsNs = AndroidXmlToolsNamespace;
 		static readonly XName versionCodeAttributeName = androidNs + "versionCode";
+		static readonly Regex versionCodeRegex = new Regex ("\\{(?<key>([A-Za-z]+)):?[D0-9]*[\\}]", RegexOptions.Compiled);
 
 		XDocument doc;
 
@@ -88,12 +91,12 @@ namespace Xamarin.Android.Tasks {
 		public string TargetSdkVersion { get; set; }
 		public string MinSdkVersion { get; set; }
 		public bool Debug { get; set; }
-		public bool MultiDex { get; set; }
 		public bool NeedsInternet { get; set; }
 		public bool ForceExtractNativeLibs { get; set; }
 		public bool ForceDebuggable { get; set; }
 		public string VersionName { get; set; }
 		public IVersionResolver VersionResolver { get; set; } = new MonoAndroidHelperVersionResolver ();
+		public AndroidRuntime AndroidRuntime { get; set; }
 
 		string versionCode;
 
@@ -122,7 +125,7 @@ namespace Xamarin.Android.Tasks {
 		{
 			int minSdkVersion;
 			if (!int.TryParse (MinSdkVersionName, out minSdkVersion))
-				minSdkVersion = XABuildConfig.AndroidMinimumDotNetApiLevel;
+				minSdkVersion = XABuildConfig.AndroidMinimumDotNetApiLevel.Major;
 			return minSdkVersion.ToString ();
 		}
 
@@ -159,12 +162,17 @@ namespace Xamarin.Android.Tasks {
 			}
 		}
 
-		string TargetSdkVersionName => VersionResolver.GetIdFromApiLevel (TargetSdkVersion);
+		// TargetSdkVersion and MinSdkVersion are already resolved to integer API level
+		// strings (e.g. "36") by GenerateMainAndroidManifest. Don't round-trip through
+		// GetIdFromApiLevel() because when multiple API versions share the same ApiLevel
+		// (e.g. 36.0 and 36.1 both have ApiLevel=36), it can return the wrong Id
+		// (e.g. "36.1" instead of "36").
+		string TargetSdkVersionName => TargetSdkVersion;
 
 		string MinSdkVersionName =>
 			string.IsNullOrEmpty (MinSdkVersion) ?
 				TargetSdkVersionName :
-				VersionResolver.GetIdFromApiLevel (MinSdkVersion);
+				MinSdkVersion;
 
 		string ToFullyQualifiedName (string typeName)
 		{
@@ -403,9 +411,6 @@ namespace Xamarin.Android.Tasks {
 				throw new InvalidOperationException ("/manifest/@package attribute MUST contain a period ('.').");
 
 			manifest.SetAttributeValue ("package", PackageName);
-
-			if (MultiDex)
-				app.Add (CreateMonoRuntimeProvider ("mono.android.MultiDexLoader", null, initOrder: --AppInitOrder));
 
 			var providerNames = AddMonoRuntimeProviders (app);
 
@@ -672,7 +677,14 @@ namespace Xamarin.Android.Tasks {
 
 		IList<string> AddMonoRuntimeProviders (XElement app)
 		{
-			app.Add (CreateMonoRuntimeProvider ("mono.MonoRuntimeProvider", null, --AppInitOrder));
+			(string packageName, string className) = AndroidRuntime switch {
+				AndroidRuntime.MonoVM => ("mono", "MonoRuntimeProvider"),
+				AndroidRuntime.CoreCLR => ("mono", "MonoRuntimeProvider"),
+				AndroidRuntime.NativeAOT => ("net.dot.jni.nativeaot", "NativeAotRuntimeProvider"),
+				_ => throw new NotSupportedException ($"Internal error: unsupported runtime type: {AndroidRuntime}")
+			};
+
+			app.Add (CreateMonoRuntimeProvider ($"{packageName}.{className}", null, --AppInitOrder));
 
 			var providerNames = new List<string> ();
 
@@ -696,9 +708,9 @@ namespace Xamarin.Android.Tasks {
 				case "activity":
 				case "receiver":
 				case "service":
-					string providerName = "MonoRuntimeProvider_" + procs.Count;
+					string providerName = $"{className}_{procs.Count}";
 					providerNames.Add (providerName);
-					app.Add (CreateMonoRuntimeProvider ("mono." + providerName, proc.Value, --AppInitOrder));
+					app.Add (CreateMonoRuntimeProvider ($"{packageName}.{providerName}", proc.Value, --AppInitOrder));
 					break;
 				}
 			}
@@ -1082,7 +1094,7 @@ namespace Xamarin.Android.Tasks {
 		public bool ValidateVersionCode (out string error, out string errorCode)
 		{
 			int code;
-			error = errorCode = string.Empty;
+			error = errorCode = "";
 			if (!int.TryParse (VersionCode, out code)) {
 				error = string.Format (Properties.Resources.XA0003, VersionCode);
 				errorCode = "XA0003";
@@ -1098,9 +1110,8 @@ namespace Xamarin.Android.Tasks {
 
 		public void CalculateVersionCode (string currentAbi, string versionCodePattern, string versionCodeProperties)
 		{
-			var regex = new Regex ("\\{(?<key>([A-Za-z]+)):?[D0-9]*[\\}]");
 			var kvp = new Dictionary<string, int> ();
-			foreach (var item in versionCodeProperties?.Split (new char [] { ';', ':' }) ?? Array.Empty<string> ()) {
+			foreach (var item in versionCodeProperties?.Split (new char [] { ';', ':' }) ?? []) {
 				var keyValue = item.Split (new char [] { '=' });
 				int val;
 				if (!int.TryParse (keyValue [1], out val))
@@ -1120,15 +1131,15 @@ namespace Xamarin.Android.Tasks {
 					int.TryParse (GetMinimumSdk (), out var minSdk)) {
 				kvp.Add ("minSDK", minSdk);
 			}
-			var versionCode = String.Empty;
-			foreach (Match match in regex.Matches (versionCodePattern)) {
+			var versionCode = new StringBuilder ();
+			foreach (Match match in versionCodeRegex.Matches (versionCodePattern)) {
 				var key = match.Groups ["key"].Value;
 				var format = match.Value.Replace (key, "0");
 				if (!kvp.ContainsKey (key))
 					continue;
-				versionCode += string.Format (format, kvp [key]);
+				versionCode.AppendFormat (format, kvp [key]);
 			}
-			VersionCode = versionCode.TrimStart ('0');
+			VersionCode = versionCode.ToString ().TrimStart ('0');
 		}
 	}
 

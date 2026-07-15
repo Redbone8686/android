@@ -63,21 +63,18 @@ To run ALL the [MSBuild Integration Tests](#msbuild-integration-tests) *and*
 all the [MSBuild Task Unit Tests](#msbuild-task-tests), run:
 
 ```sh
-./dotnet-local.sh test bin/TestDebug/net7.0/Xamarin.Android.Build.Tests.dll --filter=Category!=DotNetIgnore
+./dotnet-local.sh test bin/TestDebug/net7.0/Xamarin.Android.Build.Tests.dll
 ```
 
 To run ALL the supported [Device Integration Tests](#devive-integration-tests), run:
 
 ```sh
-./dotnet-local.sh test bin/TestDebug/MSBuildDeviceIntegration/net7.0/MSBuildDeviceIntegration.dll --filter=Category!=DotNetIgnore
+./dotnet-local.sh test bin/TestDebug/MSBuildDeviceIntegration/net7.0/MSBuildDeviceIntegration.dll
 ```
 
 If no Android device is attached, then the emulator will be created.
 The `ADB_TARGET` environment variable can be used to explicitly specify which
 Android device should be used when running Device Integration Tests.
-
-NOTE: Not all tests work under .NET for Android yet. So we need to filter
-them on the `DotNetIgnore` category.
 
 To run a specific test you can use the `Name=Value` argument for `--filter`,
 
@@ -106,21 +103,18 @@ To run ALL the [MSBuild Integration Tests](#msbuild-integration-tests) *and*
 all the [MSBuild Task Unit Tests](#msbuild-task-tests), run:
 
 ```cmd
-dotnet-local.cmd test bin\TestDebug\net7.0\Xamarin.Android.Build.Tests.dll --filter=Category!=DotNetIgnore
+dotnet-local.cmd test bin\TestDebug\net7.0\Xamarin.Android.Build.Tests.dll
 ```
 
 To run ALL the supported [Device Integration Tests](#devive-integration-tests), runs:
 
 ```cmd
-dotnet-local.cmd test bin\TestDebug\MSBuildDeviceIntegration\net7.0\MSBuildDeviceIntegration.dll --filter=Category!=DotNetIgnore
+dotnet-local.cmd test bin\TestDebug\MSBuildDeviceIntegration\net7.0\MSBuildDeviceIntegration.dll
 ```
 
 If no Android device is attached, then the emulator will be created.
 The `ADB_TARGET` environment variable can be used to explicitly specify which
 Android device should be used when running Device Integration Tests.
-
-NOTE: Not all tests work under .NET for Android yet. So we need to filter
-them on the `DotNetIgnore` category.
 
 To run a specific test you can use the `Name=Value` argument for the `--filter`,
 
@@ -397,30 +391,31 @@ public void MyAppShouldRunAndRespondToClick ()
 ## On-Device Unit Tests
 
 There are a category of tests which run on the device itself, these test the
-runtime behaviour. These run `NUnit` tests directly on the device. Some of
-these are located in the runtime itself. We build them within the repo then run
-the tests on the device. They use a custom mobile version of `NUnit` called
-`NUnitLite`. For the most part they are the same.
+runtime behaviour. The main runtime tests use stock `NUnit` through Microsoft
+Testing Platform (MTP). We build and install them within the repo, then run
+`dotnet test` from the test project directory.
 
 These tests are generally found in:
 
   * [`tests/Mono.Android-Tests`](../../tests/Mono.Android-Tests)
-  * [`tests/EmbeddedDSOs/EmbeddedDSO`](../../tests/EmbeddedDSOs/EmbeddedDSO)
-  * [`tests/locales/Xamarin.Android.Locale-Tests`](../../tests/locales/Xamarin.Android.Locale-Tests)
+  * [`tests/CodeGen-Binding/Xamarin.Android.JcwGen-Tests`](../../tests/CodeGen-Binding/Xamarin.Android.JcwGen-Tests)
 
-These tests are run by using the `RunTestApp` target on the appropriate project
-file, which includes:
+The main runtime test project is:
 
-  * `tests/Mono.Android-Tests/Runtime-Microsoft.Android.Sdk/Mono.Android.NET-Tests.csproj`
+  * `tests/Mono.Android-Tests/Mono.Android-Tests/Mono.Android.NET-Tests.csproj`
 
 For example:
 
 ```zsh
-./dotnet-local.sh build -t:RunTestApp tests/Mono.Android-Tests/Runtime-Microsoft.Android.Sdk/Mono.Android.NET-Tests.csproj
+./dotnet-local.sh build -t:Install -c Debug tests/Mono.Android-Tests/Mono.Android-Tests/Mono.Android.NET-Tests.csproj
+(
+  cd tests/Mono.Android-Tests/Mono.Android-Tests
+  ../../../dotnet-local.sh test Mono.Android.NET-Tests.csproj --no-build -c Debug --report-trx --results-directory ../../../bin/TestDebug/TestResults
+)
 ```
 
-After running the tests, a `TestResult*.xml` file will be created in the
-top checkout directory containing the results of the tests.
+Pass the same `-c` and `-p:` properties to both commands. After running the
+tests, `.trx` result files will be created under `bin/TestDebug/TestResults`.
 
 The following is an example unit test.
 
@@ -442,7 +437,7 @@ testing the `Android.App.Application` class.
 
 ## Other Tests
 
-[`tests/CodeBehind/BuildTests/CodeBehindBuildTests.csproj`](../../tests/CodeBehind/BuildTests/CodeBehindBuildTests.csproj)
-is used to test [Layout CodeBehind](../guides/LayoutCodeBehind.md).
-If it builds, the test is considered successful, and is built via inclusion
-in the [`Xamarin.Android-Tests.sln` project](../../Xamarin.Android-Tests.sln).
+[Layout CodeBehind](../guides/LayoutCodeBehind.md) is tested by the
+`CodeBehindTests` fixture in `Xamarin.Android.Build.Tests`. The fixture copies
+and patches the template projects under `tests/CodeBehind/` for each runtime
+configuration before building them.

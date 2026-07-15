@@ -1,5 +1,8 @@
+#nullable enable
+
 using System;
 using System.CodeDom;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -11,19 +14,22 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Build.Utilities;
 using Microsoft.Android.Build.Tasks;
+using System.IO.Compression;
 
 namespace Xamarin.Android.Tasks
 {
 	class FileResourceParser : ResourceParser
 	{
-		public string JavaPlatformDirectory { get; set; }
+		public FileResourceParser (TaskLoggingHelper log) : base (log) { }
 
-		public string ResourceFlagFile { get; set; }
+		public string? JavaPlatformDirectory { get; set; }
+
+		public string? ResourceFlagFile { get; set; }
 
 		Dictionary<R, R []> arrayMapping = new Dictionary<R, R []> ();
 		Dictionary<string, List<string>> foofoo = new Dictionary<string, List<string>> ();
 		List<string> custom_types = new List<string> ();
-		XDocument publicXml;
+		XDocument? publicXml;
 
 		string[] publicXmlFiles = new string[] {
 			"public.xml",
@@ -31,8 +37,8 @@ namespace Xamarin.Android.Tasks
 			"public-staging.xml",
 		};
 
-		protected XDocument LoadPublicXml () {
-			if (string.IsNullOrEmpty (JavaPlatformDirectory))
+		protected XDocument? LoadPublicXml () {
+			if (JavaPlatformDirectory.IsNullOrEmpty ())
 				return null;
 			string publicXmlPath = Path.Combine (JavaPlatformDirectory, "data", "res", "values");
 			foreach (var file in publicXmlFiles) {
@@ -43,7 +49,7 @@ namespace Xamarin.Android.Tasks
 			return null;
 		}
 
-		public IList<R> Parse (string resourceDirectory, IEnumerable<string> additionalResourceDirectories, Dictionary<string, string> resourceMap)
+		public IList<R> Parse (string resourceDirectory, IEnumerable<string> additionalResourceDirectories, IEnumerable<string> aarLibraries, Dictionary<string, string> resourceMap)
 		{
 			Log.LogDebugMessage ($"Parsing Directory {resourceDirectory}");
 			publicXml = LoadPublicXml ();
@@ -61,7 +67,7 @@ namespace Xamarin.Android.Tasks
 					ProcessResourceFile (file, resources);
 				}
 			}
-			foreach (var dir in additionalResourceDirectories ?? Array.Empty<string>()) {
+			foreach (var dir in additionalResourceDirectories ?? []) {
 				Log.LogDebugMessage ($"Processing Directory {dir}");
 				if (Directory.Exists (dir)) {
 					foreach (var file in Directory.EnumerateFiles (dir, "*.*", SearchOption.AllDirectories)) {
@@ -69,6 +75,40 @@ namespace Xamarin.Android.Tasks
 					}
 				} else {
 					Log.LogDebugMessage ($"Skipping non-existent directory: {dir}");
+				}
+			}
+			foreach (var aar in aarLibraries ?? []) {
+				Log.LogDebugMessage ($"Processing Aar file {aar}");
+				if (!File.Exists (aar)) {
+					Log.LogDebugMessage ($"Skipping non-existent aar: {aar}");
+					continue;
+				}
+				using (var file = File.OpenRead (aar)) {
+					using var zip = new ZipArchive (file);
+					foreach (var entry in zip.Entries) {
+						if (entry.IsDirectory ())
+							continue;
+						if (!entry.FullName.StartsWith ("res"))
+							continue;
+						var ext = Path.GetExtension (entry.FullName);
+						var path = Directory.GetParent (entry.FullName).Name;
+						if (ext == ".xml" || ext == ".axml") {
+							if (string.Compare (path, "raw", StringComparison.OrdinalIgnoreCase) != 0) {
+								var ms = MemoryStreamPool.Shared.Rent ();
+								try {
+									using (var entryStream = entry.Open ()) {
+										entryStream.CopyTo (ms);
+									}
+									ms.Position = 0;
+									using XmlReader reader = XmlReader.Create (ms);
+									ProcessXmlFile (reader, resources);
+								} finally {
+									MemoryStreamPool.Shared.Return (ms);
+								}
+							}
+						}
+						ProcessResourceFile (entry.FullName, resources, processXml: false);
+					}
 				}
 			}
 
@@ -120,11 +160,11 @@ namespace Xamarin.Android.Tasks
 				foreach (R r in resources[t].OrderBy(x => x.ToSortedString(), StringComparer.Ordinal)) {
 
 					int id = Convert.ToInt32 (itemPackageId + typeid.ToString ("X2") + itemid.ToString ("X4"), fromBase: 16);
-					if (r.Type == RType.Integer && r.Id == -1) {
+					if ((r.Type != RType.Array) && r.Id == -1) {
 						itemid++;
 						r.UpdateId (id);
 					} else {
-						if (foofoo.ContainsKey (r.Identifier)) {
+						if (r.Identifier != null && foofoo.ContainsKey (r.Identifier)) {
 							var items = foofoo[r.Identifier];
 							if (r.Ids != null) {
 								// do something special cos its an array we need to replace *some* its.
@@ -172,15 +212,19 @@ namespace Xamarin.Android.Tasks
 			return -1;
 		}
 
-		void ProcessResourceFile (string file, Dictionary<string, ICollection<R>> resources)
+		void ProcessResourceFile (string file, Dictionary<string, ICollection<R>> resources, bool processXml = true)
 		{
 			Log.LogDebugMessage ($"{nameof(ProcessResourceFile)} {file}");
 			var fileName = Path.GetFileNameWithoutExtension (file);
-			if (string.IsNullOrEmpty (fileName))
+			if (fileName.IsNullOrEmpty ())
 				return;
 			if (fileName.EndsWith (".9", StringComparison.OrdinalIgnoreCase))
 				fileName = Path.GetFileNameWithoutExtension (fileName);
 			var path = Directory.GetParent (file).Name;
+			if (!processXml) {
+				CreateResourceField (path, fileName, resources);
+				return;
+			}
 			var ext = Path.GetExtension (file);
 			switch (ext) {
 				case ".xml":
@@ -232,8 +276,7 @@ namespace Xamarin.Android.Tasks
 		void ProcessStyleable (XmlReader reader, Dictionary<string, ICollection<R>> resources)
 		{
 			Log.LogDebugMessage ($"{nameof(ProcessStyleable)}");
-			string topName = null;
-			int fieldCount = 0;
+			string? topName = null;
 			List<R> fields = new List<R> ();
 			List<string> attribs = new List<string> ();
 			if (reader.HasAttributes) {
@@ -245,8 +288,8 @@ namespace Xamarin.Android.Tasks
 			while (reader.Read ()) {
 				if (reader.NodeType == XmlNodeType.Whitespace || reader.NodeType == XmlNodeType.Comment)
 					continue;
-				string name = null;
-				if (string.IsNullOrEmpty (topName)) {
+				string? name = null;
+				if (topName.IsNullOrEmpty ()) {
 					if (reader.HasAttributes) {
 						while (reader.MoveToNextAttribute ()) {
 							if (reader.Name.Replace ("android:", "") == "name")
@@ -264,7 +307,9 @@ namespace Xamarin.Android.Tasks
 				}
 				reader.MoveToElement ();
 				if (reader.LocalName == "attr") {
-					attribs.Add (name);
+					if (name != null) {
+						attribs.Add (name);
+					}
 				}
 			}
 			var field = new R () {
@@ -273,7 +318,9 @@ namespace Xamarin.Android.Tasks
 				Type = RType.Array,
 			};
 			if (!arrayMapping.ContainsKey (field)) {
-				foofoo.Add (field.Identifier, new List<string> ());
+				if (field.Identifier != null) {
+					foofoo.Add (field.Identifier, new List<string> ());
+				}
 				attribs.Sort (StringComparer.OrdinalIgnoreCase);
 				for (int i = 0; i < attribs.Count; i++) {
 					string name = attribs [i];
@@ -299,8 +346,6 @@ namespace Xamarin.Android.Tasks
 						fields.Add (r);
 					}
 				}
-				if (field.Type != RType.Array)
-					return;
 				arrayMapping.Add (field, fields.ToArray ());
 
 				field.Ids = new int [attribs.Count];
@@ -309,11 +354,14 @@ namespace Xamarin.Android.Tasks
 				resources [field.ResourceTypeName].Add (field);
 				int id = 0;
 				foreach (string r in attribs) {
-					foofoo[field.Identifier].Add (r.Replace (":", "_"));
+					if (field.Identifier != null) {
+						foofoo[field.Identifier].Add (r.Replace (":", "_"));
+					}
 					resources [field.ResourceTypeName].Add (new R () {
 						ResourceTypeName = field.ResourceTypeName,
 						Identifier = $"{field.Identifier}_{r.Replace (":", "_")}",
 						Id = id++,
+						Type = RType.Integer_Styleable,
 					});
 				}
 			}
@@ -321,71 +369,80 @@ namespace Xamarin.Android.Tasks
 
 		void ProcessXmlFile (string file, Dictionary<string, ICollection<R>> resources)
 		{
-			Log.LogDebugMessage ($"{nameof(ProcessXmlFile)}");
 			using (var reader = XmlReader.Create (file)) {
-				while (reader.Read ()) {
-					if (reader.NodeType == XmlNodeType.Whitespace || reader.NodeType == XmlNodeType.Comment)
-						continue;
-					if (reader.IsStartElement ()) {
-						var elementName = reader.Name;
-						var elementNS = reader.NamespaceURI;
-						if (!string.IsNullOrEmpty (elementNS)) {
-							if (elementNS != "http://schemas.android.com/apk/res/android")
-								continue;
-						}
-						if (elementName == "declare-styleable" || elementName == "configVarying" || elementName == "add-resource") {
-							ProcessStyleable (reader.ReadSubtree (), resources);
-							continue;
-						}
-						if (reader.HasAttributes) {
-							string name = null;
-							string type = null;
-							string id = null;
-							string custom_id = null;
-							while (reader.MoveToNextAttribute ()) {
-								if (reader.LocalName == "name")
-									name = reader.Value;
-								if (reader.LocalName == "type")
-									type = reader.Value;
-								if (reader.LocalName == "id") {
-									string[] values = reader.Value.Split ('/');
-									if (values.Length != 2) {
-										id = reader.Value.Replace ("@+id/", "").Replace ("@id/", "");
-									} else {
-										if (values [0] != "@+id" && values [0] != "@id" && !values [0].Contains ("android:")) {
-											custom_id = values [0].Replace ("@", "").Replace ("+", "");
-										}
-										id = values [1];
-									}
+				ProcessXmlFile (reader, resources);
+			}
+		}
 
+		void ProcessXmlFile (XmlReader reader, Dictionary<string, ICollection<R>> resources)
+		{
+			Log.LogDebugMessage ($"{nameof(ProcessXmlFile)}");
+			while (reader.Read ()) {
+				if (reader.NodeType == XmlNodeType.Whitespace || reader.NodeType == XmlNodeType.Comment)
+					continue;
+				if (reader.IsStartElement ()) {
+					var elementName = reader.Name;
+					var elementNS = reader.NamespaceURI;
+					if (!elementNS.IsNullOrEmpty ()) {
+						if (elementNS != "http://schemas.android.com/apk/res/android")
+							continue;
+					}
+					if (elementName == "declare-styleable" || elementName == "configVarying" || elementName == "add-resource") {
+						try {
+							ProcessStyleable (reader.ReadSubtree (), resources);
+						} catch (Exception ex) {
+							Log.LogErrorFromException (ex);
+						}
+						continue;
+					}
+					if (reader.HasAttributes) {
+						string? name = null;
+						string? type = null;
+						string? id = null;
+						string? custom_id = null;
+						while (reader.MoveToNextAttribute ()) {
+							if (reader.LocalName == "name")
+								name = reader.Value;
+							if (reader.LocalName == "type")
+								type = reader.Value;
+							if (reader.LocalName == "id") {
+								string[] values = reader.Value.Split ('/');
+								if (values.Length != 2) {
+									id = reader.Value.Replace ("@+id/", "").Replace ("@id/", "");
+								} else {
+									if (values [0] != "@+id" && values [0] != "@id" && !values [0].Contains ("android:")) {
+										custom_id = values [0].Replace ("@", "").Replace ("+", "");
+									}
+									id = values [1];
 								}
-								if (reader.LocalName == "inflatedId") {
-									string inflateId = reader.Value.Replace ("@+id/", "").Replace ("@id/", "");
-									var r = new R () {
-										ResourceTypeName = "id",
-										Identifier = inflateId,
-										Id = -1,
-									};
-									Log.LogDebugMessage ($"Adding 1 {r}");
-									resources[r.ResourceTypeName].Add (r);
-								}
+
 							}
-							if (name?.Contains ("android:") ?? false)
-								continue;
-							if (id?.Contains ("android:") ?? false)
-								continue;
-							// Move the reader back to the element node.
-							reader.MoveToElement ();
-							if (!string.IsNullOrEmpty (name)) {
-								CreateResourceField (type ?? elementName, name, resources);
+							if (reader.LocalName == "inflatedId") {
+								string inflateId = reader.Value.Replace ("@+id/", "").Replace ("@id/", "");
+								var r = new R () {
+									ResourceTypeName = "id",
+									Identifier = inflateId,
+									Id = -1,
+								};
+								Log.LogDebugMessage ($"Adding 1 {r}");
+								resources[r.ResourceTypeName].Add (r);
 							}
-							if (!string.IsNullOrEmpty (custom_id) && !resources.ContainsKey (custom_id)) {
-								resources.Add (custom_id, new SortedSet<R> (new RComparer ()));
-								custom_types.Add (custom_id);
-							}
-							if (!string.IsNullOrEmpty (id)) {
-								CreateResourceField (custom_id ?? "id", id.Replace ("-", "_").Replace (".", "_"), resources);
-							}
+						}
+						if (name?.Contains ("android:") ?? false)
+							continue;
+						if (id?.Contains ("android:") ?? false)
+							continue;
+						// Move the reader back to the element node.
+						reader.MoveToElement ();
+						if (!name.IsNullOrEmpty ()) {
+							CreateResourceField (type ?? elementName, name, resources);
+						}
+						if (!custom_id.IsNullOrEmpty () && !resources.ContainsKey (custom_id)) {
+							resources.Add (custom_id, new SortedSet<R> (new RComparer ()));
+							custom_types.Add (custom_id);
+						}
+						if (!id.IsNullOrEmpty ()) {
+							CreateResourceField (custom_id ?? "id", id.Replace ("-", "_").Replace (".", "_"), resources);
 						}
 					}
 				}

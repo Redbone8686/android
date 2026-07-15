@@ -1,45 +1,30 @@
+#nullable disable
+
 using Mono.Cecil;
 using Mono.Linker;
 using Mono.Linker.Steps;
 using System;
-using System.Linq;
 using Xamarin.Android.Tasks;
 using System.Collections.Generic;
 using System.Globalization;
 using Mono.Cecil.Cil;
 using System.Text.RegularExpressions;
 using Mono.Collections.Generic;
-#if ILLINK
-using Microsoft.Android.Sdk.ILLink;
-#endif
 
 
 namespace MonoDroid.Tuner  {
 	public abstract class LinkDesignerBase : BaseStep
 	{
-#if ILLINK
 		protected IMetadataResolver Cache => Context;
-#else   // !ILLINK
-		public LinkDesignerBase (IMetadataResolver cache)
-		{
-			Cache = cache;
-		}
 
-		protected IMetadataResolver Cache { get; private set; }
-#endif  // !ILLINK
-
-		public virtual void LogMessage (string message)
+		public override void LogMessage (string message)
 		{
 			Context.LogMessage (message);
 		}
 
-		public virtual void LogError (int code, string error)
+		public override void LogError (int code, string error)
 		{
-#if ILLINK
-			Context.LogMessage (MessageContainer.CreateCustomErrorMessage (error, code, origin: new MessageOrigin ()));
-#else   // !ILLINK
-			Console.Error.WriteLine ($"error XA{code}: {error}");
-#endif  // !ILLINK
+			Context.LogError ($"XA{code}", error);
 		}
 
 		public virtual AssemblyDefinition Resolve (AssemblyNameReference name)
@@ -63,7 +48,7 @@ namespace MonoDroid.Tuner  {
 						{
 							if (p.Name == "IsApplication" && (bool)p.Argument.Value == (mainApplication ? mainApplication : (bool)p.Argument.Value))
 							{
-								designerFullName = attribute.ConstructorArguments[0].Value.ToString ();
+								designerFullName = ResourceDesignerImportGenerator.GetTypeFullNameFromAssemblyQualifiedName (attribute.ConstructorArguments[0].Value.ToString ());
 								break;
 							}
 						}

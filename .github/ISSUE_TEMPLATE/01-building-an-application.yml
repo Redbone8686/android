@@ -1,7 +1,6 @@
 name: 🛠 Building an Application
 description: Issues trying to compile or package your application.
 labels: ["Area: App+Library Build", "needs-triage"]
-assignees: ["jonathanpeppers", "dellis1972"]
 body:
   - type: markdown
     attributes:
@@ -16,6 +15,8 @@ body:
       options:
       - net8.0-android
       - net9.0-android
+      - net10.0-android
+      - net11.0-android (Preview)
       - Other
     validations:
       required: true

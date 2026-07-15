@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace Xamarin.ProjectTools
 {
@@ -13,6 +15,7 @@ namespace Xamarin.ProjectTools
 		public string ProcessLogFile { get; set; }
 		public string Verbosity { get; set; } = "normal";
 		public string AndroidSdkPath { get; set; } = AndroidSdkResolver.GetAndroidSdkPath ();
+		public string AndroidNdkPath { get; set; } = AndroidSdkResolver.GetAndroidNdkPath ();
 		public string JavaSdkPath { get; set; } = AndroidSdkResolver.GetJavaSdkPath ();
 		public string ProjectDirectory { get; set; }
 
@@ -22,6 +25,45 @@ namespace Xamarin.ProjectTools
 		{
 			this.projectOrSolution = projectOrSolution;
 			ProjectDirectory = Path.GetDirectoryName (projectOrSolution);
+		}
+
+		/// <summary>
+		/// Creates and starts a `dotnet` process with the specified arguments.
+		/// </summary>
+		/// <param name="args">command arguments</param>
+		/// <param name="workingDirectory">optional working directory</param>
+		/// <returns>A started Process instance. Caller is responsible for disposing.</returns>
+		protected Process ExecuteProcess (string [] args, string workingDirectory = null)
+		{
+			var p = new Process ();
+			p.StartInfo.FileName = Path.Combine (TestEnvironment.DotNetPreviewDirectory, "dotnet");
+			p.StartInfo.Arguments = string.Join (" ", args);
+			p.StartInfo.CreateNoWindow = true;
+			p.StartInfo.UseShellExecute = false;
+			p.StartInfo.RedirectStandardOutput = true;
+			p.StartInfo.RedirectStandardError = true;
+			if (!string.IsNullOrEmpty (workingDirectory)) {
+				p.StartInfo.WorkingDirectory = workingDirectory;
+			}
+			p.StartInfo.SetEnvironmentVariable ("DOTNET_MULTILEVEL_LOOKUP", "0");
+			// Workaround for dotnet/msbuild#13175: the MSBuild app host needs DOTNET_HOST_PATH
+			// to bootstrap the .NET runtime when spawning TaskHostFactory task hosts (e.g. ILLink).
+			// Without this, builds fail with MSB4221 when using a locally-installed SDK.
+			p.StartInfo.SetEnvironmentVariable ("DOTNET_HOST_PATH", p.StartInfo.FileName);
+			p.StartInfo.SetEnvironmentVariable ("PATH", TestEnvironment.DotNetPreviewDirectory + Path.PathSeparator + Environment.GetEnvironmentVariable ("PATH"));
+			if (TestEnvironment.UseLocalBuildOutput) {
+				p.StartInfo.SetEnvironmentVariable ("DOTNETSDK_WORKLOAD_MANIFEST_ROOTS", TestEnvironment.WorkloadManifestOverridePath);
+				p.StartInfo.SetEnvironmentVariable ("DOTNETSDK_WORKLOAD_PACK_ROOTS", TestEnvironment.WorkloadPackOverridePath);
+			}
+			if (Directory.Exists (AndroidSdkPath)) {
+				p.StartInfo.SetEnvironmentVariable ("AndroidSdkDirectory", AndroidSdkPath.TrimEnd ('\\'));
+			}
+			if (Directory.Exists (JavaSdkPath)) {
+				p.StartInfo.SetEnvironmentVariable ("JavaSdkDirectory", JavaSdkPath.TrimEnd ('\\'));
+			}
+
+			p.Start ();
+			return p;
 		}
 
 		/// <summary>
@@ -36,36 +78,23 @@ namespace Xamarin.ProjectTools
 				ProcessLogFile = Path.Combine (ProjectDirectory, $"dotnet{DateTime.Now.ToString ("yyyyMMddHHmmssff")}-process.log");
 			}
 
+			var locker = new Lock ();
 			var procOutput = new StringBuilder ();
 			bool succeeded;
 
-			using (var p = new Process ()) {
-				p.StartInfo.FileName = Path.Combine (TestEnvironment.DotNetPreviewDirectory, "dotnet");
-				p.StartInfo.Arguments = string.Join (" ", args);
-				p.StartInfo.CreateNoWindow = true;
-				p.StartInfo.UseShellExecute = false;
-				p.StartInfo.RedirectStandardOutput = true;
-				p.StartInfo.RedirectStandardError = true;
-				p.StartInfo.SetEnvironmentVariable ("DOTNET_MULTILEVEL_LOOKUP", "0");
-				p.StartInfo.SetEnvironmentVariable ("PATH", TestEnvironment.DotNetPreviewDirectory + Path.PathSeparator + Environment.GetEnvironmentVariable ("PATH"));
-				if (TestEnvironment.UseLocalBuildOutput) {
-					p.StartInfo.SetEnvironmentVariable ("DOTNETSDK_WORKLOAD_MANIFEST_ROOTS", TestEnvironment.WorkloadManifestOverridePath);
-					p.StartInfo.SetEnvironmentVariable ("DOTNETSDK_WORKLOAD_PACK_ROOTS", TestEnvironment.WorkloadPackOverridePath);
-				}
-
+			using (var p = ExecuteProcess (args)) {
 				p.ErrorDataReceived += (sender, e) => {
-					if (e.Data != null) {
-						procOutput.AppendLine (e.Data);
-					}
+					if (e.Data != null)
+						lock (locker)
+							procOutput.AppendLine (e.Data);
 				};
-				p.ErrorDataReceived += (sender, e) => {
-					if (e.Data != null) {
-						procOutput.AppendLine (e.Data);
-					}
+				p.OutputDataReceived += (sender, e) => {
+					if (e.Data != null)
+						lock (locker)
+							procOutput.AppendLine (e.Data);
 				};
 
 				procOutput.AppendLine ($"Running: {p.StartInfo.FileName} {p.StartInfo.Arguments}");
-				p.Start ();
 				p.BeginOutputReadLine ();
 				p.BeginErrorReadLine ();
 				bool completed = p.WaitForExit ((int) new TimeSpan (0, 15, 0).TotalMilliseconds);
@@ -87,40 +116,113 @@ namespace Xamarin.ProjectTools
 			return Execute (arguments.ToArray ());
 		}
 
-		public bool Restore (string target = null, string runtimeIdentifier = null, string [] parameters = null)
+		public bool Restore (string target = null, string runtimeIdentifier = null, string [] parameters = null, string [] msbuildArguments = null)
 		{
-			var arguments = GetDefaultCommandLineArgs ("restore", target, runtimeIdentifier, parameters);
+			var arguments = GetDefaultCommandLineArgs ("restore", target, runtimeIdentifier, parameters, msbuildArguments);
 			return Execute (arguments.ToArray ());
 		}
 
-		public bool Build (string target = null, string runtimeIdentifier = null, string [] parameters = null)
+		public bool Build (string target = null, string runtimeIdentifier = null, string [] parameters = null, string [] msbuildArguments = null)
 		{
-			var arguments = GetDefaultCommandLineArgs ("build", target, runtimeIdentifier, parameters);
+			var arguments = GetDefaultCommandLineArgs ("build", target, runtimeIdentifier, parameters, msbuildArguments);
 			return Execute (arguments.ToArray ());
 		}
 
-		public bool Pack (string target = null, string runtimeIdentifier = null, string [] parameters = null)
+		public bool Pack (string target = null, string runtimeIdentifier = null, string [] parameters = null, string [] msbuildArguments = null)
 		{
-			var arguments = GetDefaultCommandLineArgs ("pack", target, runtimeIdentifier, parameters);
+			var arguments = GetDefaultCommandLineArgs ("pack", target, runtimeIdentifier, parameters, msbuildArguments);
 			return Execute (arguments.ToArray ());
 		}
 
-		public bool Publish (string target = null, string runtimeIdentifier = null, string [] parameters = null)
+		public bool Publish (string target = null, string runtimeIdentifier = null, string [] parameters = null, string [] msbuildArguments = null)
 		{
-			var arguments = GetDefaultCommandLineArgs ("publish", target, runtimeIdentifier, parameters);
+			var arguments = GetDefaultCommandLineArgs ("publish", target, runtimeIdentifier, parameters, msbuildArguments);
 			return Execute (arguments.ToArray ());
 		}
 
-		public bool Run ()
+		public bool Run (bool waitForExit = false, bool noBuild = true, string [] parameters = null)
+		{
+			string binlog = Path.Combine (Path.GetDirectoryName (projectOrSolution), "run.binlog");
+			var arguments = new List<string> {
+				"run",
+				"--project", $"\"{projectOrSolution}\"",
+			};
+			if (noBuild) {
+				arguments.Add ("--no-build");
+			}
+			arguments.Add ($"/bl:\"{binlog}\"");
+			arguments.Add ($"/p:WaitForExit={waitForExit.ToString (CultureInfo.InvariantCulture)}");
+			if (parameters != null) {
+				arguments.AddRange (parameters);
+			}
+			return Execute (arguments.ToArray ());
+		}
+
+		/// <summary>
+		/// Starts `dotnet run` and returns a running Process that can be monitored and killed.
+		/// </summary>
+		/// <param name="waitForExit">Whether to use Microsoft.Android.Run tool which waits for app exit and streams logcat.</param>
+		/// <param name="parameters">Additional arguments to pass to `dotnet run`.</param>
+		/// <returns>A running Process instance. Caller is responsible for disposing.</returns>
+		public Process StartRun (bool waitForExit = true, string [] parameters = null)
 		{
 			string binlog = Path.Combine (Path.GetDirectoryName (projectOrSolution), "run.binlog");
 			var arguments = new List<string> {
 				"run",
 				"--project", $"\"{projectOrSolution}\"",
 				"--no-build",
-				$"/bl:\"{binlog}\""
+				$"/bl:\"{binlog}\"",
+				$"/p:WaitForExit={waitForExit.ToString (CultureInfo.InvariantCulture)}"
 			};
-			return Execute (arguments.ToArray ());
+			if (parameters != null) {
+				arguments.AddRange (parameters);
+			}
+
+			return ExecuteProcess (arguments.ToArray ());
+		}
+
+		/// <summary>
+		/// Starts `dotnet test` and returns a running Process that can be monitored and killed.
+		/// </summary>
+		/// <param name="parameters">Additional arguments to pass to `dotnet test`.</param>
+		/// <returns>A running Process instance. Caller is responsible for disposing.</returns>
+		public Process StartTest (string [] parameters = null)
+		{
+			string binlog = Path.Combine (Path.GetDirectoryName (projectOrSolution), "test.binlog");
+			var arguments = new List<string> {
+				"test",
+				$"\"{projectOrSolution}\"",
+				"--no-build",
+				$"/bl:\"{binlog}\"",
+			};
+			if (parameters != null) {
+				arguments.AddRange (parameters);
+			}
+
+			return ExecuteProcess (arguments.ToArray (), workingDirectory: ProjectDirectory);
+		}
+
+		/// <summary>
+		/// Starts `dotnet watch` and returns a running Process that can be monitored and killed.
+		/// This is used for hot reload testing where dotnet-watch builds, deploys, and watches for file changes.
+		/// </summary>
+		/// <param name="parameters">Additional arguments to pass to `dotnet watch`.</param>
+		/// <returns>A running Process instance. Caller is responsible for disposing.</returns>
+		public Process StartWatch (string [] parameters = null)
+		{
+			var arguments = new List<string> {
+				"watch",
+				"--project", $"\"{projectOrSolution}\"",
+				"--non-interactive",
+				"--verbose",
+				"--verbosity", "diag",
+				"-bl",
+			};
+			if (parameters != null) {
+				arguments.AddRange (parameters);
+			}
+
+			return ExecuteProcess (arguments.ToArray (), workingDirectory: ProjectDirectory);
 		}
 
 		public IEnumerable<string> LastBuildOutput {
@@ -132,9 +234,9 @@ namespace Xamarin.ProjectTools
 			}
 		}
 
-		public bool IsTargetSkipped (string target) => BuildOutput.IsTargetSkipped (LastBuildOutput, target);
+		public bool IsTargetSkipped (string target, bool defaultIfNotUsed = false) => BuildOutput.IsTargetSkipped (LastBuildOutput, target, defaultIfNotUsed);
 
-		List<string> GetDefaultCommandLineArgs (string verb, string target = null, string runtimeIdentifier = null, string [] parameters = null)
+		List<string> GetDefaultCommandLineArgs (string verb, string target = null, string runtimeIdentifier = null, string [] parameters = null, string [] msbuildArguments = null)
 		{
 			string testDir = string.IsNullOrEmpty (ProjectDirectory) ? Path.GetDirectoryName (projectOrSolution) : ProjectDirectory;
 			if (string.IsNullOrEmpty (BuildLogFile))
@@ -156,6 +258,9 @@ namespace Xamarin.ProjectTools
 			if (Directory.Exists (AndroidSdkPath)) {
 				arguments.Add ($"/p:AndroidSdkDirectory=\"{AndroidSdkPath.TrimEnd('\\')}\"");
 			}
+			if (Directory.Exists (AndroidNdkPath)) {
+				arguments.Add ($"/p:AndroidNdkDirectory=\"{AndroidNdkPath.TrimEnd('\\')}\"");
+			}
 			if (Directory.Exists (JavaSdkPath)) {
 				arguments.Add ($"/p:JavaSdkDirectory=\"{JavaSdkPath.TrimEnd ('\\')}\"");
 			}
@@ -163,6 +268,9 @@ namespace Xamarin.ProjectTools
 				foreach (var parameter in parameters) {
 					arguments.Add ($"/p:{parameter}");
 				}
+			}
+			if (msbuildArguments != null) {
+				arguments.AddRange (msbuildArguments);
 			}
 			if (!string.IsNullOrEmpty (runtimeIdentifier)) {
 				// NOTE: that this one has to be -r, /r does not appear to work

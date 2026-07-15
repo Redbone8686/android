@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,13 +13,13 @@ namespace Xamarin.Android.Tasks {
 		public override string TaskPrefix => "ACM";
 
 		[Required]
-		public ITaskItem[] Inputs { get; set; }
+		public ITaskItem[] Inputs { get; set; } = [];
 
 		[Required]
-		public ITaskItem[] MetaDataItems { get; set; }
+		public ITaskItem[] MetaDataItems { get; set; } = [];
 
 		[Output]
-		public ITaskItem[] Output { get; set; }
+		public ITaskItem[]? Output { get; set; }
 
 		public override bool RunTask ()
 		{

@@ -1,4 +1,6 @@
-﻿// Copyright (C) 2011 Xamarin, Inc. All rights reserved.
+// Copyright (C) 2011 Xamarin, Inc. All rights reserved.
+
+#nullable enable
 
 using System;
 using System.Linq;
@@ -18,14 +20,16 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "JVC";
 
 		[Required]
-		public string ClassesOutputDirectory { get; set; }
+		public string ClassesOutputDirectory { get; set; } = "";
 
-		public string ClassesZip { get; set; }
+		public string? ClassesZip { get; set; }
 
-		public string JavaPlatformJarPath { get; set; }
+		public string? JavaPlatformJarPath { get; set; }
 
-		public string JavacTargetVersion { get; set; }
-		public string JavacSourceVersion { get; set; }
+		public string? JavacTargetVersion { get; set; }
+		public string? JavacSourceVersion { get; set; }
+
+		public string? JdkVersion { get; set; }
 
 		public override string DefaultErrorCode => "JAVAC0000";
 
@@ -37,7 +41,7 @@ namespace Xamarin.Android.Tasks
 			if (!result)
 				return result;
 			// compress all the class files
-			if (!string.IsNullOrEmpty (ClassesZip)) {
+			if (!ClassesZip.IsNullOrEmpty ()) {
 				using (var zip = new ZipArchiveEx (ClassesZip, FileMode.OpenOrCreate)) {
 					zip.AutoFlush = false;
 					zip.AddDirectory (ClassesOutputDirectory, "", CompressionMethod.Store);
@@ -60,10 +64,30 @@ namespace Xamarin.Android.Tasks
 			cmd.AppendSwitchIfNotNull ("-J-Dfile.encoding=", "UTF8");
 
 			cmd.AppendFileNameIfNotNull (string.Format ("@{0}", TemporarySourceListFile));
-			cmd.AppendSwitchIfNotNull ("-target ", JavacTargetVersion);
-			cmd.AppendSwitchIfNotNull ("-source ", JavacSourceVersion);
+
+			if (int.TryParse (JavacSourceVersion, out int sourceVersion) &&
+					int.TryParse (JavacTargetVersion, out int targetVersion) &&
+					JavacSupportsRelease ()) {
+				cmd.AppendSwitchIfNotNull ("--release ", Math.Max (sourceVersion, targetVersion).ToString ());
+			} else {
+				cmd.AppendSwitchIfNotNull ("-target ", JavacTargetVersion);
+				cmd.AppendSwitchIfNotNull ("-source ", JavacSourceVersion);
+				// Ignore warning when targeting older Java versions
+				// JAVAC : warning : [options] source value 8 is obsolete and will be removed in a future release
+				// JAVAC : warning : [options] target value 8 is obsolete and will be removed in a future release
+				cmd.AppendSwitchIfNotNull ("-Xlint:", "-options");
+			}
 
 			return cmd.ToString ();
+		}
+
+		bool JavacSupportsRelease ()
+		{
+			if (JdkVersion.IsNullOrEmpty ()) {
+				return false;
+			}
+			var jdkVersion  = Version.Parse (JdkVersion);
+			return jdkVersion.Major >= 17;
 		}
 
 		protected override void WriteOptionsToResponseFile (StreamWriter sw)
@@ -71,7 +95,8 @@ namespace Xamarin.Android.Tasks
 			var jars = new List<string> ();
 			if (Jars != null)
 				jars.AddRange (Jars.Select (i => i.ItemSpec.Replace (@"\", @"\\")));
-			jars.Add (JavaPlatformJarPath.Replace (@"\", @"\\"));
+			if (JavaPlatformJarPath != null)
+				jars.Add (JavaPlatformJarPath.Replace (@"\", @"\\"));
 
 			sw.WriteLine ($"-d \"{ClassesOutputDirectory.Replace (@"\", @"\\")}\"");
 			sw.WriteLine ("-classpath \"{0}\"", string.Join (Path.PathSeparator.ToString (), jars));

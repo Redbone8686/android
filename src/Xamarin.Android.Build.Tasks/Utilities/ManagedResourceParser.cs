@@ -1,3 +1,5 @@
+#nullable disable
+
 using System;
 using System.CodeDom;
 using System.Collections.Generic;
@@ -10,12 +12,15 @@ using System.Xml.XPath;
 using System.Text.RegularExpressions;
 using System.Text;
 using Microsoft.Android.Build.Tasks;
+using Microsoft.Build.Utilities;
 
 
 namespace Xamarin.Android.Tasks
 {
 	class ManagedResourceParser : FileResourceParser
 	{
+		public ManagedResourceParser (TaskLoggingHelper log) : base (log) { }
+
 		class CompareTuple : IComparer<(int Key, CodeMemberField Value)>
 		{
 			public int Compare((int Key, CodeMemberField Value) x, (int Key, CodeMemberField Value) y)
@@ -33,7 +38,7 @@ namespace Xamarin.Android.Tasks
 		List<CodeTypeDeclaration> typeIds = new List<CodeTypeDeclaration> ();
 		Dictionary<CodeMemberField, CodeMemberField []> arrayMapping = new Dictionary<CodeMemberField, CodeMemberField []> ();
 		const string itemPackageId = "0x7f";
-		static CompareTuple compareTuple = new CompareTuple ();
+		static readonly CompareTuple compareTuple = new CompareTuple ();
 
 		XDocument publicXml;
 
@@ -295,6 +300,7 @@ namespace Xamarin.Android.Tasks
 				var cl = CreateClass (r.ResourceTypeName);
 				switch (r.Type) {
 					case RType.Integer:
+					case RType.Integer_Styleable:
 						CreateIntField (cl, r.Identifier, r.Id);
 						break;
 					case RType.Array:

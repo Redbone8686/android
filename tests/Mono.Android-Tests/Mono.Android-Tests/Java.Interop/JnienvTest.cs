@@ -1,0 +1,675 @@
+using System;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+using Android.App;
+using Android.Graphics;
+using Android.Runtime;
+using Android.Content;
+
+using Java.Interop;
+
+using NUnit.Framework;
+using Android.OS;
+
+namespace Java.InteropTests
+{
+	[TestFixture]
+	public class JnienvTest
+	{
+		[Test]
+		public void TestMyPaintColor ()
+		{
+			using (var p = new MyPaint ()) {
+				var g = JNIEnv.GetMethodID(p.Class.Handle, "getColor", "()I");
+				int c = JNIEnv.CallIntMethod(p.Handle, g);
+				Assert.AreEqual (0x11223344, c);
+				var s = JNIEnv.GetMethodID(p.Class.Handle, "setColor", "(I)V");
+				JNIEnv.CallVoidMethod (p.Handle, s, new JValue (0x22331144));
+				Assert.AreEqual (0x22331144, p.SetColor.ToArgb ());
+			}
+		}
+
+		[DllImport ("reuse-threads")]
+		static extern int rt_register_type_on_new_thread (string java_type_namem, IntPtr class_loader);
+
+		delegate void CB (IntPtr jnienv, IntPtr java_instance);
+
+		[DllImport ("reuse-threads")]
+		static extern int rt_invoke_callback_on_new_thread (CB cb);
+
+		[Test]
+		public void RegisterTypeOnNewNativeThread ()
+		{
+			int ret = rt_register_type_on_new_thread ("from.NewNativeThreadOne", Application.Context.ClassLoader.Handle);
+			Assert.AreEqual (0, ret, $"Java type registration on a new thread failed with code {ret}");
+		}
+
+		[Test]
+		public void RegisterTypeOnNewJavaThread ()
+		{
+			var thread = new MyRegistrationThread ();
+			thread.Start ();
+			thread.Join (5000);
+			Assert.AreNotEqual (null, thread.Instance, "Failed to register instance of a class on new thread");
+		}
+
+		[Test]
+		public void RegisterTypeOnNewManagedThread ()
+		{
+			Exception? ex = null;
+			var thread = new System.Threading.Thread (() => {
+				try {
+					using var instance = new RegisterMeOnNewManagedThreadOne ();
+				}
+				catch (Exception e) {
+					ex = e;
+				}
+			});
+			thread.Start ();
+			thread.Join (5000);
+			Assert.IsNull (ex, $"Failed to register instance of a class on new thread: {ex}");
+		}
+
+		[Test]
+		public void ThreadReuse ()
+		{
+			CB cb = (env, instance) => {
+				// NOTE: this callback runs on a raw native pthread spawned by
+				// libreuse-threads.so and attached to the JVM. NUnit 3 replaces
+				// Console.Out with a TextCapture that resolves the current
+				// TestExecutionContext on every write; from a thread NUnit doesn't
+				// know about it tries to manufacture an AdhocContext and NREs in
+				// MethodWrapper.get_Name, which SIGABRTs the entire process and
+				// causes the test host to report "0 tests ran" for the assembly.
+				// Route diagnostics through Android.Util.Log instead.
+				Android.Util.Log.Info ("ThreadReuse",
+						"CrossThreadObjectInteractions: JNIEnv.Handle={0} env={1}, instance={2}",
+						JNIEnv.Handle.ToString ("x"), env.ToString ("x"), instance.ToString ("x"));
+				if (env != JNIEnv.Handle)
+					Android.Util.Log.Info ("ThreadReuse", "GOOD: they should differ (on the second call)....");
+				if (instance == IntPtr.Zero)
+					return;
+				using (var o = Java.Lang.Object.GetObject<Java.Lang.Object>(env, instance, JniHandleOwnership.DoNotTransfer)) {
+					Android.Util.Log.Info ("ThreadReuse", "CrossThreadObjectInteractions: o.Handle={0}", o.Handle.ToString ("x"));
+				}
+			};
+			rt_invoke_callback_on_new_thread (cb);
+			GC.KeepAlive (cb);
+		}
+
+		[Test]
+		public void DeleteLrefOnWrongThread ()
+		{
+			Console.WriteLine ("Delete JNI local refs on wrong thread...");
+			IntPtr lref = IntPtr.Zero;
+			var t = new Thread (() => {
+					lref = JNIEnv.NewArray(new[]{1,2,3});
+			});
+			Console.WriteLine ("Do we die?");
+			JNIEnv.DeleteLocalRef (lref);
+			Console.WriteLine ("still alive!");
+		}
+
+		static  readonly  bool  HaveJavaInterop   = AppDomain.CurrentDomain.GetAssemblies ().Any (a => a.FullName.StartsWith ("Java.Interop,"));
+
+		[Test]
+		public void InvokingNullInstanceDoesNotCrashDalvik ()
+		{
+			using (var o = new Java.Lang.Object (IntPtr.Zero, JniHandleOwnership.TransferLocalRef)) {
+				Assert.AreEqual (IntPtr.Zero, o.Handle);
+				if (HaveJavaInterop) {
+					Assert.Throws<ObjectDisposedException>(() => o.ToString ());
+				} else {
+					Assert.Throws<ArgumentException>(() => o.ToString ());
+				}
+			}
+		}
+
+		[Test]
+		public void NewOpenGenericTypeThrows ()
+		{
+			try {
+				var lrefInstance = JNIEnv.StartCreateInstance (typeof (GenericHolder<>), "()V");
+				JNIEnv.FinishCreateInstance (lrefInstance, "()V");
+				Assert.Fail ("SHOULD NOT BE REACHED: creation of open generic types is not supported");
+			} catch (NotSupportedException) {
+			}
+		}
+
+		[Test]
+		public void NewClosedGenericTypeWorks ()
+		{
+			using (var holder = new GenericHolder<int>()) {
+			}
+		}
+
+		[Test]
+		public void NewObjectArrayWithNullArray ()
+		{
+			Assert.AreEqual (IntPtr.Zero, JNIEnv.NewObjectArray<Java.Lang.Object> (null), "#1");
+		}
+
+		[Test]
+		public void NewObjectArrayWithObjectArray ()
+		{
+			var array = JNIEnv.NewObjectArray<Java.Lang.String> (new Java.Lang.String [0]);
+			Assert.AreNotEqual (IntPtr.Zero, array, "#1");
+			Assert.AreEqual (0, JNIEnv.GetArrayLength (array), "#2");
+			Assert.AreEqual ("[Ljava/lang/String;", JNIEnv.GetClassNameFromInstance (array), "#3");
+			JNIEnv.DeleteLocalRef (array);
+
+			array = JNIEnv.NewObjectArray<Java.Lang.String> (new Java.Lang.String [1] { new Java.Lang.String ("str")});
+			Assert.AreNotEqual (IntPtr.Zero, array, "#4");
+			Assert.AreEqual (1, JNIEnv.GetArrayLength (array), "#5");
+			Assert.AreEqual ("[Ljava/lang/String;", JNIEnv.GetClassNameFromInstance (array), "#6");
+			JNIEnv.DeleteLocalRef (array);
+		}
+
+		[Test]
+		public void NewObjectArrayWithNullElement ()
+		{
+			var array = JNIEnv.NewObjectArray<Java.Lang.String> (new Java.Lang.String [1]);
+			Assert.AreNotEqual (IntPtr.Zero, array, "#2");
+			Assert.AreEqual (1, JNIEnv.GetArrayLength (array), "#3");
+			Assert.AreEqual ("[Ljava/lang/String;", JNIEnv.GetClassNameFromInstance (array), "#4");
+			JNIEnv.DeleteLocalRef (array);
+		}
+
+		[Test]
+		public void NewObjectArrayWithIntArray ()
+		{
+			var array = JNIEnv.NewObjectArray<int> (new int [1]);
+			Assert.AreNotEqual (IntPtr.Zero, array, "#1");
+			Assert.AreEqual (1, JNIEnv.GetArrayLength (array), "#2");
+			Assert.AreEqual ("[Ljava/lang/Integer;", JNIEnv.GetClassNameFromInstance (array), "#3");
+			JNIEnv.DeleteLocalRef (array);
+		}
+
+		[Test]
+		public void NewObjectArrayWithIntArrayAndEmptyArray ()
+		{
+			//empty array gives the right type
+			var array = JNIEnv.NewObjectArray<int> (new int [0]);
+			Assert.AreNotEqual (IntPtr.Zero, array, "#1");
+			Assert.AreEqual (0, JNIEnv.GetArrayLength (array), "#2");
+			Assert.AreEqual ("[Ljava/lang/Integer;", JNIEnv.GetClassNameFromInstance (array), "#3");
+			JNIEnv.DeleteLocalRef (array);
+		}
+
+		[Test]
+		public void NewObjectArrayWithNonJavaType ()
+		{
+			//empty array gives the right type
+			var array = JNIEnv.NewObjectArray<Type> (new Type [1] { typeof (Type) });
+			Assert.AreNotEqual (IntPtr.Zero, array, "#1");
+			Assert.AreEqual ("[Ljava/lang/Object;", JNIEnv.GetClassNameFromInstance (array), "#2");
+			JNIEnv.DeleteLocalRef (array);
+		}
+
+		[Test]
+		public void NewObjectArrayWithNonJavaTypeAndEmptyArray ()
+		{
+			//empty array gives the right type
+			var array = JNIEnv.NewObjectArray<Type> (new Type [0]);
+			Assert.AreNotEqual (IntPtr.Zero, array, "#1");
+			Assert.AreEqual ("[Ljava/lang/Object;", JNIEnv.GetClassNameFromInstance (array), "#2");
+			JNIEnv.DeleteLocalRef (array);
+		}
+
+		[Test]
+		[Ignore ("This crashes on the emulator")]
+		public void NewObjectArrayWithBadValues ()
+		{
+			try {
+				JNIEnv.NewObjectArray (-1, JNIEnv.FindClass (typeof (Java.Lang.Object)));
+				Assert.Fail ("Must throw");
+			} catch (Java.Lang.OutOfMemoryError e) {
+				//XXX shouldn't this exception be an ArgumentException?
+			}
+
+			try {
+				JNIEnv.NewObjectArray (1, IntPtr.Zero);
+				Assert.Fail ("Must throw");
+			} catch (Java.Lang.NullPointerException e) {
+				//XXX shouldn't this exception be an ArgumentException?
+			}
+		}
+
+		[Test]
+		public void NewObjectArray_UsesOnlyTypeParameter ()
+		{
+			using (var s = new Java.Lang.String ("foo"))
+			using (var i = new Java.Lang.Integer (42)) {
+				var array = JNIEnv.NewObjectArray<Java.Lang.Object> (s, i);
+				Assert.AreNotEqual (IntPtr.Zero, array, "#1");
+				Assert.AreEqual ("[Ljava/lang/Object;", JNIEnv.GetClassNameFromInstance (array), "#2");
+				Assert.AreEqual (2, JNIEnv.GetArrayLength (array));
+				JNIEnv.DeleteLocalRef (array);
+			}
+		}
+
+		[Test]
+		public void SetField_PermitNullValues ()
+		{
+			using (var resource = new Intent.ShortcutIconResource ()) {
+				var f = JNIEnv.GetFieldID (resource.Class.Handle, "packageName", "Ljava/lang/String;");
+				Console.WriteLine ("# f=0x{0}", f.ToString ("x"));
+				resource.PackageName = null;
+				Assert.AreEqual (null, resource.PackageName);
+			}
+		}
+
+		[Test, Category ("Export")]
+		public void CreateTypeWithExportedMethods ()
+		{
+			using (var e = new ContainsExportedMethods ()) {
+				e.Exported ();
+				Assert.AreEqual (1, e.Count);
+				IntPtr m = JNIEnv.GetMethodID (e.Class.Handle, "Exported", "()V");
+				JNIEnv.CallVoidMethod (e.Handle, m);
+				Assert.AreEqual (2, e.Count);
+			}
+		}
+
+		[Test, Category ("Export")]
+		public void ActivatedDirectObjectSubclassesShouldBeRegistered ()
+		{
+			if (Build.VERSION.SdkInt <= BuildVersionCodes.GingerbreadMr1)
+				Assert.Ignore ("Skipping test due to Bug #34141");
+
+			using (var ContainsExportedMethods_class  = Java.Lang.Class.FromType (typeof (ContainsExportedMethods))) {
+				var ContainsExportedMethods_init = JNIEnv.GetMethodID (ContainsExportedMethods_class.Handle, "<init>", "()V");
+
+				var o = JNIEnv.StartCreateInstance (ContainsExportedMethods_class.Handle, ContainsExportedMethods_init);
+				JNIEnv.FinishCreateInstance (o, ContainsExportedMethods_class.Handle, ContainsExportedMethods_init);
+
+				/*
+				 * Before the fix to to Bxc#32311, this will trigger an ART abort.
+				 *
+				 * StartCreateInstance()+FinishCreateInstance() will cause a ContainsExportedMethods instance
+				 * to be created, but it (1) isn't "registered" (meaning Java.Lang.Object.PeekObject(IntPtr)
+				 * will return null) and (2) doesn't even contain a JNI Global Reference, but instead a
+				 * JNI *Local* Ref!
+				 *
+				 * This causes ART to abort when attempting to use an invalid JNI local reference from the finalizer.
+				 */
+				GC.Collect ();
+				GC.WaitForPendingFinalizers ();
+
+				var v = Java.Lang.Object.GetObject<ContainsExportedMethods>(o, JniHandleOwnership.TransferLocalRef);
+				Assert.IsNotNull (v);
+				Assert.IsTrue (v.Constructed);
+				v.Dispose ();
+			}
+		}
+
+		[Test]
+		public void ActivatedDirectThrowableSubclassesShouldBeRegistered ()
+		{
+			if (Build.VERSION.SdkInt <= BuildVersionCodes.GingerbreadMr1)
+				Assert.Ignore ("Skipping test due to Bug #34141");
+
+			using (var ThrowableActivatedFromJava_class  = Java.Lang.Class.FromType (typeof (ThrowableActivatedFromJava))) {
+				var ThrowableActivatedFromJava_init = JNIEnv.GetMethodID (ThrowableActivatedFromJava_class.Handle, "<init>", "()V");
+
+				var o = JNIEnv.StartCreateInstance (ThrowableActivatedFromJava_class.Handle, ThrowableActivatedFromJava_init);
+				JNIEnv.FinishCreateInstance (o, ThrowableActivatedFromJava_class.Handle, ThrowableActivatedFromJava_init);
+
+				GC.Collect ();
+				GC.WaitForPendingFinalizers ();
+
+				var v = Java.Lang.Object.GetObject<ThrowableActivatedFromJava>(o, JniHandleOwnership.TransferLocalRef);
+				Assert.IsNotNull (v);
+				Assert.IsTrue (v.Constructed);
+				v.Dispose ();
+			}
+		}
+
+		// Locks in the legacy llvm-ir typemap behavior for parameterized ctor activation.
+		// Java instantiation forwards JNI args to the user-visible managed ctor; trimmable
+		// typemap codegen must match this contract for non-()V signatures.
+		//
+		// NOTE: Legacy mono.android.TypeManager.Activate routes args through
+		// JNIEnv.GetObjectArray, which only supports IJavaObject-derived element types.
+		// Tests deliberately use Java.Lang.Throwable args (not System.String) to stay
+		// inside the supported legacy contract.
+		[Test]
+		public void ActivatedDirectThrowableSubclasses_ThrowableCtor_ShouldForwardArgs ()
+		{
+			using (var klass = Java.Lang.Class.FromType (typeof (ThrowableCauseActivatedFromJava)))
+			using (var cause = new Java.Lang.Throwable ("a-cause")) {
+				var ctor = JNIEnv.GetMethodID (klass.Handle, "<init>", "(Ljava/lang/Throwable;)V");
+
+				var o = JNIEnv.StartCreateInstance (klass.Handle, ctor, new JValue (cause.Handle));
+				JNIEnv.FinishCreateInstance (o, klass.Handle, ctor, new JValue (cause.Handle));
+
+				GC.Collect ();
+				GC.WaitForPendingFinalizers ();
+
+				var v = Java.Lang.Object.GetObject<ThrowableCauseActivatedFromJava> (o, JniHandleOwnership.TransferLocalRef);
+				Assert.IsNotNull (v);
+				Assert.IsTrue (v.Constructed, "user-visible ctor body did not run");
+				Assert.IsNotNull (v.ReceivedCause, "throwable arg not forwarded");
+				Assert.AreEqual ("a-cause", v.ReceivedCause!.Message);
+				v.Dispose ();
+			}
+		}
+
+		[Test]
+		public void ActivatedDirectThrowableSubclasses_MultipleCtors_ShouldDispatchToCorrectCtor ()
+		{
+			using (var klass = Java.Lang.Class.FromType (typeof (MultiCtorActivatedFromJava))) {
+				// Default ctor
+				{
+					var ctor = JNIEnv.GetMethodID (klass.Handle, "<init>", "()V");
+					var o = JNIEnv.StartCreateInstance (klass.Handle, ctor);
+					JNIEnv.FinishCreateInstance (o, klass.Handle, ctor);
+					var v = Java.Lang.Object.GetObject<MultiCtorActivatedFromJava> (o, JniHandleOwnership.TransferLocalRef);
+					Assert.IsNotNull (v);
+					Assert.AreEqual (0, v.CtorIndex, "()V dispatched to wrong ctor");
+					v.Dispose ();
+				}
+				// (Throwable) ctor
+				using (var cause = new Java.Lang.Throwable ("only-cause")) {
+					var ctor = JNIEnv.GetMethodID (klass.Handle, "<init>", "(Ljava/lang/Throwable;)V");
+					var o = JNIEnv.StartCreateInstance (klass.Handle, ctor, new JValue (cause.Handle));
+					JNIEnv.FinishCreateInstance (o, klass.Handle, ctor, new JValue (cause.Handle));
+					var v = Java.Lang.Object.GetObject<MultiCtorActivatedFromJava> (o, JniHandleOwnership.TransferLocalRef);
+					Assert.IsNotNull (v);
+					Assert.AreEqual (1, v.CtorIndex, "(Throwable) dispatched to wrong ctor");
+					Assert.IsNotNull (v.ReceivedCause);
+					Assert.AreEqual ("only-cause", v.ReceivedCause!.Message);
+					v.Dispose ();
+				}
+			}
+		}
+
+		[Test]
+		public void ConversionsAndThreadsAndInstanceMappingsOhMy ()
+		{
+			IntPtr lrefJliArray = JNIEnv.NewObjectArray<int> (new[]{1});
+			IntPtr grefJliArray = JNIEnv.NewGlobalRef (lrefJliArray);
+			JNIEnv.DeleteLocalRef (lrefJliArray);
+
+			Java.Lang.Object[] jarray = (Java.Lang.Object[])
+				JNIEnv.GetArray (grefJliArray, JniHandleOwnership.DoNotTransfer, typeof(Java.Lang.Object));
+
+			Exception ignore_t1 = null;
+			Exception ignore_t2 = null;
+
+			var t1 = new Thread (() => {
+				int[] output_array1 = new int[1];
+				for (int i = 0; i < 2000; ++i) {
+					Console.WriteLine ("# t1 iter: {0}", i);
+					try {
+						JNIEnv.CopyObjectArray (grefJliArray, output_array1);
+					} catch (Exception e) {
+						ignore_t1 = e;
+						break;
+					}
+				}
+			});
+			var t2 = new Thread (() => {
+				for (int i = 0; i < 2000; ++i) {
+					Console.WriteLine ("# t2 iter: {0}", i);
+					try {
+						JNIEnv.GetArray<int>(jarray);
+					} catch (Exception e) {
+						ignore_t2 = e;
+						break;
+					}
+				}
+			});
+
+			t1.Start ();
+			t2.Start ();
+			t1.Join ();
+			t2.Join ();
+
+			for (int i = 0; i < jarray.Length; ++i) {
+				jarray [i].Dispose ();
+				jarray [i]  = null;
+			}
+
+			JNIEnv.DeleteGlobalRef (grefJliArray);
+
+			Assert.IsNull (ignore_t1, string.Format ("No exception should be thrown [t1]! Got: {0}", ignore_t1));
+			Assert.IsNull (ignore_t2, string.Format ("No exception should be thrown [t2]! Got: {0}", ignore_t2));
+		}
+
+		[Test]
+		public void MoarThreadingTests ()
+		{
+			IntPtr lrefJliArray = JNIEnv.NewObjectArray<int> (new[]{1});
+			IntPtr grefJliArray = JNIEnv.NewGlobalRef (lrefJliArray);
+			JNIEnv.DeleteLocalRef (lrefJliArray);
+
+			Exception ignore_t1 = null;
+			Exception ignore_t2 = null;
+
+			var t1 = new Thread (() => {
+				int[] output_array1 = new int[1];
+				for (int i = 0; i < 2000; ++i) {
+					Console.WriteLine ("# t1 iter: {0}", i);
+					try {
+						JNIEnv.CopyObjectArray (grefJliArray, output_array1);
+					} catch (Exception e) {
+						ignore_t1 = e;
+						break;
+					}
+				}
+			});
+			var t2 = new Thread (() => {
+				for (int i = 0; i < 2000; ++i) {
+					Console.WriteLine ("# t2 iter: {0}", i);
+					try {
+						JNIEnv.GetObjectArray (grefJliArray, new[]{typeof (int)});
+					} catch (Exception e) {
+						ignore_t2 = e;
+						break;
+					}
+				}
+			});
+
+			t1.Start ();
+			t2.Start ();
+			t1.Join ();
+			t2.Join ();
+
+			JNIEnv.DeleteGlobalRef (grefJliArray);
+
+			Assert.IsNull (ignore_t1, string.Format ("No exception should be thrown [t1]! Got: {0}", ignore_t1));
+			Assert.IsNull (ignore_t2, string.Format ("No exception should be thrown [t2]! Got: {0}", ignore_t2));
+		}
+
+		[Test]
+		public void JavaToManagedTypeMapping ()
+		{
+			Type m = JniRuntime.CurrentRuntime.TypeManager.GetType (new JniTypeSignature ("android/content/res/Resources"));
+			Assert.AreNotEqual (null, m);
+			m = JniRuntime.CurrentRuntime.TypeManager.GetType (new JniTypeSignature ("this/type/does/not/exist"));
+			Assert.AreEqual (null, m);
+		}
+
+		[Test]
+		public void ManagedToJavaTypeMapping ()
+		{
+			Type type = typeof(Activity);
+			string m = JniRuntime.CurrentRuntime.TypeManager.GetTypeSignature (type).SimpleReference;
+			Assert.AreNotEqual (null, m, "`Activity` subclasses Java.Lang.Object, it should be in the typemap!");
+
+			type = typeof (JnienvTest);
+			m = JniRuntime.CurrentRuntime.TypeManager.GetTypeSignature (type).SimpleReference;
+			Assert.AreEqual (null, m, "`JnienvTest` does *not* subclass Java.Lang.Object, it should *not* be in the typemap!");
+		}
+
+		[Test, Category ("GCBridge")]
+		[Ignore ("Failing in NativeAOT: https://github.com/dotnet/android/issues/11690")]
+		public void DoNotLeakWeakReferences ()
+		{
+			GC.Collect ();
+			GC.WaitForPendingFinalizers ();
+
+			var surfaced    = Runtime.GetSurfacedObjects ();
+			int startCount  = surfaced.Count;
+
+			Assert.IsTrue (surfaced.All (s => s.Target != null), "#1");
+
+			// `Runtime.GetSurfacedObjects()` is process-global: NUnit/MTP
+			// infrastructure (per-test TestExecutionContext, listeners, Console
+			// capture, etc.) creates and releases transient Java.Lang.Object
+			// peers around every test, so the count drifts by a few entries
+			// between the snapshots below. Allow a small tolerance instead of
+			// requiring an exact count -- a real leak would dwarf this.
+			const int tolerance = 10;
+
+			WeakReference r = null;
+			Exception threadException = null;
+			var t = new Thread (() => {
+				try {
+					var c = new MyCb ();
+					Assert.That (Runtime.GetSurfacedObjects ().Count,
+							Is.EqualTo (startCount + 1).Within (tolerance), "#2");
+					r = new WeakReference (c);
+				} catch (Exception e) {
+					threadException = e;
+				}
+			});
+			t.Start ();
+			t.Join ();
+			if (threadException != null)
+				throw new Exception ("Worker thread failed", threadException);
+
+			GC.Collect ();
+			GC.WaitForPendingFinalizers ();
+			GC.Collect ();
+			GC.WaitForPendingFinalizers ();
+
+			surfaced  = Runtime.GetSurfacedObjects ();
+			Assert.That (surfaced.Count, Is.EqualTo (startCount).Within (tolerance), "#3");
+			Assert.IsTrue (surfaced.All (s => s.Target != null), "#4");
+		}
+	}
+
+	[Register ("from/NewNativeThreadOne")]
+	class RegisterMeOnNewNativeThreadOne : Java.Lang.Object
+	{}
+
+	[Register ("from/NewManagedThreadOne")]
+	class RegisterMeOnNewManagedThreadOne : Java.Lang.Object
+	{}
+
+	[Register ("from/NewThreadTwo")]
+	class RegisterMeOnNewThreadTwo : Java.Lang.Object
+	{}
+
+	class MyRegistrationThread : Java.Lang.Thread
+	{
+		public RegisterMeOnNewThreadTwo Instance { get; private set; }
+
+		public override void Run ()
+		{
+			Instance = new RegisterMeOnNewThreadTwo ();
+		}
+	}
+
+	class MyCb : Java.Lang.Object, Java.Lang.IRunnable {
+		public void Run ()
+		{
+			Console.WriteLine ("MyCb.Run! JNIEnv.Handle={0}", JNIEnv.Handle.ToString ("x"));
+		}
+	}
+
+	class ContainsExportedMethods : Java.Lang.Object {
+
+		public bool Constructed;
+
+		public int Count;
+
+		public ContainsExportedMethods ()
+		{
+			Console.WriteLine ("# ContainsExportedMethods: constructed! Handle=0x{0}", Handle.ToString ("x"));
+			Constructed = true;
+		}
+
+		[Export]
+		public void Exported ()
+		{
+			Count++;
+		}
+	}
+
+	class ThrowableActivatedFromJava : Java.Lang.Throwable {
+
+		public  bool  Constructed;
+
+		public ThrowableActivatedFromJava ()
+		{
+			Constructed = true;
+		}
+	}
+
+	// Throwable subclass with (Throwable) ctor — exercises single IJavaObject-derived
+	// ref-arg ctor activation. (System.String args are NOT supported by the legacy
+	// TypeManager.Activate path because JNIEnv.GetObjectArray routes Object[] elements
+	// through the IJavaObject converter.)
+	class ThrowableCauseActivatedFromJava : Java.Lang.Throwable {
+
+		public bool                  Constructed;
+		public Java.Lang.Throwable?  ReceivedCause;
+
+		public ThrowableCauseActivatedFromJava (Java.Lang.Throwable cause)
+			: base (cause)
+		{
+			Constructed   = true;
+			ReceivedCause = cause;
+		}
+	}
+
+	// Throwable subclass with multiple registered ctors — exercises ctor dispatch.
+	class MultiCtorActivatedFromJava : Java.Lang.Throwable {
+
+		public int                   CtorIndex = -1;
+		public Java.Lang.Throwable?  ReceivedCause;
+
+		public MultiCtorActivatedFromJava ()
+		{
+			CtorIndex = 0;
+		}
+
+		public MultiCtorActivatedFromJava (Java.Lang.Throwable cause)
+			: base (cause)
+		{
+			CtorIndex     = 1;
+			ReceivedCause = cause;
+		}
+	}
+
+	class GenericHolder<T> : Java.Lang.Object {
+
+		public T Value {get; set;}
+
+	}
+
+	#region BXC_374
+	class MyPaint : Paint {
+
+		public Color SetColor;
+
+		public override Color Color {
+			get {
+				Console.WriteLine ("get_Color");
+				return new Color (a:0x11, r:0x22, g:0x33, b:0x44);
+			}
+			set {
+				Console.WriteLine ("set_Color({0})", value.ToArgb ());
+				SetColor = value;
+				base.Color = value;
+			}
+		}
+	}
+	#endregion
+}

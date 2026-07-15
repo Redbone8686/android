@@ -26,6 +26,7 @@ namespace Android.Runtime {
 				AndroidEnvironment.FailFast ("Cannot find AndroidRuntimeInternal.WaitForBridgeProcessing");
 		}
 
+		[RequiresDynamicCode ("This method uses System.Reflection.Emit to create a delegate at runtime.")]
 		public static Delegate CreateDelegate (Delegate dlg)
 		{
 			if (dlg == null)
@@ -40,7 +41,7 @@ namespace Android.Runtime {
 			if (result != null)
 				return result;
 
-			if (JNIEnvInit.LogAssemblyCategory) {
+			if (Logger.LogAssembly) {
 				RuntimeNativeMethods.monodroid_log (LogLevel.Debug, LogCategories.Assembly, $"Falling back to System.Reflection.Emit for delegate type '{delegateType}': {dlg.Method}");
 			}
 

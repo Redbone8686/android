@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -22,17 +23,23 @@ namespace Xamarin.Android.Tasks
 			"libxamarin-debug-app-helper",
 		};
 
+		static readonly HashSet<string> RuntimeNativeLibraryNames = new (StringComparer.OrdinalIgnoreCase);
+
+		[Required]
+		public ITaskItem[] KnownRuntimeNativeLibraries { get; set; } = [];
+
 		/// <summary>
 		/// Assumed to be .so files only
 		/// </summary>
-		public ITaskItem [] InputLibraries { get; set; }
-		public ITaskItem [] Components { get; set; }
-		public string [] ExcludedLibraries { get; set; }
+		public ITaskItem []? InputLibraries { get; set; }
+		public ITaskItem []? Components { get; set; }
+		public string []? ExcludedLibraries { get; set; }
 
 		public bool IncludeDebugSymbols { get; set; }
+		public bool NativeRuntimeLinking { get; set; }
 
 		[Output]
-		public ITaskItem [] OutputLibraries { get; set; }
+		public ITaskItem []? OutputLibraries { get; set; }
 
 		public override bool RunTask ()
 		{
@@ -46,24 +53,38 @@ namespace Xamarin.Android.Tasks
 				}
 			}
 
+			foreach (ITaskItem lib in KnownRuntimeNativeLibraries) {
+				RuntimeNativeLibraryNames.Add (Path.GetFileName (lib.ItemSpec));
+			}
+
 			var output = new List<ITaskItem> (InputLibraries.Length);
 
 			foreach (var library in InputLibraries) {
 				var abi = AndroidRidAbiHelper.GetNativeLibraryAbi (library);
-				if (string.IsNullOrEmpty (abi)) {
+				if (abi.IsNullOrEmpty ()) {
 					var packageId = library.GetMetadata ("NuGetPackageId");
-					if (!string.IsNullOrEmpty (packageId)) {
+					if (!packageId.IsNullOrEmpty ()) {
 						Log.LogCodedWarning ("XA4301", library.ItemSpec, 0, Properties.Resources.XA4301_ABI_NuGet, library.ItemSpec, packageId);
 					} else {
 						Log.LogCodedWarning ("XA4301", library.ItemSpec, 0, Properties.Resources.XA4301_ABI, library.ItemSpec);
 					}
 					continue;
 				}
-				// Both libmono-android.debug.so and libmono-android.release.so are in InputLibraries.
+				// Both lib{mono,net}-android.debug.so and lib{mono,net}-android.release.so are in InputLibraries.
 				// Use IncludeDebugSymbols to determine which one to include.
-				// We may eventually have files such as `libmono-android-checked+asan.release.so` as well.
+				// We may eventually have files such as `lib{mono,net}-android-checked+asan.release.so` as well.
 				var fileName = Path.GetFileNameWithoutExtension (library.ItemSpec);
-				if (fileName.StartsWith ("libmono-android", StringComparison.Ordinal)) {
+				if (ExcludedLibraries != null && ExcludedLibraries.Contains (fileName, StringComparer.OrdinalIgnoreCase)) {
+					Log.LogDebugMessage ($"Excluding '{library.ItemSpec}'");
+					continue;
+				}
+
+				if (fileName.StartsWith ("libmono-android", StringComparison.Ordinal) || fileName.StartsWith ("libnet-android", StringComparison.Ordinal)) {
+					if (NativeRuntimeLinking) {
+						// We don't need the precompiled runtime, it will be linked during application build
+						continue;
+					}
+
 					if (fileName.EndsWith (".debug", StringComparison.Ordinal)) {
 						if (!IncludeDebugSymbols)
 							continue;
@@ -73,6 +94,7 @@ namespace Xamarin.Android.Tasks
 							continue;
 						library.SetMetadata ("ArchiveFileName", "libmonodroid.so");
 					}
+					Log.LogDebugMessage ($"Including runtime: {library}");
 				} else if (DebugNativeLibraries.Contains (fileName)) {
 					if (!IncludeDebugSymbols) {
 						Log.LogDebugMessage ($"Excluding '{library.ItemSpec}' for release builds.");
@@ -82,17 +104,34 @@ namespace Xamarin.Android.Tasks
 					if (!wantedComponents.Contains (fileName)) {
 						continue;
 					}
-				} else if (ExcludedLibraries != null && ExcludedLibraries.Contains (fileName, StringComparer.OrdinalIgnoreCase)) {
-					Log.LogDebugMessage ($"Excluding '{library.ItemSpec}'");
-					continue;
 				}
 
-				output.Add (library);
+				if (!IgnoreLibraryWhenLinkingRuntime (library)) {
+					output.Add (library);
+				} else {
+					Log.LogDebugMessage ($"Ignoring '{library.ItemSpec}'");
+				}
 			}
 
 			OutputLibraries = output.ToArray ();
 
 			return !Log.HasLoggedErrors;
+		}
+
+		bool IgnoreLibraryWhenLinkingRuntime (ITaskItem libItem)
+		{
+			if (!NativeRuntimeLinking) {
+				return false;
+			}
+
+			// We ignore all the shared libraries coming from the runtime packages, as they are all linked into our runtime and
+			// need not be packaged.
+			if (MonoAndroidHelper.IsFromAKnownRuntimePack (libItem)) {
+				return true;
+			}
+
+			// Should `NuGetPackageId` be empty, we check the libs by name, as the last resort.
+			return RuntimeNativeLibraryNames.Contains (Path.GetFileName (libItem.ItemSpec));
 		}
 	}
 }

@@ -37,7 +37,7 @@
     </BuildDependsOn>
   </PropertyGroup>
 
-  <Target Name="_CopyToPackDirs" >
+  <Target Name="_CopyToPackDirs">
     <Copy
         SourceFiles="$(OutputPath)ref\Mono.Android.Export.dll"
         DestinationFolder="$(MicrosoftAndroidRefPackDir)"
@@ -45,22 +45,7 @@
     />
     <Copy
         SourceFiles="$(OutputPath)Mono.Android.Export.dll"
-        DestinationFolder="$(MicrosoftAndroidArmPackDir)lib\$(DotNetTargetFramework)"
-        SkipUnchangedFiles="true"
-    />
-    <Copy
-        SourceFiles="$(OutputPath)Mono.Android.Export.dll"
-        DestinationFolder="$(MicrosoftAndroidArm64PackDir)lib\$(DotNetTargetFramework)"
-        SkipUnchangedFiles="true"
-    />
-    <Copy
-        SourceFiles="$(OutputPath)Mono.Android.Export.dll"
-        DestinationFolder="$(MicrosoftAndroidx86PackDir)lib\$(DotNetTargetFramework)"
-        SkipUnchangedFiles="true"
-    />
-    <Copy
-        SourceFiles="$(OutputPath)Mono.Android.Export.dll"
-        DestinationFolder="$(MicrosoftAndroidx64PackDir)lib\$(DotNetTargetFramework)"
+        DestinationFolder="$(BuildOutputDirectory)lib\packs\Microsoft.Android.Runtime.$(AndroidApiLevel).android\$(AndroidPackVersion)\runtimes\android\lib\$(DotNetTargetFramework)"
         SkipUnchangedFiles="true"
     />
   </Target>

@@ -1,5 +1,5 @@
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
-
+#nullable enable
 using System;
 using System.Linq;
 using System.IO;
@@ -15,11 +15,11 @@ namespace Xamarin.Android.Tasks
 
 	public abstract class JavaCompileToolTask : JavaToolTask
 	{
-		public string StubSourceDirectory { get; set; }
+		public string? StubSourceDirectory { get; set; }
 
-		public ITaskItem[] JavaSourceFiles { get; set; }
+		public ITaskItem[]? JavaSourceFiles { get; set; }
 
-		public ITaskItem[] Jars { get; set; }
+		public ITaskItem[]? Jars { get; set; }
 
 		protected override string ToolName {
 			get { return OS.IsWindows ? "javac.exe" : "javac"; }
@@ -32,7 +32,7 @@ namespace Xamarin.Android.Tasks
 			}
 		}
 
-		internal string TemporarySourceListFile;
+		internal string? TemporarySourceListFile;
 
 		public override bool RunTask ()
 		{
@@ -66,7 +66,7 @@ namespace Xamarin.Android.Tasks
 					foreach (var file in JavaSourceFiles.Where (p => Path.GetExtension (p.ItemSpec) == ".java"))
 						sw.WriteLine (string.Format ("\"{0}\"", file.ItemSpec.Replace (@"\", @"\\")));
 
-				if (string.IsNullOrEmpty (StubSourceDirectory))
+				if (StubSourceDirectory.IsNullOrEmpty ())
 					return;
 
 				if (!Directory.Exists (StubSourceDirectory))

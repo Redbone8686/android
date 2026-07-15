@@ -1,13 +1,11 @@
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
+#nullable enable
 
 using System;
-using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Text;
-using System.Threading;
-using System.Xml;
-using System.Xml.Linq;
 using Microsoft.Build.Utilities;
 using Microsoft.Build.Framework;
 using System.Text.RegularExpressions;
@@ -19,70 +17,70 @@ namespace Xamarin.Android.Tasks {
 
 	//aapt2 link -o resources.apk.bk --manifest Foo.xml --java . --custom-package com.infinitespace_studios.blankforms -R foo2 -v --auto-add-overlay
 	public class Aapt2Link : Aapt2 {
-		static Regex exraArgSplitRegEx = new Regex (@"[\""].+?[\""]|[\''].+?[\'']|[^ ]+", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+		static readonly Regex exraArgSplitRegEx = new Regex (@"[\""].+?[\""]|[\''].+?[\'']|[^ ]+", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
 		public override string TaskPrefix => "A2L";
 
 		[Required]
-		public ITaskItem [] ManifestFiles { get; set; }
+		public ITaskItem [] ManifestFiles { get; set; } = [];
 
 		[Required]
-		public string JavaPlatformJarPath { get; set; }
+		public string JavaPlatformJarPath { get; set; } = "";
 
-		public string PackageName { get; set; }
+		public string? PackageName { get; set; }
 
-		public ITaskItem [] AdditionalResourceArchives { get; set; }
+		public ITaskItem []? AdditionalResourceArchives { get; set; }
 
-		public ITaskItem [] AdditionalAndroidResourcePaths { get; set; }
+		public ITaskItem []? AdditionalAndroidResourcePaths { get; set; }
 
-		public ITaskItem [] LibraryProjectJars { get; set; }
+		public ITaskItem []? LibraryProjectJars { get; set; }
 
-		public ITaskItem CompiledResourceFlatArchive { get; set; }
+		public ITaskItem? CompiledResourceFlatArchive { get; set; }
 
-		public ITaskItem [] CompiledResourceFlatFiles { get; set; }
+		public ITaskItem []? CompiledResourceFlatFiles { get; set; }
 
-		public string AndroidComponentResgenFlagFile { get; set; }
+		public string? AndroidComponentResgenFlagFile { get; set; }
 
-		public string AssetsDirectory { get; set; }
+		public string? AssetsDirectory { get; set; }
 
-		public ITaskItem [] AdditionalAndroidAssetPaths { get; set; }
+		public ITaskItem []? AdditionalAndroidAssetPaths { get; set; }
 
-		public string ExtraPackages { get; set; }
+		public string? ExtraPackages { get; set; }
 
-		public string ExtraArgs { get; set; }
+		public string? ExtraArgs { get; set; }
 
 		public bool CreatePackagePerAbi { get; set; }
 
-		public string [] SupportedAbis { get; set; }
+		public string []? SupportedAbis { get; set; }
 
-		public string OutputFile { get; set; }
+		public string? OutputFile { get; set; }
 
-		public string JavaDesignerOutputDirectory { get; set; }
+		public string? JavaDesignerOutputDirectory { get; set; }
 
-		public string UncompressedFileExtensions { get; set; }
+		public string? UncompressedFileExtensions { get; set; }
 
-		public string AndroidSdkPlatform { get; set; }
+		public string AndroidApiLevel { get; set; } = "";
 
-		public string VersionCodePattern { get; set; }
+		public string? VersionCodePattern { get; set; }
 
-		public string VersionCodeProperties { get; set; }
+		public string? VersionCodeProperties { get; set; }
 
-		public string AssemblyIdentityMapFile { get; set; }
+		public string? AssemblyIdentityMapFile { get; set; }
 
-		public string OutputImportDirectory { get; set; }
+		public string? OutputImportDirectory { get; set; }
 
-		public string ImportsDirectory { get; set; }
+		public string? ImportsDirectory { get; set; }
 
 		public bool NonConstantId { get; set; }
 
 		public bool ProtobufFormat { get; set; }
 
-		public string ProguardRuleOutput { get; set; }
+		public string? ProguardRuleOutput { get; set; }
 
 		AssemblyIdentityMap assemblyMap = new AssemblyIdentityMap ();
 		List<string> tempFiles = new List<string> ();
 		SortedSet<string> rulesFiles = new SortedSet<string> ();
 		Dictionary<string, long> apks = new Dictionary<string, long> ();
-		string resourceSymbolsTextFileTemp;
+		string? resourceSymbolsTextFileTemp;
 
 		protected override int GetRequiredDaemonInstances ()
 		{
@@ -104,7 +102,7 @@ namespace Xamarin.Android.Tasks {
 					string currentResourceOutputFile = kvp.Key;
 					bool aaptResult = Daemon.JobSucceded (kvp.Value);
 					LogDebugMessage ($"Processing {currentResourceOutputFile} JobId: {kvp.Value} Exists: {File.Exists (currentResourceOutputFile)} JobWorked: {aaptResult}");
-					if (!string.IsNullOrEmpty (currentResourceOutputFile)) {
+					if (!currentResourceOutputFile.IsNullOrEmpty ()) {
 						var tmpfile = currentResourceOutputFile + ".bk";
 						// aapt2 might not produce an archive and we must provide
 						// and -o foo even if we don't want one.
@@ -122,7 +120,7 @@ namespace Xamarin.Android.Tasks {
 						}
 					}
 				}
-				if (!string.IsNullOrEmpty (ProguardRuleOutput)) {
+				if (!ProguardRuleOutput.IsNullOrEmpty ()) {
 					// combine the "proguard" temp files into one file.
 					var sb = new StringBuilder ();
 					sb.AppendLine ("#Auto Generated file. Do not Edit.");
@@ -135,7 +133,7 @@ namespace Xamarin.Android.Tasks {
 					}
 					Files.CopyIfStringChanged (sb.ToString (), ProguardRuleOutput);
 				}
-				if (!string.IsNullOrEmpty (ResourceSymbolsTextFile))
+				if (!ResourceSymbolsTextFile.IsNullOrEmpty ())
 					Files.CopyIfChanged (resourceSymbolsTextFileTemp, GetFullPath (ResourceSymbolsTextFile));
 			} finally {
 				lock (tempFiles) {
@@ -147,15 +145,19 @@ namespace Xamarin.Android.Tasks {
 			}
 		}
 
-		string [] GenerateCommandLineCommands (string ManifestFile, string currentAbi, string currentResourceOutputFile)
+		string [] GenerateCommandLineCommands (string ManifestFile, string? currentAbi, string currentResourceOutputFile)
 		{
 			List<string> cmd = new List<string> ();
 			string manifestDir = Path.Combine (Path.GetDirectoryName (ManifestFile), currentAbi != null ? currentAbi : "manifest");
 			Directory.CreateDirectory (manifestDir);
 			string manifestFile = Path.Combine (manifestDir, Path.GetFileName (ManifestFile));
+			string targetSdkVersion = AndroidApiLevel;
+			if (MonoAndroidHelper.TryParseApiLevel (targetSdkVersion, out Version v)) {
+				targetSdkVersion = v.Major.ToString (CultureInfo.InvariantCulture);
+			}
 			ManifestDocument manifest = new ManifestDocument (ManifestFile);
-			manifest.TargetSdkVersion = AndroidSdkPlatform;
-			if (!string.IsNullOrEmpty (VersionCodePattern)) {
+			manifest.TargetSdkVersion = targetSdkVersion;
+			if (!VersionCodePattern.IsNullOrEmpty ()) {
 				try {
 					manifest.CalculateVersionCode (currentAbi, VersionCodePattern, VersionCodeProperties);
 				} catch (ArgumentOutOfRangeException ex) {
@@ -163,7 +165,7 @@ namespace Xamarin.Android.Tasks {
 					return cmd.ToArray ();
 				}
 			}
-			if (currentAbi != null && string.IsNullOrEmpty (VersionCodePattern)) {
+			if (currentAbi != null && VersionCodePattern.IsNullOrEmpty ()) {
 				manifest.SetAbi (currentAbi);
 			}
 			if (!manifest.ValidateVersionCode (out string error, out string errorCode)) {
@@ -177,7 +179,7 @@ namespace Xamarin.Android.Tasks {
 				cmd.Add ("-v");
 			cmd.Add ($"--manifest");
 			cmd.Add (GetFullPath (manifestFile));
-			if (!string.IsNullOrEmpty (JavaDesignerOutputDirectory)) {
+			if (!JavaDesignerOutputDirectory.IsNullOrEmpty ()) {
 				var designerDirectory = Path.IsPathRooted (JavaDesignerOutputDirectory) ? JavaDesignerOutputDirectory : Path.Combine (WorkingDirectory, JavaDesignerOutputDirectory);
 				Directory.CreateDirectory (designerDirectory);
 				cmd.Add ("--java");
@@ -227,7 +229,7 @@ namespace Xamarin.Android.Tasks {
 					var fullPath = GetFullPath (file.ItemSpec);
 					if (!File.Exists (fullPath)) {
 						LogDebugMessage ($"File does not exist: {fullPath}");
-					} else if (!string.IsNullOrEmpty (file.GetMetadata ("ResourceDirectory"))) {
+					} else if (!file.GetMetadata ("ResourceDirectory").IsNullOrEmpty ()) {
 						cmd.Add ("-R");
 						cmd.Add (fullPath);
 					} else {
@@ -242,13 +244,14 @@ namespace Xamarin.Android.Tasks {
 
 			cmd.Add ("--auto-add-overlay");
 
-			if (!string.IsNullOrWhiteSpace (UncompressedFileExtensions))
+			if (!UncompressedFileExtensions.IsNullOrWhiteSpace ()) {
 				foreach (var ext in UncompressedFileExtensions.Split (new char [] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries)) {
 					cmd.Add ("-0");
 					cmd.Add (ext.StartsWith (".", StringComparison.OrdinalIgnoreCase) ? ext : $".{ext}");
 				}
+			}
 
-			if (!string.IsNullOrEmpty (ExtraPackages)) {
+			if (!ExtraPackages.IsNullOrEmpty ()) {
 				cmd.Add ("--extra-packages");
 				cmd.Add (ExtraPackages);
 			}
@@ -256,27 +259,32 @@ namespace Xamarin.Android.Tasks {
 			cmd.Add ("-I");
 			cmd.Add (GetFullPath (JavaPlatformJarPath));
 
-			if (!string.IsNullOrEmpty (ResourceSymbolsTextFile)) {
+			if (!ResourceSymbolsTextFile.IsNullOrEmpty ()) {
 				cmd.Add ("--output-text-symbols");
-				cmd.Add (GetFullPath (resourceSymbolsTextFileTemp));
+				cmd.Add (GetFullPath (resourceSymbolsTextFileTemp ?? ""));
 			}
 
 			if (ProtobufFormat)
 				cmd.Add ("--proto-format");
 
-			if (!string.IsNullOrWhiteSpace (ExtraArgs)) {
+			if (!ExtraArgs.IsNullOrWhiteSpace ()) {
 				foreach (Match match in exraArgSplitRegEx.Matches (ExtraArgs)) {
 					string value = match.Value.Trim (' ', '"', '\'');
-					if (!string.IsNullOrEmpty (value))
+					if (!value.IsNullOrEmpty ())
 						cmd.Add (value);
 				}
 			}
 
+			var hasAssetsErrors = false;
 			// When adding Assets the first item found takes precedence.
-			// So we need to add the applicaiton Assets first.
-			if (!string.IsNullOrEmpty (AssetsDirectory)) {
+			// So we need to add the application Assets first.
+			if (!AssetsDirectory.IsNullOrEmpty ()) {
 				var assetDir = GetFullPath (AssetsDirectory.TrimEnd ('\\'));
 				if (Directory.Exists (assetDir)) {
+					if (OS.IsWindows && !IsPathOnlyASCII (assetDir)) {
+						hasAssetsErrors = true;
+						LogCodedError ("APT2265", Properties.Resources.APT2265, assetDir);
+					}
 					cmd.Add ("-A");
 					cmd.Add (assetDir);
 				} else {
@@ -287,8 +295,13 @@ namespace Xamarin.Android.Tasks {
 			if (AdditionalAndroidAssetPaths != null) {
 				for (int i = 0; i < AdditionalAndroidAssetPaths.Length; i++) {
 					var assetDir = GetFullPath (AdditionalAndroidAssetPaths [i].ItemSpec.TrimEnd ('\\'));
-					if (!string.IsNullOrWhiteSpace (assetDir)) {
+					if (!assetDir.IsNullOrWhiteSpace ()) {
 						if (Directory.Exists (assetDir)) {
+							if (OS.IsWindows && !IsPathOnlyASCII (assetDir)) {
+								hasAssetsErrors = true;
+								LogCodedError ("APT2265", Properties.Resources.APT2265, assetDir);
+								continue;
+							}
 							cmd.Add ("-A");
 							cmd.Add (GetFullPath (assetDir));
 						} else {
@@ -298,12 +311,33 @@ namespace Xamarin.Android.Tasks {
 				}
 			}
 
-			if (!string.IsNullOrEmpty (ProguardRuleOutput)) {
+			if (hasAssetsErrors) {
+				return [];
+			}
+
+			if (!ProguardRuleOutput.IsNullOrEmpty ()) {
 				cmd.Add ("--proguard");
 				cmd.Add (GetFullPath (GetManifestRulesFile (manifestDir)));
 			}
 			cmd.Add ("-o");
 			cmd.Add (GetFullPath (currentResourceOutputFile));
+
+			// Add min SDK version from AndroidManifestFile if available
+			string? minSdkVersion = null;
+			if (AndroidManifestFile is { ItemSpec.Length: > 0 }) {
+				var doc = AndroidAppManifest.Load (AndroidManifestFile.ItemSpec, MonoAndroidHelper.SupportedVersions);
+				if (doc.MinSdkVersion.HasValue) {
+					minSdkVersion = doc.MinSdkVersion.Value.ToString (CultureInfo.InvariantCulture);
+				}
+			}
+			// Use $(SupportedOSPlatformVersion) if minSdkVersion was not found in the manifest
+			if (minSdkVersion.IsNullOrEmpty () && MonoAndroidHelper.TryParseApiLevel (SupportedOSPlatformVersion, out Version version)) {
+				minSdkVersion = version.Major.ToString (CultureInfo.InvariantCulture);
+			}
+			if (!minSdkVersion.IsNullOrEmpty ()) {
+				cmd.Add ("--min-sdk-version");
+				cmd.Add (minSdkVersion);
+			}
 
 			return cmd.ToArray ();
 		}
@@ -334,7 +368,7 @@ namespace Xamarin.Android.Tasks {
 
 			if (AdditionalAndroidResourcePaths != null)
 				foreach (var dir in AdditionalAndroidResourcePaths)
-					if (!string.IsNullOrEmpty (dir.ItemSpec))
+					if (!dir.ItemSpec.IsNullOrEmpty ())
 						upToDate = upToDate && ManifestIsUpToDate (string.Format ("{0}{1}{2}{3}{4}", dir, Path.DirectorySeparatorChar, "manifest", Path.DirectorySeparatorChar, "AndroidManifest.xml"));
 
 			if (upToDate) {
@@ -342,12 +376,12 @@ namespace Xamarin.Android.Tasks {
 				return;
 			}
 
-			var defaultAbi = new string [] { null };
+			var defaultAbi = new string? [] { null };
 			var abis = CreatePackagePerAbi && SupportedAbis?.Length > 1 ? defaultAbi.Concat (SupportedAbis) : defaultAbi;
-			var outputFile = string.IsNullOrEmpty (OutputFile) ? GetTempFile () : OutputFile;
+			var outputFile = OutputFile.IsNullOrEmpty () ? GetTempFile () : OutputFile;
 			foreach (var abi in abis) {
 				var currentResourceOutputFile = abi != null ? string.Format ("{0}-{1}", outputFile, abi) : outputFile;
-				if (!string.IsNullOrEmpty (currentResourceOutputFile) && !Path.IsPathRooted (currentResourceOutputFile))
+				if (!currentResourceOutputFile.IsNullOrEmpty () && !Path.IsPathRooted (currentResourceOutputFile))
 					currentResourceOutputFile = Path.Combine (WorkingDirectory, currentResourceOutputFile);
 				string[] cmd = GenerateCommandLineCommands (manifest, abi, currentResourceOutputFile);
 				if (!cmd.Any () || !ExecuteForAbi (cmd, currentResourceOutputFile)) {

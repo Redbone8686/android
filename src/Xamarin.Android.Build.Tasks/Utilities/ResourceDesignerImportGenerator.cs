@@ -44,6 +44,10 @@ namespace Xamarin.Android.Tasks
 			primary.Members.Add (method);
 			foreach (var assemblyPath in libraries) {
 				using (var pe = new PEReader (File.OpenRead (assemblyPath.ItemSpec))) {
+					if (!pe.HasMetadata) {
+						Log.LogDebugMessage ($"Skipping non-.NET assembly: {assemblyPath.ItemSpec}");
+						continue;
+					}
 					var reader = pe.GetMetadataReader ();
 					var resourceDesignerName = GetResourceDesignerClass (reader);
 					if (string.IsNullOrEmpty (resourceDesignerName)) {
@@ -77,10 +81,11 @@ namespace Xamarin.Android.Tasks
 			}
 		}
 
-		string GetResourceDesignerClass (MetadataReader reader)
+		string? GetResourceDesignerClass (MetadataReader reader)
 		{
-			// Looking for:
-			// [assembly: Android.Runtime.ResourceDesignerAttribute("MyApp.Resource", IsApplication=true)]
+			// Looking for library assemblies:
+			// [assembly: Android.Runtime.ResourceDesignerAttribute("MyLibrary.Resource, MyLibrary", IsApplication=false)]
+			// [assembly: Android.Runtime.ResourceDesignerAttribute("MyLibrary.Resource", IsApplication=false)]
 
 			var assembly = reader.GetAssemblyDefinition ();
 			foreach (var handle in assembly.GetCustomAttributes ()) {
@@ -94,10 +99,23 @@ namespace Xamarin.Android.Tasks
 							return null;
 						}
 					}
-					return (string) values.FixedArguments.First ().Value;
+					var typeName = (string?) values.FixedArguments.First ().Value;
+					return GetTypeFullNameFromAssemblyQualifiedName (typeName);
 				}
 			}
 			return null;
+		}
+
+		internal static string? GetTypeFullNameFromAssemblyQualifiedName (string? typeName)
+		{
+			if (typeName is null)
+				return typeName;
+
+			int assemblySeparator = typeName.IndexOf (',');
+			if (assemblySeparator < 0)
+				return typeName;
+
+			return typeName.Substring (0, assemblySeparator).Trim ();
 		}
 
 		void CreateImportFor (string declaringTypeFullName, TypeDefinition type, CodeMemberMethod method, MetadataReader reader, bool hasAlias)
@@ -123,4 +141,3 @@ namespace Xamarin.Android.Tasks
 		}
 	}
 }
-

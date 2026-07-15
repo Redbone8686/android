@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -14,28 +16,35 @@ namespace Xamarin.Android.Tasks
 	{
 		public override string TaskPrefix => "CAAR";
 
-		public ITaskItem [] AndroidAssets { get; set; }
+		public ITaskItem []? AndroidAssets { get; set; }
 
-		public ITaskItem [] AndroidResources { get; set; }
+		public ITaskItem []? AndroidResources { get; set; }
 
-		public ITaskItem [] AndroidEnvironment { get; set; }
+		public ITaskItem []? AndroidEnvironment { get; set; }
 
-		public ITaskItem AndroidManifest { get; set; }
+		public ITaskItem? AndroidManifest { get; set; }
 
-		public ITaskItem [] JarFiles { get; set; }
+		public ITaskItem []? JarFiles { get; set; }
 
-		public ITaskItem [] NativeLibraries { get; set; }
+		public ITaskItem []? NativeLibraries { get; set; }
 
-		public ITaskItem [] ProguardConfigurationFiles { get; set; }
-
-		[Required]
-		public string AssetDirectory { get; set; }
+		public ITaskItem []? ProguardConfigurationFiles { get; set; }
 
 		[Required]
-		public string OutputFile { get; set; }
+		public string AssetDirectory { get; set; } = "";
+
+		[Required]
+		public string OutputFile { get; set; } = "";
+
+		[Required]
+		public string PrefixProperty { get; set; } = "";
 
 		public override bool RunTask ()
 		{
+			if (Path.IsPathRooted (AssetDirectory)) {
+				Log.LogCodedError ("XA1041", message: Properties.Resources.XA1041, PrefixProperty, AssetDirectory);
+				return false;
+			}
 			Directory.CreateDirectory (Path.GetDirectoryName (OutputFile));
 
 			using (var stream = File.Create (OutputFile))
@@ -91,6 +100,11 @@ namespace Xamarin.Android.Tasks
 				}
 				if (JarFiles != null) {
 					foreach (var jar in JarFiles) {
+						var pack = jar.GetMetadata ("Pack");
+						if (string.Equals (pack, "false", StringComparison.OrdinalIgnoreCase)) {
+							Log.LogDebugMessage ($"Skipping jar '{jar.ItemSpec}' because Pack='false'");
+							continue;
+						}
 						var archivePath = $"libs/{GetHashedFileName (jar)}.jar";
 						aar.AddStream (File.OpenRead (jar.ItemSpec), archivePath);
 						existingEntries.Remove (archivePath);
@@ -99,7 +113,7 @@ namespace Xamarin.Android.Tasks
 				if (NativeLibraries != null) {
 					foreach (var lib in NativeLibraries) {
 						var abi = AndroidRidAbiHelper.GetNativeLibraryAbi (lib);
-						if (string.IsNullOrWhiteSpace (abi)) {
+						if (abi.IsNullOrWhiteSpace ()) {
 							Log.LogCodedError ("XA4301", lib.ItemSpec, 0, Properties.Resources.XA4301_ABI, lib.ItemSpec);
 							continue;
 						}
@@ -118,7 +132,7 @@ namespace Xamarin.Android.Tasks
 				if (AndroidManifest != null && File.Exists (AndroidManifest.ItemSpec)) {
 					var manifest = File.ReadAllText (AndroidManifest.ItemSpec);
 					var doc = XDocument.Parse(manifest);
-					if (!string.IsNullOrEmpty (doc.Element ("manifest")?.Attribute ("package")?.Value ?? string.Empty)) {
+					if (!(doc.Element ("manifest")?.Attribute ("package")?.Value).IsNullOrEmpty ()) {
 						aar.AddEntry ("AndroidManifest.xml", manifest, Files.UTF8withoutBOM);
 					} else {
 						Log.LogDebugMessage ($"Skipping {AndroidManifest.ItemSpec}. The `manifest` does not have a `package` attribute.");

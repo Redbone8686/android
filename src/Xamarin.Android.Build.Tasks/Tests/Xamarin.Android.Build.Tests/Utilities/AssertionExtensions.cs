@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using Xamarin.Android.Tasks;
 using Xamarin.ProjectTools;
@@ -10,39 +12,39 @@ namespace Xamarin.Android.Build.Tests
 	public static class AssertionExtensions
 	{
 		[DebuggerHidden]
-		public static void AssertTargetIsSkipped (this BuildOutput output, string target, int? occurrence = null)
+		public static void AssertTargetIsSkipped (this BuildOutput output, string target, int? occurrence = null, bool defaultIfNotUsed = false)
 		{
 			if (occurrence != null)
-				Assert.IsTrue (output.IsTargetSkipped (target), $"The target {target} should have been skipped. ({occurrence})");
+				Assert.IsTrue (output.IsTargetSkipped (target, defaultIfNotUsed), $"The target {target} should have been skipped. ({occurrence})");
 			else
-				Assert.IsTrue (output.IsTargetSkipped (target), $"The target {target} should have been skipped.");
+				Assert.IsTrue (output.IsTargetSkipped (target, defaultIfNotUsed), $"The target {target} should have been skipped.");
 		}
 
 		[DebuggerHidden]
-		public static void AssertTargetIsNotSkipped (this BuildOutput output, string target, int? occurrence = null)
+		public static void AssertTargetIsNotSkipped (this BuildOutput output, string target, int? occurrence = null, bool defaultIfNotUsed = false)
 		{
 			if (occurrence != null)
-				Assert.IsFalse (output.IsTargetSkipped (target), $"The target {target} should have *not* been skipped. ({occurrence})");
+				Assert.IsFalse (output.IsTargetSkipped (target, defaultIfNotUsed), $"The target {target} should have *not* been skipped. ({occurrence})");
 			else
-				Assert.IsFalse (output.IsTargetSkipped (target), $"The target {target} should have *not* been skipped.");
+				Assert.IsFalse (output.IsTargetSkipped (target, defaultIfNotUsed), $"The target {target} should have *not* been skipped.");
 		}
 
 		[DebuggerHidden]
-		public static void AssertTargetIsSkipped (this DotNetCLI dotnet, string target, int? occurrence = null)
+		public static void AssertTargetIsSkipped (this DotNetCLI dotnet, string target, int? occurrence = null, bool defaultIfNotUsed = false)
 		{
 			if (occurrence != null)
-				Assert.IsTrue (dotnet.IsTargetSkipped (target), $"The target {target} should have been skipped. ({occurrence})");
+				Assert.IsTrue (dotnet.IsTargetSkipped (target, defaultIfNotUsed), $"The target {target} should have been skipped. ({occurrence})");
 			else
-				Assert.IsTrue (dotnet.IsTargetSkipped (target), $"The target {target} should have been skipped.");
+				Assert.IsTrue (dotnet.IsTargetSkipped (target, defaultIfNotUsed), $"The target {target} should have been skipped.");
 		}
 
 		[DebuggerHidden]
-		public static void AssertTargetIsNotSkipped (this DotNetCLI dotnet, string target, int? occurrence = null)
+		public static void AssertTargetIsNotSkipped (this DotNetCLI dotnet, string target, int? occurrence = null, bool defaultIfNotUsed = false)
 		{
 			if (occurrence != null)
-				Assert.IsFalse (dotnet.IsTargetSkipped (target), $"The target {target} should have *not* been skipped. ({occurrence})");
+				Assert.IsFalse (dotnet.IsTargetSkipped (target, defaultIfNotUsed), $"The target {target} should have *not* been skipped. ({occurrence})");
 			else
-				Assert.IsFalse (dotnet.IsTargetSkipped (target), $"The target {target} should have *not* been skipped.");
+				Assert.IsFalse (dotnet.IsTargetSkipped (target, defaultIfNotUsed), $"The target {target} should have *not* been skipped.");
 		}
 
 		[DebuggerHidden]
@@ -70,7 +72,7 @@ namespace Xamarin.Android.Build.Tests
 		[DebuggerHidden]
 		public static void AssertContainsEntry (this ZipArchive zip, string zipPath, string archivePath)
 		{
-			Assert.IsTrue (zip.ContainsEntry (archivePath), $"{zipPath} should contain {archivePath}");
+			Assert.IsTrue (zip.ContainsEntry (archivePath), $"{zipPath} should contain {archivePath}:\n{string.Join (",\n", zip.Select (e => e.FullName))}");
 		}
 
 		[DebuggerHidden]
@@ -114,6 +116,7 @@ namespace Xamarin.Android.Build.Tests
 		[DebuggerHidden]
 		public static void AssertEntryContents (this ZipArchive zip, string zipPath, string archivePath, string contents)
 		{
+			zip.AssertContainsEntry (zipPath, archivePath);
 			var entry = zip.ReadEntry (archivePath);
 			Assert.IsNotNull (entry, $"{zipPath} should contain {archivePath}");
 			using (var stream = new MemoryStream ())
@@ -128,13 +131,52 @@ namespace Xamarin.Android.Build.Tests
 		[DebuggerHidden]
 		public static void AssertHasNoWarnings (this ProjectBuilder builder)
 		{
-			Assert.IsTrue (StringAssertEx.ContainsText (builder.LastBuildOutput, " 0 Warning(s)"), $"{builder.BuildLogFile} should have no MSBuild warnings.");
+			AssertHasSomeWarnings (builder.LastBuildOutput, 0, builder.BuildLogFile);
+		}
+
+		[DebuggerHidden]
+		public static void AssertHasSomeWarnings (this ProjectBuilder builder, uint numOfExpectedWarnings)
+		{
+			AssertHasSomeWarnings (builder.LastBuildOutput, numOfExpectedWarnings, builder.BuildLogFile);
 		}
 
 		[DebuggerHidden]
 		public static void AssertHasNoWarnings (this DotNetCLI dotnet)
 		{
-			Assert.IsTrue (StringAssertEx.ContainsText (dotnet.LastBuildOutput, " 0 Warning(s)"), $"{dotnet.BuildLogFile} should have no MSBuild warnings.");
+			AssertHasSomeWarnings (dotnet.LastBuildOutput, 0, dotnet.BuildLogFile);
+		}
+
+		[DebuggerHidden]
+		public static void AssertHasSomeWarnings (this DotNetCLI dotnet, uint numOfExpectedWarnings)
+		{
+			AssertHasSomeWarnings (dotnet.LastBuildOutput, numOfExpectedWarnings, dotnet.BuildLogFile);
+		}
+
+		[DebuggerHidden]
+		public static void AssertHasAtMostWarnings (this ProjectBuilder builder, uint maxWarnings)
+		{
+			AssertHasAtMostWarnings (builder.LastBuildOutput, maxWarnings, builder.BuildLogFile);
+		}
+
+		[DebuggerHidden]
+		public static void AssertHasAtMostWarnings (this DotNetCLI dotnet, uint maxWarnings)
+		{
+			AssertHasAtMostWarnings (dotnet.LastBuildOutput, maxWarnings, dotnet.BuildLogFile);
+		}
+
+		static void AssertHasSomeWarnings (IEnumerable<string> lastBuildOutput, uint numOfExpectedWarnings, string logFile)
+		{
+			Assert.IsTrue (StringAssertEx.ContainsText (lastBuildOutput, $" {numOfExpectedWarnings} Warning(s)"), $"{logFile} should have {numOfExpectedWarnings} MSBuild warnings.");
+		}
+
+		static void AssertHasAtMostWarnings (IEnumerable<string> lastBuildOutput, uint maxWarnings, string logFile)
+		{
+			var match = lastBuildOutput
+				.Select (line => System.Text.RegularExpressions.Regex.Match (line, @"^\s*(\d+) Warning\(s\)\s*$"))
+				.FirstOrDefault (m => m.Success);
+			Assert.IsNotNull (match, $"{logFile} did not contain an MSBuild 'N Warning(s)' summary line.");
+			var actual = uint.Parse (match.Groups [1].Value, System.Globalization.CultureInfo.InvariantCulture);
+			Assert.IsTrue (actual <= maxWarnings, $"{logFile} should have at most {maxWarnings} MSBuild warnings, but had {actual}.");
 		}
 	}
 }

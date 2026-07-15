@@ -18,7 +18,6 @@ namespace Android.Graphics
 	{
 		private int color;
 
-		#region Constuctors
 		public Color (int argb)
 		{
 			color = argb;
@@ -48,16 +47,31 @@ namespace Android.Graphics
 		{
 			color = FromArgb (r, g, b, a);
 		}
-		#endregion
 
-		#region Public Properties
+		/// <summary>
+		/// Gets or sets the alpha (opacity) component of the color, where 0 is fully transparent and 255 is fully opaque.
+		/// </summary>
+		/// <value>A <see cref="byte"/> representing the alpha component, in the range 0–255.</value>
 		public byte A { get { return (byte)(color >> 24); } set { color = FromArgb (R, G, B, value); } }
-		public byte B { get { return (byte)color; } set { color = FromArgb (R, G, value, A); } }
-		public byte G { get { return (byte)(color >> 8); } set { color = FromArgb (R, value, B, A); } }
-		public byte R { get { return (byte)(color >> 16); } set { color = FromArgb (value, G, B, A); } }
-		#endregion
 
-		#region Public Methods
+		/// <summary>
+		/// Gets or sets the blue component of the color.
+		/// </summary>
+		/// <value>A <see cref="byte"/> representing the blue component, in the range 0–255.</value>
+		public byte B { get { return (byte)color; } set { color = FromArgb (R, G, value, A); } }
+
+		/// <summary>
+		/// Gets or sets the green component of the color.
+		/// </summary>
+		/// <value>A <see cref="byte"/> representing the green component, in the range 0–255.</value>
+		public byte G { get { return (byte)(color >> 8); } set { color = FromArgb (R, value, B, A); } }
+
+		/// <summary>
+		/// Gets or sets the red component of the color.
+		/// </summary>
+		/// <value>A <see cref="byte"/> representing the red component, in the range 0–255.</value>
+		public byte R { get { return (byte)(color >> 16); } set { color = FromArgb (value, G, B, A); } }
+
 		public int ToArgb ()
 		{
 			return color;
@@ -68,7 +82,7 @@ namespace Android.Graphics
 			return FormattableString.Invariant ($"Color [A={A}, R={R}, G={G}, B={B}]");
 		}
 
-		public override bool Equals (object obj)
+		public override bool Equals (object? obj)
 		{
 			if (!(obj is Color))
 				return false;
@@ -127,24 +141,42 @@ namespace Android.Graphics
 
 			return hue;
 		}
-		#endregion
 
-		#region Public Static Methods
+		/// <summary>
+		/// Extracts the alpha (opacity) component from a packed ARGB color integer, where 0 is fully transparent and 255 is fully opaque.
+		/// </summary>
+		/// <param name="color">A packed ARGB color integer, such as the value returned by <see cref="ToArgb"/>.</param>
+		/// <returns>The alpha component of <paramref name="color"/>, in the range 0–255.</returns>
 		public static int GetAlphaComponent (int color)
 		{
 			return (byte)(color >> 24);
 		}
 
+		/// <summary>
+		/// Extracts the blue component from a packed ARGB color integer.
+		/// </summary>
+		/// <param name="color">A packed ARGB color integer, such as the value returned by <see cref="ToArgb"/>.</param>
+		/// <returns>The blue component of <paramref name="color"/>, in the range 0–255.</returns>
 		public static int GetBlueComponent (int color)
 		{
 			return (byte)color;
 		}
 
+		/// <summary>
+		/// Extracts the green component from a packed ARGB color integer.
+		/// </summary>
+		/// <param name="color">A packed ARGB color integer, such as the value returned by <see cref="ToArgb"/>.</param>
+		/// <returns>The green component of <paramref name="color"/>, in the range 0–255.</returns>
 		public static int GetGreenComponent (int color)
 		{
 			return (byte)(color >> 8);
 		}
 
+		/// <summary>
+		/// Extracts the red component from a packed ARGB color integer.
+		/// </summary>
+		/// <param name="color">A packed ARGB color integer, such as the value returned by <see cref="ToArgb"/>.</param>
+		/// <returns>The red component of <paramref name="color"/>, in the range 0–255.</returns>
 		public static int GetRedComponent (int color)
 		{
 			return (byte)(color >> 16);
@@ -160,9 +192,7 @@ namespace Android.Graphics
 			int alpha = 255;
 			return new Color ((int)((uint)alpha << 24) | (red << 16) | (green << 8) | blue);
 		}
-		#endregion
 
-		#region Operators
 		public static bool operator == (Color left, Color right)
 		{
 			return left.color == right.color;
@@ -182,9 +212,7 @@ namespace Android.Graphics
 		{
 			return color;
 		}
-		#endregion
 
-		#region Private Methods
 		private static int FromRgb (int red, int green, int blue)
 		{
 			int alpha = 255;
@@ -246,9 +274,7 @@ namespace Android.Graphics
 		{
 			ColorObject.RGBToHSV (red, green, blue, hsv);
 		}
-		#endregion
 
-		#region Known Colors
 		public static Color Transparent { get { return new Color (0x000000); } }
 		public static Color AliceBlue { get { return new Color (0xFFF0F8FF); } }
 		public static Color AntiqueWhite { get { return new Color (0xFFFAEBD7); } }
@@ -390,23 +416,17 @@ namespace Android.Graphics
 		public static Color WhiteSmoke { get { return new Color (0xFFF5F5F5); } }
 		public static Color Yellow { get { return new Color (0xFFFFFF00); } }
 		public static Color YellowGreen { get { return new Color (0xFF9ACD32); } }
-		#endregion
 	}
 
 	public class ColorValueMarshaler : JniValueMarshaler<Color>
 	{
-		const DynamicallyAccessedMemberTypes ConstructorsAndInterfaces = DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors | DynamicallyAccessedMemberTypes.Interfaces;
 		const string ExpressionRequiresUnreferencedCode = "System.Linq.Expression usage may trim away required code.";
 
 		public override Type MarshalType {
 			get { return typeof (int); }
 		}
 
-		public override Color CreateGenericValue (
-				ref JniObjectReference reference,
-				JniObjectReferenceOptions options,
-				[DynamicallyAccessedMembers (ConstructorsAndInterfaces)]
-				Type targetType)
+		public override Color CreateGenericValue (ref JniObjectReference reference, JniObjectReferenceOptions options, Type? targetType)
 		{
 			throw new NotImplementedException ();
 		}
@@ -423,7 +443,7 @@ namespace Android.Graphics
 
 		[RequiresDynamicCode (ExpressionRequiresUnreferencedCode)]
 		[RequiresUnreferencedCode (ExpressionRequiresUnreferencedCode)]
-		public override Expression CreateParameterToManagedExpression (JniValueMarshalerContext context, ParameterExpression sourceValue, ParameterAttributes synchronize, Type targetType)
+		public override Expression CreateParameterToManagedExpression (JniValueMarshalerContext context, ParameterExpression sourceValue, ParameterAttributes synchronize, Type? targetType)
 		{
 			var c = typeof (Color).GetConstructor (new[]{typeof (int)})!;
 			var v = Expression.Variable (typeof (Color), sourceValue.Name + "_val");

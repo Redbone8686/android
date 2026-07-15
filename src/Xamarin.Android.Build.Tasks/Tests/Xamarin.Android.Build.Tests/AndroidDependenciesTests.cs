@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Xml;
 using System.Xml.Linq;
 using NUnit.Framework;
@@ -18,14 +19,25 @@ namespace Xamarin.Android.Build.Tests
 	public class AndroidDependenciesTests : BaseTest
 	{
 		[Test]
+		[Ignore ("Flaky test that intermittently fails when downloading the Android SDK/JDK over the network in CI. See: https://github.com/dotnet/android/issues/11973")]
 		[NonParallelizable] // Do not run environment modifying tests in parallel.
-		public void InstallAndroidDependenciesTest ([Values ("GoogleV2", "Xamarin")] string manifestType)
+		public void InstallAndroidDependenciesTest ([Values ("GoogleV2", "Xamarin")] string manifestType, [Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			// The GoogleV2 manifest from Google doesn't have an ndk-bundle component,
+			// so the NDK dependency can't be resolved for runtimes that require it.
+			if (manifestType == "GoogleV2" && runtime == AndroidRuntime.NativeAOT) {
+				Assert.Ignore ("GoogleV2 manifest does not have an ndk-bundle component for NativeAOT");
+			}
+
 			// Set to true when we are marking a new Android API level as stable, but it has not
 			// been added to the Xamarin manifest yet.
 			var xamarin_manifest_needs_updating = false;
 
-			AssertCommercialBuild ();
 			var oldSdkPath = Environment.GetEnvironmentVariable ("TEST_ANDROID_SDK_PATH");
 			var oldJdkPath = Environment.GetEnvironmentVariable ("TEST_ANDROID_JDK_PATH");
 			try {
@@ -33,13 +45,11 @@ namespace Xamarin.Android.Build.Tests
 				string jdkPath = Path.Combine (Root, "temp", TestName, "android-jdk");
 				Environment.SetEnvironmentVariable ("TEST_ANDROID_SDK_PATH", sdkPath);
 				Environment.SetEnvironmentVariable ("TEST_ANDROID_JDK_PATH", jdkPath);
-				foreach (var path in new [] { sdkPath, jdkPath }) {
-					if (Directory.Exists (path))
-						Directory.Delete (path, recursive: true);
-					Directory.CreateDirectory (path);
-				}
 
-				var proj = new XamarinAndroidApplicationProject ();
+				var proj = new XamarinAndroidApplicationProject {
+					IsRelease = isRelease,
+				};
+				proj.SetRuntime (runtime);
 				var buildArgs = new List<string> {
 					"AcceptAndroidSDKLicenses=true",
 					$"AndroidManifestType={manifestType}",
@@ -56,7 +66,30 @@ namespace Xamarin.Android.Build.Tests
 					string defaultTarget = b.Target;
 					b.Target = "InstallAndroidDependencies";
 					b.BuildLogFile = "install-deps.log";
-					Assert.IsTrue (b.Build (proj, parameters: buildArgs.ToArray ()), "InstallAndroidDependencies should have succeeded.");
+
+					// InstallAndroidDependencies downloads the Android SDK and JDK over the network, which
+					// can fail intermittently in CI. Retry a few times before giving up, starting from a
+					// clean SDK/JDK directory each attempt so a partial download does not affect the next.
+					// See https://github.com/dotnet/android/issues/11973
+					const int maxInstallAttempts = 3;
+					bool installSucceeded = false;
+					for (int attempt = 1; attempt <= maxInstallAttempts; attempt++) {
+						foreach (var path in new [] { sdkPath, jdkPath }) {
+							if (Directory.Exists (path))
+								Directory.Delete (path, recursive: true);
+							Directory.CreateDirectory (path);
+						}
+
+						if (b.Build (proj, parameters: buildArgs.ToArray ())) {
+							installSucceeded = true;
+							break;
+						}
+
+						TestContext.WriteLine ($"InstallAndroidDependencies attempt {attempt} of {maxInstallAttempts} failed. Please check the task output in 'install-deps.log'.");
+						if (attempt < maxInstallAttempts)
+							Thread.Sleep (TimeSpan.FromSeconds (10));
+					}
+					Assert.IsTrue (installSucceeded, $"InstallAndroidDependencies should have succeeded within {maxInstallAttempts} attempts.");
 
 					// When dependencies can not be resolved/installed a warning will be present in build output:
 					//    Dependency `platform-tools` should have been installed but could not be resolved.
@@ -108,7 +141,8 @@ namespace Xamarin.Android.Build.Tests
 			var d = XDocument.Load (r);
 
 			var platformToolsPackage    = d.Root.Elements ("remotePackage")
-				.Where (e => "platform-tools" == (string) e.Attribute("path"))
+				.Where (e => "platform-tools" == (string) e.Attribute("path") &&
+					"android-sdk-preview-license" != (string) e.Element ("uses-license")?.Attribute ("ref"))
 				.FirstOrDefault ();
 
 			var revision    = platformToolsPackage.Element ("revision");
@@ -116,14 +150,56 @@ namespace Xamarin.Android.Build.Tests
 			return $"{revision.Element ("major")?.Value}.{revision.Element ("minor")?.Value}.{revision.Element ("micro")?.Value}";
 		}
 
-		[Test]
-		[TestCase ("AotAssemblies", false)]
-		[TestCase ("AndroidEnableProfiledAot", false)]
-		[TestCase ("EnableLLVM", true)]
-		public void GetDependencyNdkRequiredConditions (string property, bool ndkRequired)
+		static IEnumerable<object[]> Get_GetDependencyNdkRequiredConditionsData ()
 		{
-			var proj = new XamarinAndroidApplicationProject ();
-			proj.AotAssemblies = true;
+			var ret = new List<object[]> ();
+
+			foreach (AndroidRuntime runtime in new[] { AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT }) {
+				AddTestData ("AotAssemblies", false, runtime);
+				AddTestData ("AndroidEnableProfiledAot", false, runtime);
+				AddTestData ("EnableLLVM", true, runtime);
+			}
+
+			return ret;
+
+			void AddTestData (string property, bool ndkRequired, AndroidRuntime runtime)
+			{
+				ret.Add (new object[] {
+					property,
+					ndkRequired,
+					runtime,
+				});
+			}
+		}
+
+		[Test]
+		[TestCaseSource (nameof (Get_GetDependencyNdkRequiredConditionsData))]
+		public void GetDependencyNdkRequiredConditions (string property, bool ndkRequired, AndroidRuntime runtime)
+		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			// CoreCLR doesn't support AOT so it doesn't ever need the NDK and it doesn't support profiled AOT
+			if (runtime == AndroidRuntime.CoreCLR && (ndkRequired || property == "AndroidEnableProfiledAot")) {
+				Assert.Ignore ("CoreCLR doesn't support AOT, it doesn't ever require the NDK");
+			}
+
+			// NativeAOT doesn't support profiled AOT or EnableLLVM (Mono concepts)
+			if (runtime == AndroidRuntime.NativeAOT && property == "AndroidEnableProfiledAot") {
+				Assert.Ignore ("NativeAOT doesn't support profiled AOT");
+			}
+
+			if (runtime == AndroidRuntime.NativeAOT && property == "EnableLLVM") {
+				Assert.Ignore ("EnableLLVM is not applicable to NativeAOT");
+			}
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+			};
+			proj.SetRuntime (runtime);
+			proj.AotAssemblies = runtime == AndroidRuntime.MonoVM;
 			proj.SetProperty (property, "true");
 			using (var builder = CreateApkBuilder ()) {
 				builder.Verbosity = LoggerVerbosity.Detailed;
@@ -142,8 +218,35 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void GetDependencyWhenBuildToolsAreMissingTest ()
+		public void NativeAotRequiresNdk_WhenWorkloadLinkerDisabled ()
 		{
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = true,
+			};
+			proj.SetRuntime (AndroidRuntime.NativeAOT);
+			proj.SetProperty ("_AndroidUseWorkloadNativeLinker", "false");
+			proj.SetProperty ("_SkipNdkResolution", "false");
+			using (var builder = CreateApkBuilder ()) {
+				builder.Verbosity = LoggerVerbosity.Detailed;
+				builder.Target = "GetAndroidDependencies";
+				Assert.IsTrue (builder.Build (proj), "Build should have succeeded.");
+				IEnumerable<string> taskOutput = builder.LastBuildOutput
+					.Select (x => x.Trim ())
+					.SkipWhile (x => !x.StartsWith ("Task \"CalculateProjectDependencies\"", StringComparison.Ordinal))
+					.SkipWhile (x => !x.StartsWith ("Output Item(s):", StringComparison.Ordinal))
+					.TakeWhile (x => !x.StartsWith ("Done executing task \"CalculateProjectDependencies\"", StringComparison.Ordinal));
+				StringAssertEx.Contains ("ndk-bundle", taskOutput, "ndk-bundle should be a dependency for NativeAOT without workload linker.");
+			}
+		}
+
+		[Test]
+		public void GetDependencyWhenBuildToolsAreMissingTest ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
+		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var apis = new ApiInfo [] {
 			};
 			var path = Path.Combine ("temp", TestName);
@@ -151,9 +254,10 @@ namespace Xamarin.Android.Build.Tests
 					null, apis);
 			var referencesPath = CreateFauxReferencesDirectory (Path.Combine (path, "xbuild-frameworks"), apis);
 			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
+				IsRelease = isRelease,
 				TargetSdkVersion = "26",
 			};
+			proj.SetRuntime (runtime);
 			var parameters = new string [] {
 				$"TargetFrameworkRootPath={referencesPath}",
 				$"AndroidSdkDirectory={androidSdkPath}",
@@ -165,16 +269,24 @@ namespace Xamarin.Android.Build.Tests
 				builder.Target = "GetAndroidDependencies";
 				Assert.True (builder.Build (proj, parameters: parameters),
 					string.Format ("First Build should have succeeded"));
-				int apiLevel = XABuildConfig.AndroidDefaultTargetDotnetApiLevel;
-				StringAssertEx.Contains ($"platforms/android-{apiLevel}", builder.LastBuildOutput, $"platforms/android-{apiLevel} should be a dependency.");
+				var apiLevel = XABuildConfig.AndroidDefaultTargetDotnetApiLevel;
+				StringAssertEx.Contains (
+						anyOf: new [] { $"platforms/android-{apiLevel}", $"platforms/android-{apiLevel.Major}" },
+						collection: builder.LastBuildOutput,
+						message: $"platforms/android-{apiLevel} should be a dependency.");
 				StringAssertEx.Contains ($"build-tools/{buildToolsVersion}", builder.LastBuildOutput, $"build-tools/{buildToolsVersion} should be a dependency.");
 				StringAssertEx.Contains ("platform-tools", builder.LastBuildOutput, "platform-tools should be a dependency.");
 			}
 		}
 
 		[Test]
-		public void GetDependencyWhenSDKIsMissingTest ([Values (true, false)] bool createSdkDirectory, [Values (true, false)] bool installJavaDeps)
+		public void GetDependencyWhenSDKIsMissingTest ([Values] bool createSdkDirectory, [Values] bool installJavaDeps, [Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var apis = new ApiInfo [] {
 			};
 			var path = Path.Combine ("temp", TestName);
@@ -185,7 +297,7 @@ namespace Xamarin.Android.Build.Tests
 				Directory.Delete (androidSdkPath, recursive: true);
 			var referencesPath = CreateFauxReferencesDirectory (Path.Combine (path, "xbuild-frameworks"), apis);
 			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
+				IsRelease = isRelease,
 				TargetSdkVersion = "26",
 			};
 			var requestedJdkVersion = "17.0.8.1";
@@ -203,8 +315,11 @@ namespace Xamarin.Android.Build.Tests
 				builder.Target = "GetAndroidDependencies";
 				Assert.True (builder.Build (proj, parameters: parameters),
 					string.Format ("First Build should have succeeded"));
-				int apiLevel = XABuildConfig.AndroidDefaultTargetDotnetApiLevel;
-				StringAssertEx.Contains ($"platforms/android-{apiLevel}", builder.LastBuildOutput, $"platforms/android-{apiLevel} should be a dependency.");
+				var apiLevel = XABuildConfig.AndroidDefaultTargetDotnetApiLevel;
+				StringAssertEx.Contains (
+						anyOf: new [] { $"platforms/android-{apiLevel}", $"platforms/android-{apiLevel.Major}" },
+						collection: builder.LastBuildOutput,
+						message: $"platforms/android-{apiLevel} should be a dependency.");
 				StringAssertEx.Contains ($"build-tools/{buildToolsVersion}", builder.LastBuildOutput, $"build-tools/{buildToolsVersion} should be a dependency.");
 				StringAssertEx.Contains ("platform-tools", builder.LastBuildOutput, "platform-tools should be a dependency.");
 				if (installJavaDeps)

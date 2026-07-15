@@ -8,33 +8,11 @@
   "suppressionSets": {
     "default": {
       "name": "default",
-      "createdDate": "2023-02-22 23:55:29Z",
-      "lastUpdatedDate": "2024-04-22 13:40:30Z"
+      "createdDate": "2025-02-05 11:48:04Z",
+      "lastUpdatedDate": "2025-02-05 11:48:04Z"
     }
   },
   "results": {
-    "6789cab1bdc97b0cc3ad057b7fdd21d63cdf8bc2679391923803fa240ef81292": {
-      "signature": "6789cab1bdc97b0cc3ad057b7fdd21d63cdf8bc2679391923803fa240ef81292",
-      "alternativeSignatures": [
-        "b5041e3ec6776af49d6d69148e4db480f366b559299d19ec8ea3e095295b39a8"
-      ],
-      "memberOf": [
-        "default"
-      ],
-      "justification": "Reference to an ISCII term.",
-      "createdDate": "2023-02-22 23:55:29Z"
-    },
-    "bbaf5f946cb72748567e41f0df5f1bae05550f4ba7381e21ec6b26d6c3ecec9f": {
-      "signature": "bbaf5f946cb72748567e41f0df5f1bae05550f4ba7381e21ec6b26d6c3ecec9f",
-      "alternativeSignatures": [
-        "739cb5e6ee2409515900652ca668f819f697f23834becece8d2f9f9236723c1b"
-      ],
-      "memberOf": [
-        "default"
-      ],
-      "justification": "Reference to an ISCII term.",
-      "createdDate": "2023-02-22 23:55:29Z"
-    },
     "db8916a0f0cdca4082c540921dd362e09a9ff413862ab826308411b76ee35789": {
       "signature": "db8916a0f0cdca4082c540921dd362e09a9ff413862ab826308411b76ee35789",
       "alternativeSignatures": [
@@ -101,50 +79,6 @@
       "justification": "Reference to an Android logging function.",
       "createdDate": "2023-02-22 23:55:29Z"
     },
-    "bca629d8e7888af4116b013c6585b78d0908d248a80138339e0eb1620832eb10": {
-      "signature": "bca629d8e7888af4116b013c6585b78d0908d248a80138339e0eb1620832eb10",
-      "alternativeSignatures": [
-        "f35d63032e4f346c1afcc299d50eb17a0a05ecea81ba3025f14c7fbf78b10100"
-      ],
-      "memberOf": [
-        "default"
-      ],
-      "justification": "Reference to find first set bit function.",
-      "createdDate": "2023-02-22 23:55:29Z"
-    },
-    "dc43990fd9fa6a44f2fb2fffcb0497571af4379f23090482035d79a98970e7ae": {
-      "signature": "dc43990fd9fa6a44f2fb2fffcb0497571af4379f23090482035d79a98970e7ae",
-      "alternativeSignatures": [
-        "f35d63032e4f346c1afcc299d50eb17a0a05ecea81ba3025f14c7fbf78b10100"
-      ],
-      "memberOf": [
-        "default"
-      ],
-      "justification": "Reference to find first set bit function.",
-      "createdDate": "2023-02-22 23:55:29Z"
-    },
-    "eb60d4f1e48ca85ad5fa4a413d8ff76c4975bccb12931f51179d67c24a82f354": {
-      "signature": "eb60d4f1e48ca85ad5fa4a413d8ff76c4975bccb12931f51179d67c24a82f354",
-      "alternativeSignatures": [
-        "f35d63032e4f346c1afcc299d50eb17a0a05ecea81ba3025f14c7fbf78b10100"
-      ],
-      "memberOf": [
-        "default"
-      ],
-      "justification": "Reference to find first set bit function.",
-      "createdDate": "2023-02-22 23:55:29Z"
-    },
-    "bb80a900ad96e4833eb7f54f55723a3425e846a290dd62b709d4714952cd9d45": {
-      "signature": "bb80a900ad96e4833eb7f54f55723a3425e846a290dd62b709d4714952cd9d45",
-      "alternativeSignatures": [
-        "f35d63032e4f346c1afcc299d50eb17a0a05ecea81ba3025f14c7fbf78b10100"
-      ],
-      "memberOf": [
-        "default"
-      ],
-      "justification": "Reference to find first set bit function.",
-      "createdDate": "2024-02-22 21:40:38Z"
-    },
     "b34b42aa41018376a31460c142f2ae910704725d9e9a4470f92b587df682369b": {
       "signature": "b34b42aa41018376a31460c142f2ae910704725d9e9a4470f92b587df682369b",
       "alternativeSignatures": [
@@ -153,19 +87,247 @@
       "memberOf": [
         "default"
       ],
-      "justification": "Reference to output from an external tool.",
-      "createdDate": "2023-02-22 23:55:29Z"
+      "justification": "Matching against `aapt2` tool output.",
+      "createdDate": "2025-02-05 11:48:04Z"
     },
-    "243e199c7aec22377e0363bdca82384278cc36b0674f35697935fde6c45cfd0e": {
-      "signature": "243e199c7aec22377e0363bdca82384278cc36b0674f35697935fde6c45cfd0e",
+    "26d3e99b351de02627162b255b2513d833a0343a6f25064f35d7310eb07cf3ff": {
+      "signature": "26d3e99b351de02627162b255b2513d833a0343a6f25064f35d7310eb07cf3ff",
       "alternativeSignatures": [
-        "cf02f44873b25336e01a1fa294bd858d2ea69ae734f08c6db40d4b83d17ccf76"
+        "d23c1bf667150310fd782f0ad92064dcf077226a64d9bf1dd6762ead152f7703"
       ],
       "memberOf": [
         "default"
       ],
-      "justification": "Reference to a proper name.",
-      "createdDate": "2023-10-26 21:20:54Z"
+      "justification": "Reference to ffs(3) find first set bit function.",
+      "createdDate": "2025-02-10 19:44:17Z"
+    },
+    "a5555a74b0e940543802a63a6465b4d965eff4f6c858552813df633186794c45": {
+      "signature": "a5555a74b0e940543802a63a6465b4d965eff4f6c858552813df633186794c45",
+      "alternativeSignatures": [
+        "c5aa7148967f346e897301d8c424af20d89620c75ba9b966a0d42985102717bc"
+      ],
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Reference to ffs(3) find first set bit function.",
+      "createdDate": "2025-02-05 11:48:04Z"
+    },
+    "fd1572e08e818076a2ceaab7a032186f70236fb82ab3663756d69632a9615329": {
+      "signature": "fd1572e08e818076a2ceaab7a032186f70236fb82ab3663756d69632a9615329",
+      "alternativeSignatures": [
+        "c5aa7148967f346e897301d8c424af20d89620c75ba9b966a0d42985102717bc"
+      ],
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Reference to ffs(3) find first set bit function.",
+      "createdDate": "2025-02-05 11:48:04Z"
+    },
+    "2593da2393fe547b441ddfdfc614dd1448add1bf7d7ccc0696ab91f75fa6f29b": {
+      "signature": "2593da2393fe547b441ddfdfc614dd1448add1bf7d7ccc0696ab91f75fa6f29b",
+      "alternativeSignatures": [
+        "c5aa7148967f346e897301d8c424af20d89620c75ba9b966a0d42985102717bc"
+      ],
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Reference to ffs(3) find first set bit function.",
+      "createdDate": "2025-02-05 11:48:04Z"
+    },
+    "1b604a2a60556cfca51c34a0e8d5f89174379ea1fc2598170147a7ce57a25fba": {
+      "signature": "1b604a2a60556cfca51c34a0e8d5f89174379ea1fc2598170147a7ce57a25fba",
+      "alternativeSignatures": [
+        "c5aa7148967f346e897301d8c424af20d89620c75ba9b966a0d42985102717bc"
+      ],
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Reference to ffs(3) find first set bit function.",
+      "createdDate": "2025-02-05 11:48:04Z"
+    },
+    "cccebaacfe4f8c7eae2d4d00c4d534d1f85ae79b11d53bf858c6243061ef7d69": {
+      "signature": "cccebaacfe4f8c7eae2d4d00c4d534d1f85ae79b11d53bf858c6243061ef7d69",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim GPLv3 license text in THIRD-PARTY-NOTICES.TXT (gnu/binutils).",
+      "createdDate": "2026-05-05 00:00:00Z"
+    },
+    "5c055f17206f60132ca8011955bd4ddcfe42a332341015b221e45d5a15d4e0af": {
+      "signature": "5c055f17206f60132ca8011955bd4ddcfe42a332341015b221e45d5a15d4e0af",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim GPLv3 license text in THIRD-PARTY-NOTICES.TXT (gnu/binutils).",
+      "createdDate": "2026-05-05 00:00:00Z"
+    },
+    "ed6b5cb1fe11577308dd5b137e106a12fed8e039c410a57d8580fb72b07a28a2": {
+      "signature": "ed6b5cb1fe11577308dd5b137e106a12fed8e039c410a57d8580fb72b07a28a2",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim GPLv3 license text in THIRD-PARTY-NOTICES.TXT (gnu/binutils).",
+      "createdDate": "2026-05-05 00:00:00Z"
+    },
+    "e281b9747a4a2f75cb24b67a65521526fc407ecd1cc2f2963a586ce507de3096": {
+      "signature": "e281b9747a4a2f75cb24b67a65521526fc407ecd1cc2f2963a586ce507de3096",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim GPLv3 license text in THIRD-PARTY-NOTICES.TXT (gnu/binutils).",
+      "createdDate": "2026-05-05 00:00:00Z"
+    },
+    "dd3653a71847ff622e134c85d308328bd803a0ccadff0e0918ee7dda8a7cbfc5": {
+      "signature": "dd3653a71847ff622e134c85d308328bd803a0ccadff0e0918ee7dda8a7cbfc5",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "'country' is the X.509 distinguished-name field (C=) used when generating Android signing keystores. Required by the spec.",
+      "createdDate": "2026-05-28 00:00:00Z"
+    },
+    "d91e97a7a1124eef0a8666e84b775855e74a3bdd74e3ead9a77bd351372183f5": {
+      "signature": "d91e97a7a1124eef0a8666e84b775855e74a3bdd74e3ead9a77bd351372183f5",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "'country' is the X.509 distinguished-name field (C=) used when generating Android signing keystores. Required by the spec.",
+      "createdDate": "2026-05-28 00:00:00Z"
+    },
+    "a0e948514523326635048c6ee0cbc97367731c21b2dd92bbe8eeaed44ba4b9a1": {
+      "signature": "a0e948514523326635048c6ee0cbc97367731c21b2dd92bbe8eeaed44ba4b9a1",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "033dfe9eb4aef0323a350e6dd6bd0cd2c41378f59ef94e42c738880e87945b48": {
+      "signature": "033dfe9eb4aef0323a350e6dd6bd0cd2c41378f59ef94e42c738880e87945b48",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "8217a3c04a6aa50532cdad59201d3bef0b1ec84c0b4cb08ab107d455554953d6": {
+      "signature": "8217a3c04a6aa50532cdad59201d3bef0b1ec84c0b4cb08ab107d455554953d6",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "7f29203d683db072390bd6e9903bc174149c4efb5d2bb968950078ac12ec2de3": {
+      "signature": "7f29203d683db072390bd6e9903bc174149c4efb5d2bb968950078ac12ec2de3",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "82fe02d7739bef798b996a4830f934ad94bc53e0e5f2a4da7b7b729ab4d6a547": {
+      "signature": "82fe02d7739bef798b996a4830f934ad94bc53e0e5f2a4da7b7b729ab4d6a547",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "0979aaf8f6f2432ca4d180cfbef3f1af8d7f5c7ce31ce937ca1f643b7e5e1da6": {
+      "signature": "0979aaf8f6f2432ca4d180cfbef3f1af8d7f5c7ce31ce937ca1f643b7e5e1da6",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "b0fa94c74d47d90d023ed1000d40aa79d9776b258eb1e49b2370692adb19a16f": {
+      "signature": "b0fa94c74d47d90d023ed1000d40aa79d9776b258eb1e49b2370692adb19a16f",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "87026159c3fdf4aa2df78596485ea7d86e30b2a1d5fdabc83b01f8671b9c9c7e": {
+      "signature": "87026159c3fdf4aa2df78596485ea7d86e30b2a1d5fdabc83b01f8671b9c9c7e",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "a5326eb0963ed824ec2cb923f641bb26bf13d9d891c0a590d49d355003933d60": {
+      "signature": "a5326eb0963ed824ec2cb923f641bb26bf13d9d891c0a590d49d355003933d60",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "677f1486b22ca60adc3d3585f3d866a6c90db63747fa1fafd0d617e9f0bdeb6d": {
+      "signature": "677f1486b22ca60adc3d3585f3d866a6c90db63747fa1fafd0d617e9f0bdeb6d",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "513c0f620f144d3487fcd8dc2a2cb0d5095f750f8fb3df38bc7d6f07c9ad66e8": {
+      "signature": "513c0f620f144d3487fcd8dc2a2cb0d5095f750f8fb3df38bc7d6f07c9ad66e8",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "43dffec2f9a7dbc4e1749fbd8bbfbadc48a663a2c576a95312faa682402dad4a": {
+      "signature": "43dffec2f9a7dbc4e1749fbd8bbfbadc48a663a2c576a95312faa682402dad4a",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "df8d626fcc7507a5f9b51e390092eb37cddd4606148e6dca886ab0883a503286": {
+      "signature": "df8d626fcc7507a5f9b51e390092eb37cddd4606148e6dca886ab0883a503286",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "53221abf96d49aebaff75d59276f135e4f6248051584efa08fb55f52c63fec49": {
+      "signature": "53221abf96d49aebaff75d59276f135e4f6248051584efa08fb55f52c63fec49",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "b46fed778b7ed28541c1788476a3af23fe93b9d93c2ac80c7424388e73ecbde9": {
+      "signature": "b46fed778b7ed28541c1788476a3af23fe93b9d93c2ac80c7424388e73ecbde9",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "c52d3ff6ce1b6bd645841371b74b30c7893b14c44d29125158dac434eca6c4ab": {
+      "signature": "c52d3ff6ce1b6bd645841371b74b30c7893b14c44d29125158dac434eca6c4ab",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Verbatim Google Android SDK / Google TV Add-on / GDK license text in AndroidManifestFeed_d18.0.xml. Must not be modified.",
+      "createdDate": "2026-06-02 00:00:00Z"
+    },
+    "50e11913ca432d4f277d772defe82135f9d6ec83c3f7559e9407ca85b41c1569": {
+      "signature": "50e11913ca432d4f277d772defe82135f9d6ec83c3f7559e9407ca85b41c1569",
+      "memberOf": [
+        "default"
+      ],
+      "justification": "Doc comment in third-party Kajabity.Tools.Java/JavaPropertyReader.cs example illustrating embedded-space keys ('Hong Kong' as sample data).",
+      "createdDate": "2026-06-02 00:00:00Z"
     }
   }
 }

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using System.Linq;
@@ -12,7 +14,7 @@ namespace Xamarin.Android.Tasks
 		{
 			const string BindingPartialClassBackingFieldName = "__layout_binding";
 
-			string codebehindDir = string.Empty;
+			string codebehindDir = "";
 			protected override string LineCommentString => "//";
 			protected override string DocCommentString => "///";
 			public override string LanguageName => "C#";
@@ -105,7 +107,7 @@ namespace Xamarin.Android.Tasks
 				WriteLineIndent (state, $"{BindingPartialClassBackingFieldName} = new global::{state.BindingClassName} ({parameters});");
 			}
 
-			void WriteMethodStart (State state, string lead, string name, string parameters, string genericConstraint = null, bool startBody = true)
+			void WriteMethodStart (State state, string lead, string name, string parameters, string? genericConstraint = null, bool startBody = true)
 			{
 				string declaration = $"{lead} {name} ({parameters})";
 				if (!String.IsNullOrEmpty (genericConstraint))
@@ -119,7 +121,7 @@ namespace Xamarin.Android.Tasks
 				}
 			}
 
-			void WriteMethodEnd (State state, string returnExpression = null)
+			void WriteMethodEnd (State state, string? returnExpression = null)
 			{
 				if (!String.IsNullOrWhiteSpace (returnExpression))
 					WriteLineIndent (state, $"return {returnExpression};");
@@ -261,7 +263,7 @@ namespace Xamarin.Android.Tasks
 
 				// There might be several locations, we will write only the first one since we can have
 				// only one and first is as good as any
-				LayoutLocationInfo loc = widget.Locations?.FirstOrDefault ();
+				LayoutLocationInfo? loc = widget.Locations?.FirstOrDefault ();
 				if (loc == null)
 					return;
 
@@ -318,7 +320,7 @@ namespace Xamarin.Android.Tasks
 					id = $"{resourceNamespace}{id}";
 
 				string backingFieldName = GetBindingBackingFieldName (widget);
-				string extraParam;
+				string? extraParam;
 				if (isFragment)
 					extraParam = $" {backingFieldName},";
 				else

@@ -51,7 +51,7 @@ namespace Android.Widget {
 
 	[Register ("android/widget/AdapterView", DoNotGenerateAcw=true)]
 	public abstract class AdapterView<
-			[DynamicallyAccessedMembers (DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)]
+			[DynamicallyAccessedMembers (Constructors)]
 			T
 	> : AdapterView  where T : IAdapter {
 
@@ -129,8 +129,8 @@ namespace Android.Widget {
 			}
 		}
 
-		protected override Java.Lang.Object RawAdapter {
-			get { return JavaObjectExtensions.JavaCast<Java.Lang.Object>(JavaConvert.ToJavaObject (Adapter))!; }
+		protected override Java.Lang.Object? RawAdapter {
+			get { return JavaObjectExtensions.JavaCast<Java.Lang.Object>(JavaConvert.ToJavaObject (Adapter)); }
 			set { Adapter = JavaConvert.FromJavaObject<T>(value)!; }
 		}
 

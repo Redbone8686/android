@@ -8,24 +8,15 @@ can also be used by setting the `$(MSBUILD)` make variable to `xbuild`.
 
  1. Install the [build dependencies](dependencies.md).
 
- 2. Clone the xamarin-android repo:
+ 2. Clone the dotnet/android repo:
 
-        git clone https://github.com/xamarin/xamarin-android.git
+        git clone https://github.com/dotnet/android.git
 
- 3. Navigate to the `xamarin-android` directory
+ 3. Navigate to the `android` directory
 
  4. (Optional) [Configure the build](../configuration.md).
 
- 5. (For Microsoft team members only) (Optional) Prepare external
-    proprietary git dependencies
-
-        make prepare-external-git-dependencies
-
-    This will clone or update a monodroid checkout in `external` and
-    ensure that subsequent `prepare` and `make` invocations will build
-    proprietary components.
-
- 6. Prepare the project:
+ 5. Prepare the project:
 
         make prepare
         # -or-
@@ -77,7 +68,7 @@ Create a new project with `./dotnet-local.sh new android`:
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net6.0-android</TargetFramework>
+    <TargetFramework>net11.0-android</TargetFramework>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
 </Project>
@@ -108,19 +99,16 @@ Alternatively, .NET for Android workload packs can be built with:
 
 Several `.nupkg` files will be output in `./bin/Build$(Configuration)/nuget-unsigned`.
 
-Commercial installers will be created by this command if the
-`make prepare-external-git-dependencies` command was ran before building.
-
 
 # Running Unit Tests
 
 
-The `xamarin-android` repo contains several unit tests:
+The `dotnet/android` repo contains several unit tests:
 
   * NUnit-based unit tests, for stand-alone assemblies and utilities.
 
-  * `.apk`-based unit tests, which are NUnitLite-based tests that need to
-    execute on an Android device.
+  * `.apk`/instrumentation-based unit tests, which need to execute on an
+    Android device.
 
 All unit tests can be executed via the `make run-all-tests` target:
 
@@ -215,7 +203,7 @@ custom attribute -- may be executed instead of executing *all* test fixtures.
 The `RunTestApks` target accepts a `TestFixture` MSBuild property
 to specify the test fixture class to execute.
 
-If using `Xamarin.Android.NUnitLite` for projects outside the `xamarin-android`
+If using `Xamarin.Android.NUnitLite` for projects outside the `dotnet/android`
 repository, such as NUnit tests for a custom app, the `RunTestApks` target
 will not exist. In such scenarios, the [`adb shell am`][adb-shell-am]
 `instrument` command can be used instead. It follows the format:
@@ -349,5 +337,4 @@ For example, to rebuild Mono for armeabi-v7a:
 
 	# This updates bin/$(Configuration)/lib/xamarin.android/xbuild/Xamarin/Android/lib/armeabi-v7a/libmonosgen-2.0.so
 	$ msbuild /t:_InstallRuntimes src/mono-runtimes/mono-runtimes.csproj
-
 

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -5,42 +7,42 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Microsoft.Android.Build.Tasks;
 using Microsoft.Build.Utilities;
+using System.Runtime.InteropServices;
 
 namespace Xamarin.Android.Tasks
 {
-	public enum RType {
+	public enum RType : byte {
 		Integer,
+		Integer_Styleable,
 		Array,
 	}
 
-	public enum ResourceType {
+	public enum ResourceType : byte {
 		System,
 		Custom,
 	}
 
+	[StructLayout(LayoutKind.Sequential)]
 	public struct R : IComparable<R> {
-		public RType Type;
 		public int Id;
-		public int [] Ids;
-		public string Identifier;
-		public string ResourceTypeName;
+		public RType Type;
 		public ResourceType ResourceType;
-
-		public string Key => $"{ResourceTypeName}:{Identifier}";
+		public string? Identifier;
+		public string? ResourceTypeName;
+		public int []? Ids;
+		public string Key => $"{ResourceTypeName ?? ""}:{Identifier ?? ""}";
 
 		public override string ToString ()
 		{
-			if (Type == RType.Integer) {
-				if (ResourceTypeName == "styleable")
-					return $"int {ResourceTypeName} {Identifier} {Id}";
-				return $"int {ResourceTypeName} {Identifier} 0x{Id.ToString ("x8")}";
+			if (Type != RType.Array) {
+				return $"int {ResourceTypeName ?? ""} {Identifier ?? ""} { (Type == RType.Integer ? $"0x{Id.ToString ("x8")}" : $"{Id}")}";
 			}
-			return $"int[] {ResourceTypeName} {Identifier} {{ {String.Join (", ", Ids.Select (x => $"0x{x.ToString ("x8")}"))} }}";
+			return $"int[] {ResourceTypeName ?? ""} {Identifier ?? ""} {{ {String.Join (", ", (Ids ?? []).Select (x => $"0x{x.ToString ("x8")}"))} }}";
 		}
 
 		public string ToSortedString ()
 		{
-			return $"{ResourceTypeName}_{Identifier}";
+			return $"{ResourceTypeName ?? ""}_{Identifier ?? ""}";
 		}
 
 		public int CompareTo(R other)
@@ -53,23 +55,20 @@ namespace Xamarin.Android.Tasks
 			Id = newId;
 		}
 
-		public void UpdateIds (int [] newIds)
+		public void UpdateIds (int []? newIds)
 		{
 			Ids = newIds;
 		}
 	}
 
 	public class RtxtParser {
-
+		static readonly int DefaultCapacity = 10000; // a Maui template project has 7000+ resource entires.
 		static readonly char[] EmptyChar = new char [] { ' ' };
 		static readonly char[] CurlyBracketsChar = new char [] { '{', '}' };
 		static readonly char[] CommaChar = new char [] { ',' };
 		static readonly Regex ValidChars = new Regex (@"([^a-f0-9x, \{\}])+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-		TaskLoggingHelper log;
-		Dictionary<string, string> map;
-
-		public static HashSet<string> knownTypes = new HashSet<string> () {
+		public static readonly HashSet<string> knownTypes = new HashSet<string> () {
 			"anim",
 			"animator",
 			"attr",
@@ -96,18 +95,16 @@ namespace Xamarin.Android.Tasks
 
 		public IEnumerable<R> Parse (string file, TaskLoggingHelper logger, Dictionary<string, string> mapping)
 		{
-			log = logger;
-			map = mapping;
-			var result = new List<R> ();
+			var result = new List<R> (DefaultCapacity);
 			if (File.Exists (file))
-				ProcessRtxtFile (file, result);
+				ProcessRtxtFile (file, result, logger, mapping);
 			return result;
 		}
 
-		void ProcessRtxtFile (string file, IList<R> result)
+		void ProcessRtxtFile (string file, List<R> result, TaskLoggingHelper log, Dictionary<string, string> map)
 		{
 			int lineNumber = 0;
-			foreach (var line in File.ReadLines (file)) {
+			foreach (var line in File.ReadLines (file) ) {
 				lineNumber++;
 				var items = line.Split (EmptyChar, 4);
 				if (items.Length < 4) {
@@ -124,6 +121,7 @@ namespace Xamarin.Android.Tasks
 					if (items [1] != "styleable") {
 						result.Add (new R () {
 							ResourceTypeName = items [1],
+							Type = RType.Integer,
 							Identifier = itemName,
 							Id = value,
 						});
@@ -133,6 +131,7 @@ namespace Xamarin.Android.Tasks
 						case "int":
 							result.Add (new R () {
 								ResourceTypeName = items [1],
+								Type = RType.Integer_Styleable,
 								Identifier = itemName,
 								Id = Convert.ToInt32 (items [3].Trim (), 10),
 							});

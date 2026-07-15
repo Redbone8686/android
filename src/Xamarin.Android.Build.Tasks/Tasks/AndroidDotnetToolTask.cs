@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -16,7 +18,7 @@ namespace Xamarin.Android.Tasks
 		/// <summary>
 		/// Path to the folder that contains dotnet / dotnet.exe.
 		/// </summary>
-		public string NetCoreRoot { get; set; }
+		public string? NetCoreRoot { get; set; }
 
 		/// <summary>
 		/// If `true`, this task should run `dotnet foo.dll` and `foo.exe` otherwise.
@@ -32,7 +34,7 @@ namespace Xamarin.Android.Tasks
 		/// <summary>
 		/// The path to the assembly `foo.dll`. Will be `null` when NeedsDotnet and NeedsMono are `false`.
 		/// </summary>
-		protected string AssemblyPath { get; private set; }
+		protected string? AssemblyPath { get; private set; }
 
 		public override bool Execute ()
 		{
@@ -105,14 +107,14 @@ namespace Xamarin.Android.Tasks
 
 		string FindMono ()
 		{
-			string mono = BuildEngine4.GetRegisteredTaskObjectAssemblyLocal<string> (MonoKey, Lifetime);
-			if (!string.IsNullOrEmpty (mono)) {
+			string? mono = BuildEngine4.GetRegisteredTaskObjectAssemblyLocal<string> (MonoKey, Lifetime);
+			if (!mono.IsNullOrEmpty ()) {
 				Log.LogDebugMessage ($"Found cached mono via {nameof (BuildEngine4.RegisterTaskObject)}");
 				return mono;
 			}
 
 			var env = Environment.GetEnvironmentVariable ("PATH");
-			if (string.IsNullOrEmpty (env)) {
+			if (!env.IsNullOrEmpty ()) {
 				foreach (var path in env.Split (Path.PathSeparator)) {
 					if (File.Exists (mono = Path.Combine (path, "mono"))) {
 						Log.LogDebugMessage ("Found mono in $PATH");
@@ -138,7 +140,7 @@ namespace Xamarin.Android.Tasks
 		protected virtual CommandLineBuilder GetCommandLineBuilder ()
 		{
 			var cmd = new CommandLineBuilder ();
-			if (!string.IsNullOrEmpty (AssemblyPath)) {
+			if (!AssemblyPath.IsNullOrEmpty ()) {
 				cmd.AppendFileNameIfNotNull (AssemblyPath);
 			}
 			return cmd;

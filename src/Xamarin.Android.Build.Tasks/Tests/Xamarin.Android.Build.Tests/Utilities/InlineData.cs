@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Globalization;
 using Xamarin.ProjectTools;
 
 namespace Xamarin.Android.Build.Tests
@@ -32,7 +31,7 @@ namespace Xamarin.Android.Build.Tests
 using System;
 using System.Reflection;
 
-namespace @projectName@
+namespace @projectNamespace@
 {
 	[System.CodeDom.Compiler.GeneratedCodeAttribute(""System.Resources.Tools.StronglyTypedResourceBuilder"", ""4.0.0.0"")]
 	[System.Diagnostics.DebuggerNonUserCodeAttribute()]
@@ -51,7 +50,7 @@ namespace @projectName@
 		internal static System.Resources.ResourceManager ResourceManager {
 			get {
 				if (object.Equals(null, resourceMan)) {
-					System.Resources.ResourceManager temp = new System.Resources.ResourceManager(""@projectName@.@className@"", typeof(@className@).GetTypeInfo().Assembly);
+					System.Resources.ResourceManager temp = new System.Resources.ResourceManager(""@projectNamespace@.@className@"", typeof(@className@).GetTypeInfo().Assembly);
 					resourceMan = temp;
 				}
 				return resourceMan;
@@ -87,7 +86,7 @@ namespace @projectName@
 			}
 		}
 
-		public static string DesignerWithContents (string projectName, string className, string modifier, string[] dataNames)
+		public static string DesignerWithContents (string projectNamespace, string className, string modifier, string[] dataNames)
 		{
 			var content = new StringBuilder ();
 			foreach (string data in dataNames) {
@@ -99,14 +98,14 @@ namespace @projectName@
 			}
 			return Designer.Replace ("@modifier@", modifier)
 				.Replace ("@className@", className)
-				.Replace ("@projectName@", projectName)
+				.Replace ("@projectNamespace@", projectNamespace)
 				.Replace ("@content@", content.ToString ());
 		}
 
-		public static void AddCultureResourceDesignerToProject (IShortFormProject proj, string projectName, string className, params string[] dataNames)
+		public static void AddCultureResourceDesignerToProject (IShortFormProject proj, string projectNamespace, string className, params string[] dataNames)
 		{
 			proj.OtherBuildItems.Add (new BuildItem.Source ($"{className}.Designer.cs") {
-				TextContent = () => InlineData.DesignerWithContents (projectName, className, "internal", dataNames)
+				TextContent = () => InlineData.DesignerWithContents (projectNamespace, className, "internal", dataNames)
 			});
 		}
 	}

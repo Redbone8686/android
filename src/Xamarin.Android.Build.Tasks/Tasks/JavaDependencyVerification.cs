@@ -1,5 +1,4 @@
 #nullable enable
-
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -11,7 +10,8 @@ using Java.Interop.Tools.Maven.Models;
 using Microsoft.Android.Build.Tasks;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
-using Newtonsoft.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using NuGet.ProjectModel;
 
 namespace Xamarin.Android.Tasks;
@@ -272,7 +272,13 @@ class MSBuildLoggingPomResolver : IProjectResolver
 		try {
 			using (var file = File.OpenRead (filename)) {
 				var project = Project.Load (file);
-				var registered_artifact = Artifact.Parse (project.VersionedArtifactString);
+
+				// POMs may inherit GroupId/Version from a <parent> element, so fall back to
+				// the parent's values when the project itself doesn't declare them. (Without
+				// this, building an Artifact would fail validation with an empty coordinate.)
+				var groupId = project.GroupId.HasValue () ? project.GroupId : (project.Parent?.GroupId ?? "");
+				var version = project.Version.HasValue () ? project.Version : (project.Parent?.Version ?? "");
+				var registered_artifact = new Artifact (groupId, project.ArtifactId ?? "", version);
 
 				// Return the registered artifact, preferring any overrides specified in the task item
 				var final_artifact = new Artifact (
@@ -305,7 +311,7 @@ class MSBuildLoggingPomResolver : IProjectResolver
 	}
 }
 
-class MicrosoftNuGetPackageFinder
+partial class MicrosoftNuGetPackageFinder
 {
 	readonly PackageListFile? package_list;
 
@@ -318,7 +324,7 @@ class MicrosoftNuGetPackageFinder
 
 		try {
 			var json = File.ReadAllText (file);
-			package_list = JsonConvert.DeserializeObject<PackageListFile> (json);
+			package_list = JsonSerializer.Deserialize<PackageListFile> (json, PackageListFileContext.Default.PackageListFile);
 		} catch (Exception ex) {
 			log.LogMessage ("There was an error reading 'microsoft-packages.json', Android NuGet suggestions will not be provided: {0}", ex);
 		}
@@ -331,17 +337,25 @@ class MicrosoftNuGetPackageFinder
 
 	public class PackageListFile
 	{
-		[JsonProperty ("packages")]
 		public List<Package>? Packages { get; set; }
 	}
 
 	public class Package
 	{
-		[JsonProperty ("javaId")]
 		public string? JavaId { get; set; }
-
-		[JsonProperty ("nugetId")]
 		public string? NuGetId { get; set; }
+	}
+
+	[JsonSourceGenerationOptions(
+		AllowTrailingCommas = true,
+		WriteIndented = true,
+		PropertyNameCaseInsensitive = true
+	)]
+	[JsonSerializable(typeof(PackageListFile))]
+	[JsonSerializable(typeof(List<Package>))]
+	[JsonSerializable(typeof(string))]
+	internal partial class PackageListFileContext : JsonSerializerContext
+	{
 	}
 }
 

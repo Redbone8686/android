@@ -1,0 +1,554 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Microsoft.Android.Sdk.TrimmableTypeMap;
+
+/// <summary>
+/// Data model for a single TypeMap output assembly.
+/// Describes what to emit — the emitter writes this directly into a PE assembly.
+/// Built by <see cref="ModelBuilder"/>, consumed by <see cref="TypeMapAssemblyGenerator"/>.
+/// </summary>
+sealed class TypeMapAssemblyData
+{
+	/// <summary>
+	/// Assembly name (e.g., "_MyApp.TypeMap").
+	/// </summary>
+	public required string AssemblyName { get; init; }
+
+	/// <summary>
+	/// Module file name (e.g., "_MyApp.TypeMap.dll").
+	/// </summary>
+	public required string ModuleName { get; init; }
+
+	/// <summary>
+	/// TypeMap entries — one per unique JNI name.
+	/// </summary>
+	public List<TypeMapAttributeData> Entries { get; } = new ();
+
+	/// <summary>
+	/// Proxy types to emit in the assembly.
+	/// </summary>
+	public List<JavaPeerProxyData> ProxyTypes { get; } = new ();
+
+	/// <summary>
+	/// TypeMapAssociation entries for managed types backed by generated proxies.
+	/// </summary>
+	public List<TypeMapAssociationData> Associations { get; } = new ();
+
+	/// <summary>
+	/// Alias holder types to emit — one per alias group (≥2 types sharing a JNI name).
+	/// </summary>
+	public List<AliasHolderData> AliasHolders { get; } = new ();
+
+	/// <summary>
+	/// Array proxy types to emit — one per JNI element name and rank.
+	/// </summary>
+	public List<ArrayProxyData> ArrayProxyTypes { get; } = new ();
+
+	/// <summary>
+	/// Maximum array rank for which the generator emits per-rank <c>__ArrayMapRank{N}</c>
+	/// sentinel TypeDefs and <c>TypeMap</c> entries. 0 disables.
+	/// </summary>
+	public int MaxArrayRank { get; set; }
+
+	/// <summary>
+	/// Assembly names that need [IgnoresAccessChecksTo] for cross-assembly n_* calls.
+	/// </summary>
+	public List<string> IgnoresAccessChecksTo { get; } = new ();
+}
+
+/// <summary>
+/// One [assembly: TypeMap("jni/name", typeof(Proxy))] or
+/// [assembly: TypeMap("jni/name", typeof(Proxy), typeof(Target))] entry.
+///
+/// 2-arg (unconditional): proxy is always preserved — used for ACW types and essential runtime types.
+/// 3-arg (trimmable): proxy is preserved only if Target type is referenced by the app.
+/// </summary>
+sealed record TypeMapAttributeData
+{
+	/// <summary>
+	/// Type map key, e.g., "android/app/Activity" for peer entries or
+	/// "Android.App.Activity, Mono.Android" for array proxy entries.
+	/// </summary>
+	public required string MapKey { get; init; }
+
+	/// <summary>
+	/// Assembly-qualified proxy type reference string.
+	/// Either points to a generated proxy or to the original managed type.
+	/// </summary>
+	public required string ProxyTypeReference { get; init; }
+
+	/// <summary>
+	/// Assembly-qualified target type reference for the trimmable (3-arg) variant.
+	/// Null for unconditional (2-arg) entries.
+	/// The trimmer preserves the proxy only if this target type is used by the app.
+	/// </summary>
+	public string? TargetTypeReference { get; init; }
+
+	/// <summary>
+	/// True for 2-arg unconditional entries (ACW types, essential runtime types).
+	/// </summary>
+	public bool IsUnconditional => TargetTypeReference == null;
+
+	/// <summary>
+	/// 1-based array rank when this entry should use a <c>__ArrayMapRank{value}</c>
+	/// sentinel as its <c>TGroup</c> instead of the default model anchor.
+	/// </summary>
+	public int? AnchorRank { get; init; }
+}
+
+/// <summary>
+/// A generated array proxy type used by per-rank array TypeMap entries.
+/// </summary>
+sealed record ArrayProxyData
+{
+	public required string TypeName { get; init; }
+
+	public string Namespace { get; init; } = "_TypeMap.ArrayProxies";
+
+	public required TypeRefData ElementType { get; init; }
+
+	public required int Rank { get; init; }
+
+	public PrimitiveArrayProxyData? Primitive { get; init; }
+}
+
+/// <summary>
+/// Additional primitive array metadata for <see cref="ArrayProxyData"/>.
+/// </summary>
+sealed record PrimitiveArrayProxyData
+{
+	public IReadOnlyList<TypeRefData> ConcreteArrayTypes { get; init; } = [];
+}
+
+/// <summary>
+/// A proxy type to generate in the TypeMap assembly (subclass of JavaPeerProxy).
+/// </summary>
+sealed class JavaPeerProxyData
+{
+	/// <summary>
+	/// Simple type name, e.g., "Java_Lang_Object_Proxy".
+	/// </summary>
+	public required string TypeName { get; init; }
+
+	/// <summary>
+	/// JNI type name, e.g., "android/app/Activity" or "crc64abc.../MyButton".
+	/// Used for managed → Java reverse lookups at runtime.
+	/// </summary>
+	public required string JniName { get; init; }
+
+	/// <summary>
+	/// Namespace for all proxy types.
+	/// </summary>
+	public string Namespace { get; init; } = "_TypeMap.Proxies";
+
+	/// <summary>
+	/// Reference to the managed type this proxy wraps (for ldtoken in TargetType property).
+	/// </summary>
+	public required TypeRefData TargetType { get; init; }
+
+	/// <summary>
+	/// Reference to the invoker type (for interfaces/abstract types). Null if not applicable.
+	/// </summary>
+	public TypeRefData? InvokerType { get; set; }
+
+	/// <summary>
+	/// Activation constructor style to use when creating <see cref="InvokerType"/>.
+	/// </summary>
+	public ActivationCtorStyle? InvokerActivationCtorStyle { get; set; }
+
+	/// <summary>
+	/// Whether this proxy has a CreateInstance that can actually create instances.
+	/// </summary>
+	public bool HasActivation => ActivationCtor != null || InvokerType != null;
+
+	/// <summary>
+	/// Activation constructor details. Determines how CreateInstance instantiates the managed peer.
+	/// </summary>
+	public ActivationCtorData? ActivationCtor { get; set; }
+
+	/// <summary>
+	/// True if this is an open generic type definition. CreateInstance throws NotSupportedException.
+	/// </summary>
+	public bool IsGenericDefinition { get; init; }
+
+	/// <summary>
+	/// True if the proxied peer type is a Java interface. Interfaces have no constructors, so
+	/// the proxy must derive from the non-generic <c>JavaPeerProxy</c> base instead of
+	/// <c>JavaPeerProxy&lt;T&gt;</c>: closing the generic (whose <c>T</c> is annotated with
+	/// <c>[DynamicallyAccessedMembers(PublicConstructors|NonPublicConstructors)]</c>) over an
+	/// interface makes ILC fail to load the type (TypeLoadException). Instances are still created
+	/// from <see cref="InvokerType"/> in CreateInstance.
+	/// </summary>
+	public bool IsInterface { get; init; }
+
+	/// <summary>
+	/// True when the Java stub must not call RegisterNatives from a static initializer because
+	/// the type can be instantiated before the runtime is fully ready (for example Application
+	/// or Instrumentation subclasses).
+	/// </summary>
+	public bool CannotRegisterInStaticConstructor { get; init; }
+
+	/// <summary>
+	/// Whether this proxy needs ACW support (RegisterNatives + UCO wrappers + IAndroidCallableWrapper).
+	/// </summary>
+	public bool IsAcw { get; init; }
+
+	/// <summary>
+	/// UCO method wrappers for marshal methods (non-constructor).
+	/// </summary>
+	public List<UcoMethodData> UcoMethods { get; } = new ();
+
+	/// <summary>
+	/// UCO constructor wrappers.
+	/// </summary>
+	public List<UcoConstructorData> UcoConstructors { get; } = new ();
+
+	/// <summary>
+	/// RegisterNatives registrations (method name, JNI signature, wrapper target).
+	/// </summary>
+	public List<NativeRegistrationData> NativeRegistrations { get; } = new ();
+}
+
+/// <summary>
+/// A cross-assembly type reference (assembly name + full managed type name).
+/// </summary>
+sealed record TypeRefData
+{
+	/// <summary>
+	/// Full managed type name, e.g., "Android.App.Activity" or "MyApp.Outer+Inner".
+	/// </summary>
+	public required string ManagedTypeName { get; init; }
+
+	/// <summary>
+	/// Assembly containing the type, e.g., "Mono.Android".
+	/// </summary>
+	public required string AssemblyName { get; init; }
+
+	/// <summary>
+	/// Generic arguments for a constructed generic type. Empty for non-generic
+	/// types and open generic definitions.
+	/// </summary>
+	public IReadOnlyList<TypeRefData> GenericArguments { get; init; } = [];
+
+	/// <summary>
+	/// True if this type — or, for array types, the element type — is a value type.
+	/// Used by the IL emitter to encode the type as <c>ELEMENT_TYPE_VALUETYPE</c>
+	/// rather than <c>ELEMENT_TYPE_CLASS</c> in member references and signatures.
+	/// </summary>
+	public bool IsValueType { get; init; }
+
+	/// <summary>
+	/// True if this type — or, for array types, the element type — is an enum.
+	/// Used by JNI signature generation to map enum values to their underlying
+	/// primitive ABI type.
+	/// </summary>
+	public bool IsEnum { get; init; }
+
+	public bool EncodeAsValueType => IsValueType || IsEnum;
+
+	public string DisplayName {
+		get {
+			if (ManagedTypeName.EndsWith ("[]", StringComparison.Ordinal)) {
+				return $"{(this with { ManagedTypeName = ManagedTypeName.Substring (0, ManagedTypeName.Length - 2) }).DisplayName}[]";
+			}
+			return GenericArguments.Count == 0
+				? ManagedTypeName
+				: $"{ManagedTypeName}<{string.Join (",", GenericArguments.Select (t => t.DisplayName))}>";
+		}
+	}
+
+	public bool Equals (TypeRefData? other)
+	{
+		if (ReferenceEquals (this, other)) {
+			return true;
+		}
+		if (other is null) {
+			return false;
+		}
+		if (!string.Equals (ManagedTypeName, other.ManagedTypeName, StringComparison.Ordinal) ||
+		    !string.Equals (AssemblyName, other.AssemblyName, StringComparison.Ordinal) ||
+		    IsValueType != other.IsValueType ||
+		    IsEnum != other.IsEnum ||
+		    GenericArguments.Count != other.GenericArguments.Count) {
+			return false;
+		}
+		for (int i = 0; i < GenericArguments.Count; i++) {
+			if (!GenericArguments [i].Equals (other.GenericArguments [i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	public override int GetHashCode ()
+	{
+		unchecked {
+			int hash = 17;
+			hash = hash * 31 + StringComparer.Ordinal.GetHashCode (ManagedTypeName);
+			hash = hash * 31 + StringComparer.Ordinal.GetHashCode (AssemblyName);
+			hash = hash * 31 + IsValueType.GetHashCode ();
+			hash = hash * 31 + IsEnum.GetHashCode ();
+			foreach (var argument in GenericArguments) {
+				hash = hash * 31 + argument.GetHashCode ();
+			}
+			return hash;
+		}
+	}
+}
+
+/// <summary>
+/// An [UnmanagedCallersOnly] static wrapper for a marshal method.
+/// Body: either forward to an existing n_* callback or dispatch directly to the
+/// managed target. Direct dispatch avoids inherited n_* callbacks that can route
+/// through the wrong managed virtual slot for hidden/new-slot members sharing the
+/// same JNI method.
+/// </summary>
+sealed record UcoMethodData
+{
+	/// <summary>
+	/// Name of the generated wrapper method, e.g., "n_onCreate_uco_0".
+	/// </summary>
+	public required string WrapperName { get; init; }
+
+	/// <summary>
+	/// Java/JNI-visible native method name, e.g., "n_OnCreate".
+	/// </summary>
+	public required string CallbackMethodName { get; init; }
+
+	/// <summary>
+	/// Type containing the callback method.
+	/// </summary>
+	public required TypeRefData CallbackType { get; init; }
+
+	/// <summary>
+	/// JNI method signature, e.g., "(Landroid/os/Bundle;)V". Used to determine CLR parameter types.
+	/// </summary>
+	public required string JniSignature { get; init; }
+
+	/// <summary>
+	/// CLR type-name strings for the real <c>n_*</c> callback's JNI parameters (excluding the leading
+	/// jnienv/self IntPtr pair), captured from metadata. When present, the callback MemberRef is
+	/// emitted to mirror these exactly (correctly distinguishing bool/sbyte and char/ushort). Null
+	/// when the <c>n_*</c> signature was not resolved.
+	/// </summary>
+	public IReadOnlyList<string>? CallbackParameterTypeNames { get; init; }
+
+	/// <summary>
+	/// CLR return type-name string for the real <c>n_*</c> callback, captured from metadata.
+	/// Null when the <c>n_*</c> signature was not resolved.
+	/// </summary>
+	public string? CallbackReturnTypeName { get; init; }
+
+	/// <summary>
+	/// Optional metadata for wrappers that dispatch directly to the managed target
+	/// instead of forwarding to a generated n_* callback.
+	/// </summary>
+	public ExportMethodDispatchData? ExportMethodDispatch { get; init; }
+
+	/// <summary>
+	/// True when this wrapper performs the managed direct-dispatch path.
+	/// </summary>
+	public bool UsesExportMethodDispatch => ExportMethodDispatch != null;
+}
+
+sealed record UcoWrapperTargetData
+{
+	public static UcoWrapperTargetData From (JavaPeerProxyData proxy, string methodName)
+	{
+		return new UcoWrapperTargetData {
+			TypeNamespace = proxy.Namespace,
+			TypeName = proxy.TypeName,
+			MethodName = methodName,
+		};
+	}
+
+	/// <summary>
+	/// Namespace of the generated proxy type containing the wrapper method.
+	/// </summary>
+	public required string TypeNamespace { get; init; }
+
+	/// <summary>
+	/// Name of the generated proxy type containing the wrapper method.
+	/// </summary>
+	public required string TypeName { get; init; }
+
+	/// <summary>
+	/// Name of the UCO wrapper method whose function pointer to register.
+	/// </summary>
+	public required string MethodName { get; init; }
+}
+
+sealed record ExportMethodDispatchData
+{
+	/// <summary>
+	/// Managed method name on the callback type that should be invoked for [Export].
+	/// </summary>
+	public required string ManagedMethodName { get; init; }
+
+	/// <summary>
+	/// Managed parameter types for the target method, including the defining assembly.
+	/// </summary>
+	public IReadOnlyList<TypeRefData> ParameterTypes { get; init; } = [];
+
+	/// <summary>
+	/// Per-parameter [ExportParameter] kinds for legacy callback marshalling.
+	/// </summary>
+	public IReadOnlyList<ExportParameterKindInfo> ParameterKinds { get; init; } = [];
+
+	/// <summary>
+	/// Managed return type for the target method, including the defining assembly.
+	/// </summary>
+	public TypeRefData ReturnType { get; init; } = new () {
+		ManagedTypeName = "System.Void",
+		AssemblyName = "System.Runtime",
+	};
+
+	/// <summary>
+	/// [ExportParameter] kind applied to the return value, if any.
+	/// </summary>
+	public ExportParameterKindInfo ReturnKind { get; init; }
+
+	/// <summary>
+	/// Whether the managed target method is static.
+	/// </summary>
+	public bool IsStatic { get; init; }
+}
+
+/// <summary>
+/// An [UnmanagedCallersOnly] static wrapper for a constructor callback.
+/// Signature must match the full JNI native method signature (jnienv + self + ctor params)
+/// so the ABI is correct when JNI dispatches the call.
+/// Body: directly activates the target type using its generated activation ctor.
+/// </summary>
+sealed record UcoConstructorData
+{
+	/// <summary>
+	/// Name of the generated wrapper, e.g., "nctor_0_uco".
+	/// </summary>
+	public required string WrapperName { get; init; }
+
+	/// <summary>
+	/// Target type to activate in the generated wrapper.
+	/// </summary>
+	public required TypeRefData TargetType { get; init; }
+
+	/// <summary>
+	/// JNI constructor signature, e.g., "(Landroid/content/Context;)V". Used for RegisterNatives registration.
+	/// </summary>
+	public required string JniSignature { get; init; }
+
+	/// <summary>
+	/// <see langword="true"/> when the UCO codegen can statically prove the managed
+	/// type defines a matching user-visible ctor with this signature. When
+	/// <see langword="false"/>, the codegen must use the legacy activation-ctor
+	/// `(IntPtr, JniHandleOwnership)` path instead of emitting a member ref to
+	/// a (potentially non-existent) user ctor.
+	/// </summary>
+	public required bool HasMatchingManagedCtor { get; init; }
+
+	/// <summary>
+	/// Managed parameter types of the matching user-visible ctor, in declaration
+	/// order. Empty for `()V`. Non-empty when <see cref="HasMatchingManagedCtor"/>
+	/// is <see langword="true"/> and the ctor takes parameters; the emitter uses
+	/// this to build the member ref signature and to marshal each JNI argument
+	/// to the corresponding managed type before calling the user ctor.
+	/// </summary>
+	public IReadOnlyList<TypeRefData> ManagedParameterTypes { get; init; } = [];
+}
+
+/// <summary>
+/// One JNI native method registration in RegisterNatives.
+/// </summary>
+sealed record NativeRegistrationData
+{
+	/// <summary>
+	/// JNI method name to register, e.g., "n_onCreate" or "nctor_0".
+	/// </summary>
+	public required string JniMethodName { get; init; }
+
+	/// <summary>
+	/// JNI method signature, e.g., "(Landroid/os/Bundle;)V".
+	/// </summary>
+	public required string JniSignature { get; init; }
+
+	/// <summary>
+	/// Name of the UCO wrapper method whose function pointer to register.
+	/// </summary>
+	public required string WrapperMethodName { get; init; }
+
+	/// <summary>
+	/// Generated proxy wrapper target to register. This may point at a wrapper
+	/// emitted for a different proxy when inherited virtual overrides share the
+	/// same base callback.
+	/// </summary>
+	public required UcoWrapperTargetData WrapperTarget { get; init; }
+}
+
+/// <summary>
+/// Describes how the proxy's CreateInstance should construct the managed peer.
+/// </summary>
+sealed record ActivationCtorData
+{
+	/// <summary>
+	/// Type that declares the activation constructor (may be a base type).
+	/// </summary>
+	public required TypeRefData DeclaringType { get; init; }
+
+	/// <summary>
+	/// True when the leaf type itself declares the activation ctor.
+	/// </summary>
+	public required bool IsOnLeafType { get; init; }
+
+	/// <summary>
+	/// The style of activation ctor (XamarinAndroid or JavaInterop).
+	/// </summary>
+	public required ActivationCtorStyle Style { get; init; }
+}
+
+/// <summary>
+/// One [assembly: TypeMapAssociation(typeof(Source), typeof(AliasProxy))] entry.
+/// Links a managed type to an alias holder, generated proxy, or generated array proxy.
+/// </summary>
+sealed record TypeMapAssociationData
+{
+	/// <summary>
+	/// Assembly-qualified source type reference (the managed alias type).
+	/// </summary>
+	public required string SourceTypeReference { get; init; }
+
+	/// <summary>
+	/// Assembly-qualified proxy type reference (the alias holder).
+	/// </summary>
+	public required string AliasProxyTypeReference { get; init; }
+
+	/// <summary>
+	/// 1-based array rank when this association should use a <c>__ArrayMapRank{value}</c>
+	/// sentinel as its <c>TGroup</c> instead of the default model anchor.
+	/// </summary>
+	public int? AnchorRank { get; init; }
+}
+
+/// <summary>
+/// An alias holder class to generate in the TypeMap assembly.
+/// Extends JavaPeerProxy and implements IJavaPeerAliases.
+/// Emitted when multiple .NET types map to the same JNI name.
+/// </summary>
+sealed class AliasHolderData
+{
+	/// <summary>
+	/// Simple type name, e.g., "Test_AliasTarget_Aliases".
+	/// </summary>
+	public required string TypeName { get; init; }
+
+	/// <summary>
+	/// Namespace for alias holder types.
+	/// </summary>
+	public string Namespace { get; init; } = "_TypeMap.Aliases";
+
+	/// <summary>
+	/// Indexed TypeMap keys, e.g., ["test/AliasTarget[0]", "test/AliasTarget[1]"].
+	/// </summary>
+	public required List<string> AliasKeys { get; init; }
+}

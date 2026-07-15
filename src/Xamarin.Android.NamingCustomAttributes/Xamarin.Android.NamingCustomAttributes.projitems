@@ -14,6 +14,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Android.Content\ContentProviderAttribute.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Android.Content\ContentProviderAttribute.Partial.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Android.Runtime\RegisterAttribute.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Java.Interop\BaseExportAttribute.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Java.Interop\ExportAttribute.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Java.Interop\ExportFieldAttribute.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Java.Interop\ExportParameterAttribute.cs" />
@@ -29,7 +30,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Android.App\LayoutAttribute.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Java.Interop\IJniNameProviderAttribute.cs" />
   </ItemGroup>
-  <ItemGroup Condition=" '$(TargetFramework)' == 'monoandroid10' or '$(TargetFramework)' == 'netstandard2.0' ">
+  <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' ">
     <Compile Include="$(ThirdPartySourcePath)System.Diagnostics.CodeAnalysis/DynamicallyAccessedMembersAttribute.cs" />
     <Compile Include="$(ThirdPartySourcePath)System.Diagnostics.CodeAnalysis/DynamicallyAccessedMemberTypes.cs" />
     <Compile Include="$(ThirdPartySourcePath)System.Diagnostics.CodeAnalysis/DynamicDependencyAttribute.cs" />

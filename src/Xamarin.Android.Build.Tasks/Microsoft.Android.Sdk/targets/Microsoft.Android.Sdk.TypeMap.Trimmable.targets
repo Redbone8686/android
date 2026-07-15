@@ -1,0 +1,481 @@
+<!-- Trimmable typemap: managed type mapping instead of native binary typemaps. -->
+<Project>
+
+  <UsingTask TaskName="Xamarin.Android.Tasks.GenerateTrimmableTypeMap" AssemblyFile="$(_XamarinAndroidBuildTasksAssembly)" />
+  <UsingTask TaskName="Xamarin.Android.Tasks.GenerateEmptyTypemapStub" AssemblyFile="$(_XamarinAndroidBuildTasksAssembly)" />
+  <UsingTask TaskName="Xamarin.Android.Tasks.GenerateNativeAotBootstrapSources" AssemblyFile="$(_XamarinAndroidBuildTasksAssembly)" />
+  <UsingTask TaskName="Xamarin.Android.Tasks.GenerateProguardConfiguration" AssemblyFile="$(_XamarinAndroidBuildTasksAssembly)" />
+
+  <Import Project="$(MSBuildThisFileDirectory)Microsoft.Android.Sdk.TypeMap.Trimmable.CoreCLR.targets"
+      Condition=" '$(_AndroidRuntime)' == 'CoreCLR' " />
+  <Import Project="$(MSBuildThisFileDirectory)Microsoft.Android.Sdk.TypeMap.Trimmable.NativeAOT.targets"
+      Condition=" '$(_AndroidRuntime)' == 'NativeAOT' " />
+
+  <PropertyGroup>
+    <_TypeMapAssemblyName>_Microsoft.Android.TypeMaps</_TypeMapAssemblyName>
+    <_TrimmableTypeMapPackageNamingPolicy Condition=" '$(_AndroidPackageNamingPolicySetByUser)' == 'true' ">$(AndroidPackageNamingPolicy)</_TrimmableTypeMapPackageNamingPolicy>
+    <_TrimmableTypeMapPackageNamingPolicy Condition=" '$(_TrimmableTypeMapPackageNamingPolicy)' == '' ">Crc64</_TrimmableTypeMapPackageNamingPolicy>
+    <!-- Use the outer IntermediateOutputPath when available (inner per-RID builds set
+         _OuterIntermediateOutputPath) so that generated manifests/JCWs are written
+         where the packaging phase expects them. -->
+    <_TypeMapBaseOutputDir Condition=" '$(_OuterIntermediateOutputPath)' != '' ">$(_OuterIntermediateOutputPath)</_TypeMapBaseOutputDir>
+    <_TypeMapBaseOutputDir Condition=" '$(_TypeMapBaseOutputDir)' == '' ">$(IntermediateOutputPath)</_TypeMapBaseOutputDir>
+    <_TypeMapBaseOutputDir>$(_TypeMapBaseOutputDir.Replace('\','/'))</_TypeMapBaseOutputDir>
+    <_TypeMapOutputDirectory>$(_TypeMapBaseOutputDir)typemap/</_TypeMapOutputDirectory>
+    <_TypeMapJavaOutputDirectory>$(_TypeMapBaseOutputDir)typemap/java</_TypeMapJavaOutputDirectory>
+    <_TypeMapAssembliesListFile>$(_TypeMapOutputDirectory)typemap-assemblies.txt</_TypeMapAssembliesListFile>
+    <_PostTrimTypeMapJavaBaseOutputDir Condition=" '$(_OuterIntermediateOutputPath)' != '' ">$(IntermediateOutputPath)</_PostTrimTypeMapJavaBaseOutputDir>
+    <_PostTrimTypeMapJavaBaseOutputDir Condition=" '$(_PostTrimTypeMapJavaBaseOutputDir)' == '' ">$(_TypeMapBaseOutputDir)</_PostTrimTypeMapJavaBaseOutputDir>
+    <_PostTrimTypeMapJavaOutputDirectory>$(_PostTrimTypeMapJavaBaseOutputDir)typemap/linked-java</_PostTrimTypeMapJavaOutputDirectory>
+    <_PostTrimTypeMapFirstRuntimeIdentifier Condition=" '$(RuntimeIdentifiers)' != '' ">$([System.String]::Copy('$(RuntimeIdentifiers)').Split(';')[0])</_PostTrimTypeMapFirstRuntimeIdentifier>
+    <_PostTrimTypeMapFirstRuntimeIdentifier Condition=" '$(_PostTrimTypeMapFirstRuntimeIdentifier)' == '' ">$(RuntimeIdentifier)</_PostTrimTypeMapFirstRuntimeIdentifier>
+    <_TypeMapJavaStubsSourceDirectory Condition=" '$(_TypeMapJavaStubsSourceDirectory)' == '' and '$(_AndroidRuntime)' == 'CoreCLR' and '$(PublishTrimmed)' == 'true' ">$(_PostTrimTypeMapJavaOutputDirectory)</_TypeMapJavaStubsSourceDirectory>
+    <_TypeMapJavaStubsSourceDirectory Condition=" '$(_TypeMapJavaStubsSourceDirectory)' == '' ">$(_TypeMapJavaOutputDirectory)</_TypeMapJavaStubsSourceDirectory>
+    <_PostTrimTrimmableTypeMapJavaStamp>$(_PostTrimTypeMapJavaBaseOutputDir)stamp/_GeneratePostTrimTrimmableTypeMapJavaSources.stamp</_PostTrimTrimmableTypeMapJavaStamp>
+    <!-- Stamp file touched on every _GenerateTrimmableTypeMap run. It is a stable
+         incremental sentinel: the generated TypeMap DLLs are only rewritten when their
+         content changes (CopyIfStreamChanged), so their timestamps cannot be used as
+         Outputs without making the target run on every build. The stamp is always
+         touched, so the target is correctly skipped when none of its Inputs changed. -->
+    <_TrimmableTypeMapOutputStamp>$(_TypeMapOutputDirectory)_GenerateTrimmableTypeMap.stamp</_TrimmableTypeMapOutputStamp>
+    <!-- Sentinel for _GenerateJavaStubs: the post-trim Java stamp when JCWs are regenerated
+         from the linked assemblies (CoreCLR + PublishTrimmed), otherwise the generator stamp.
+         Both are touched only when their producing target actually runs, so _GenerateJavaStubs
+         stays incremental while still reacting to post-trim JCW regeneration. -->
+    <_TrimmableJavaSourceStamp Condition=" '$(_TrimmableJavaSourceStamp)' == '' and '$(_AndroidRuntime)' == 'CoreCLR' and '$(PublishTrimmed)' == 'true' ">$(_PostTrimTrimmableTypeMapJavaStamp)</_TrimmableJavaSourceStamp>
+    <_TrimmableJavaSourceStamp Condition=" '$(_TrimmableJavaSourceStamp)' == '' ">$(_TrimmableTypeMapOutputStamp)</_TrimmableJavaSourceStamp>
+    <!-- On NativeAOT, ensure ILC's dynamic build properties (e.g. RuntimeIdentifier-derived
+         paths) are computed before the typemap is generated. -->
+    <_GenerateTrimmableTypeMapDependsOn Condition=" '$(_AndroidRuntime)' == 'NativeAOT' ">$(IlcDynamicBuildPropertyDependencies)</_GenerateTrimmableTypeMapDependsOn>
+    <!-- _GetLibraryImports populates @(ExtractedManifestDocuments) (the extracted library .aar
+         AndroidManifest.xml files) that the legacy manifest merger merges into the app manifest. -->
+    <_GenerateTrimmableTypeMapDependsOn>$(_GenerateTrimmableTypeMapDependsOn);_GetLibraryImports</_GenerateTrimmableTypeMapDependsOn>
+    <!-- Max array rank for __ArrayMapRank{N} sentinel emission. Defaults to 3 when
+         dynamic code is unavailable, so array creation uses the typemap path;
+         defaults to 0 otherwise, where dynamic code can use Array.CreateInstance directly. -->
+    <_AndroidTrimmableTypeMapMaxArrayRank Condition=" '$(_AndroidTrimmableTypeMapMaxArrayRank)' == '' and ('$(PublishAot)' == 'true' or '$(DynamicCodeSupport)' == 'false') ">3</_AndroidTrimmableTypeMapMaxArrayRank>
+    <_AndroidTrimmableTypeMapMaxArrayRank Condition=" '$(_AndroidTrimmableTypeMapMaxArrayRank)' == '' ">0</_AndroidTrimmableTypeMapMaxArrayRank>
+    <IncrementalCleanDependsOn>
+      _RecordTrimmableTypeMapFileWrites;
+      $(IncrementalCleanDependsOn);
+    </IncrementalCleanDependsOn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="Microsoft.Android.Runtime.RuntimeFeature.TrimmableTypeMap"
+        Value="true" Trim="true" />
+    <RuntimeHostConfigurationOption Include="System.Runtime.InteropServices.TypeMappingEntryAssembly"
+        Value="$(_TypeMapAssemblyName)" />
+    <!-- [Export] metadata is still needed at compile time, but the legacy runtime helper
+         assembly must stay out of the packaged app on the trimmable path. -->
+    <AndroidCustomMetaDataForReferences Include="Mono.Android.Export">
+      <AndroidSkipAddToPackage>true</AndroidSkipAddToPackage>
+    </AndroidCustomMetaDataForReferences>
+    <!-- Preserve the native→managed entry point (called via create_delegate from host.cc) -->
+    <TrimmerRootDescriptor Include="$(MSBuildThisFileDirectory)../PreserveLists/Trimmable.CoreCLR.xml"
+        Condition=" '$(_AndroidRuntime)' == 'CoreCLR' " />
+    <TrimmerRootDescriptor Include="$(MSBuildThisFileDirectory)../PreserveLists/System.Private.CoreLib.xml"
+        Condition=" '$(_AndroidRuntime)' == 'CoreCLR' " />
+  </ItemGroup>
+
+  <Target Name="_ValidateTrimmableTypeMapRuntime"
+      Condition=" '$(_AndroidRuntime)' != 'CoreCLR' And '$(_AndroidRuntime)' != 'NativeAOT' "
+      BeforeTargets="Build">
+    <Error Text="Trimmable typemap is not supported for runtime '$(_AndroidRuntime)'." />
+  </Target>
+
+  <Target Name="_ValidateTrimmableTypeMapPackageNamingPolicy"
+      Condition=" '$(_AndroidTypeMapImplementation)' == 'trimmable' and '$(_AndroidPackageNamingPolicySetByUser)' == 'true' and '$(AndroidPackageNamingPolicy.ToLowerInvariant())' != 'crc64' and '$(AndroidPackageNamingPolicy.ToLowerInvariant())' != 'lowercasecrc64' "
+      BeforeTargets="_GenerateTrimmableTypeMap;Build">
+    <Error Text="AndroidPackageNamingPolicy value '$(AndroidPackageNamingPolicy)' is not supported with the trimmable typemap. Supported values are 'Crc64' (default) and 'LowercaseCrc64'." />
+  </Target>
+
+  <!--
+    Generate TypeMap assemblies and JCW files.
+    AfterTargets="CoreCompile" so it runs after compilation.
+    Uses @(ReferencePath) as the primary input (available after compilation).
+    Skipped in design-time builds because project references may resolve to target
+    paths that are not produced when SkipCompilerExecution=true, and because the
+    generator output is not needed to provide IDE design-time information.
+    Skipped in inner per-RID builds (_OuterIntermediateOutputPath is set) because
+    those builds lack the manifest template and full assembly set needed for correct
+    deferred-registration propagation.
+  -->
+  <Target Name="_GenerateTrimmableTypeMap"
+      Condition=" '$(_AndroidTypeMapImplementation)' == 'trimmable' and '$(DesignTimeBuild)' != 'true' and '@(ReferencePath->Count())' != '0' and '$(_OuterIntermediateOutputPath)' == '' "
+      AfterTargets="CoreCompile"
+      DependsOnTargets="$(_GenerateTrimmableTypeMapDependsOn)"
+      Inputs="@(ReferencePath);@(PrivateSdkAssemblies);@(FrameworkAssemblies);@(ExtractedManifestDocuments);@(_AndroidTrimmableTypeMapExtraFrameworkAssembly);$(IntermediateOutputPath)$(TargetFileName);$(_AndroidManifestAbs);$(_AndroidBuildPropertiesCache)"
+      Outputs="$(_TrimmableTypeMapOutputStamp)">
+
+    <ItemGroup>
+      <_TypeMapInputAssemblies Include="@(ReferencePath)" />
+      <_TypeMapInputAssemblies Include="@(ResolvedAssemblies)" />
+      <_TypeMapInputAssemblies Include="@(ResolvedFrameworkAssemblies)" />
+      <_TypeMapInputAssemblies Include="@(PrivateSdkAssemblies)" />
+      <_TypeMapInputAssemblies Include="@(FrameworkAssemblies)" />
+      <!-- Runtime-only framework assemblies that have no counterpart in @(ReferencePath) (e.g. the
+           NativeAOT runtime host Microsoft.Android.Runtime.NativeAOT.dll, injected by the trimmable
+           NativeAOT targets). They carry Java Callable Wrapper types that must be in the typemap. -->
+      <_TypeMapInputAssemblies Include="@(_AndroidTrimmableTypeMapExtraFrameworkAssembly)" />
+      <_TypeMapFrameworkAssemblies Include="@(ResolvedFrameworkAssemblies)" />
+      <_TypeMapFrameworkAssemblies Include="@(PrivateSdkAssemblies)" />
+      <_TypeMapFrameworkAssemblies Include="@(FrameworkAssemblies)" />
+      <_TypeMapFrameworkAssemblies Include="@(_AndroidTrimmableTypeMapExtraFrameworkAssembly)" />
+      <_TypeMapInputAssemblies Include="$(IntermediateOutputPath)$(TargetFileName)"
+          Condition="Exists('$(IntermediateOutputPath)$(TargetFileName)')" />
+      <!-- Library (.aar) manifests to merge into the app manifest. Only on the legacy manifest
+           merger path; manifestmerger.jar merges these downstream in the _ManifestMerger target. -->
+      <_MergedManifestDocuments Condition=" '$(AndroidManifestMerger)' == 'legacy' " Include="@(ExtractedManifestDocuments)" />
+    </ItemGroup>
+
+    <GenerateTrimmableTypeMap
+        ResolvedAssemblies="@(_TypeMapInputAssemblies)"
+        ResolvedFrameworkAssemblies="@(_TypeMapFrameworkAssemblies)"
+        FrameworkAssemblyNames="@(_TypeMapFrameworkAssemblies->'%(Filename)')"
+        OutputDirectory="$(_TypeMapOutputDirectory)"
+        JavaSourceOutputDirectory="$(_TypeMapJavaOutputDirectory)"
+        TargetFrameworkVersion="$(TargetFrameworkVersion)"
+        ManifestTemplate="$(_AndroidManifestAbs)"
+        MergedAndroidManifestOutput="$(_TypeMapBaseOutputDir)AndroidManifest.xml"
+        MergedManifestDocuments="@(_MergedManifestDocuments)"
+        PackageName="$(_AndroidPackage)"
+        ApplicationLabel="$(_ApplicationLabel)"
+        VersionCode="$(_AndroidVersionCode)"
+        VersionName="$(_AndroidVersionName)"
+        AndroidApiLevel="$(_AndroidApiLevel)"
+        SupportedOSPlatformVersion="$(SupportedOSPlatformVersion)"
+        RuntimeProviderJavaName="$(_TrimmableRuntimeProviderJavaName)"
+        Debug="$(AndroidIncludeDebugSymbols)"
+        NeedsInternet="$(AndroidNeedsInternetPermission)"
+        EmbedAssemblies="$(EmbedAssembliesIntoApk)"
+        PackageNamingPolicy="$(_TrimmableTypeMapPackageNamingPolicy)"
+        MaxArrayRank="$(_AndroidTrimmableTypeMapMaxArrayRank)"
+        ManifestPlaceholders="$(AndroidManifestPlaceholders)"
+        CheckedBuild="$(_AndroidCheckedBuild)"
+        ApplicationJavaClass="$(AndroidApplicationJavaClass)"
+        GeneratedAssembliesListFile="$(_TypeMapAssembliesListFile)"
+        AcwMapOutputFile="$(IntermediateOutputPath)acw-map.txt"
+        ApplicationRegistrationOutputFile="$(IntermediateOutputPath)android/src/net/dot/android/ApplicationRegistration.java">
+      <Output TaskParameter="GeneratedAssemblies" ItemName="_GeneratedTypeMapAssemblies" />
+      <Output TaskParameter="GeneratedJavaFiles" ItemName="_GeneratedJavaFiles" />
+      <Output TaskParameter="DeletedJavaFiles" ItemName="_DeletedJavaFiles" />
+      <Output TaskParameter="AdditionalProviderSources" ItemName="_AdditionalProviderSources" />
+    </GenerateTrimmableTypeMap>
+
+    <!-- Mirror any Java sources the generator deleted into the android/src copies so a
+         removed type does not leave a stale .java (and stale .class) behind. Busting the
+         Java compile stamp forces _CompileJava to drop the corresponding class output. -->
+    <ItemGroup>
+      <_DeletedCopiedJavaFiles Remove="@(_DeletedCopiedJavaFiles)" />
+      <_DeletedCopiedJavaFiles Include="@(_DeletedJavaFiles->'$(IntermediateOutputPath)android/src/%(RelativePath)')" />
+    </ItemGroup>
+    <Delete Files="@(_DeletedCopiedJavaFiles)" />
+    <Delete Files="$(_AndroidCompileJavaStampFile)" Condition=" '@(_DeletedCopiedJavaFiles->Count())' != '0' " />
+
+    <!-- Touch only the stamp: it is the target's sole Output and incremental sentinel.
+         The generated TypeMap DLLs and the assemblies list are written via CopyIfStreamChanged
+         (so unchanged content keeps a stable timestamp) and are not consumed as timestamp
+         Inputs by any other target, so they do not need to be touched here. -->
+    <Touch Files="$(_TrimmableTypeMapOutputStamp)" AlwaysCreate="true" />
+
+    <ItemGroup>
+      <FileWrites Remove="@(_DeletedJavaFiles)" />
+      <FileWrites Remove="@(_DeletedCopiedJavaFiles)" />
+      <FileWrites Include="@(_GeneratedTypeMapAssemblies)" />
+      <FileWrites Include="@(_GeneratedJavaFiles)" />
+      <FileWrites Include="$(_TypeMapAssembliesListFile)" />
+      <FileWrites Include="$(_TrimmableTypeMapOutputStamp)" />
+      <FileWrites Include="$(_TypeMapBaseOutputDir)AndroidManifest.xml" />
+      <FileWrites Include="$(IntermediateOutputPath)acw-map.txt" />
+      <FileWrites Include="$(IntermediateOutputPath)android/src/net/dot/android/ApplicationRegistration.java" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_ReadGeneratedTrimmableTypeMapAssemblies"
+      Condition=" '$(_AndroidTypeMapImplementation)' == 'trimmable' "
+      DependsOnTargets="_GenerateTrimmableTypeMap">
+    <MakeDir
+        Directories="$(_TypeMapOutputDirectory)"
+        Condition=" '@(ReferencePath->Count())' == '0' and '$(_OuterIntermediateOutputPath)' == '' and !Exists('$(_TypeMapAssembliesListFile)')" />
+    <Touch
+        Files="$(_TypeMapAssembliesListFile)"
+        AlwaysCreate="true"
+        Condition=" '@(ReferencePath->Count())' == '0' and '$(_OuterIntermediateOutputPath)' == '' and !Exists('$(_TypeMapAssembliesListFile)')" />
+    <Error
+        Condition=" !Exists('$(_TypeMapAssembliesListFile)') "
+        Text="Trimmable typemap assembly list '$(_TypeMapAssembliesListFile)' was not found." />
+    <ItemGroup>
+      <_GeneratedTypeMapAssembliesFromList Remove="@(_GeneratedTypeMapAssembliesFromList)" />
+    </ItemGroup>
+    <ReadLinesFromFile File="$(_TypeMapAssembliesListFile)">
+      <Output TaskParameter="Lines" ItemName="_GeneratedTypeMapAssembliesFromList" />
+    </ReadLinesFromFile>
+  </Target>
+
+  <!--
+    The TypeMap generator has dynamic outputs: the set of generated assemblies
+    and Java files comes from scanning references.  FileWrites entries in the
+    generating targets are correct for builds that run those targets, but
+    skipped targets do not execute their ItemGroup bodies on no-op builds.
+    Re-emit the previous dynamic outputs before MSBuild's IncrementalClean
+    reads FileWrites, otherwise those outputs look orphaned and can be deleted
+    before packaging target inputs are evaluated.
+  -->
+  <Target Name="_RecordTrimmableTypeMapFileWrites"
+      Condition=" '$(_OuterIntermediateOutputPath)' == '' and Exists('$(_TypeMapAssembliesListFile)') ">
+    <ItemGroup>
+      <_GeneratedTypeMapAssembliesForFileWrites Remove="@(_GeneratedTypeMapAssembliesForFileWrites)" />
+      <_TypeMapJavaFilesForFileWrites Remove="@(_TypeMapJavaFilesForFileWrites)" />
+      <_TypeMapPostTrimJavaFilesForFileWrites Remove="@(_TypeMapPostTrimJavaFilesForFileWrites)" />
+    </ItemGroup>
+    <ReadLinesFromFile File="$(_TypeMapAssembliesListFile)">
+      <Output TaskParameter="Lines" ItemName="_GeneratedTypeMapAssembliesForFileWrites" />
+    </ReadLinesFromFile>
+    <ItemGroup>
+      <_TypeMapJavaFilesForFileWrites Include="$(_TypeMapJavaOutputDirectory)/**/*.java" />
+      <!-- For CoreCLR + PublishTrimmed the JCWs copied into android/src come from the post-trim
+           `linked-java` directory. _GeneratePostTrimTrimmableTypeMapJavaSources is now incremental,
+           so re-emit its outputs here too; otherwise IncrementalClean deletes linked-java (and its
+           android/src copies) on builds where post-trim is skipped. The glob is empty for
+           configurations that have no post-trim pass. -->
+      <_TypeMapPostTrimJavaFilesForFileWrites Include="$(_PostTrimTypeMapJavaOutputDirectory)/**/*.java" />
+
+      <FileWrites Include="@(_GeneratedTypeMapAssembliesForFileWrites)" />
+      <FileWrites Include="@(_TypeMapJavaFilesForFileWrites)" />
+      <FileWrites Include="@(_TypeMapJavaFilesForFileWrites->'$(IntermediateOutputPath)android/src/%(RecursiveDir)%(Filename)%(Extension)')" />
+      <FileWrites Include="@(_TypeMapPostTrimJavaFilesForFileWrites)" />
+      <FileWrites Include="@(_TypeMapPostTrimJavaFilesForFileWrites->'$(IntermediateOutputPath)android/src/%(RecursiveDir)%(Filename)%(Extension)')" />
+      <FileWrites Include="$(_PostTrimTrimmableTypeMapJavaStamp)" Condition="Exists('$(_PostTrimTrimmableTypeMapJavaStamp)')" />
+      <FileWrites Include="$(_TypeMapAssembliesListFile)" />
+      <FileWrites Include="$(_TrimmableTypeMapOutputStamp)" Condition="Exists('$(_TrimmableTypeMapOutputStamp)')" />
+      <FileWrites Include="$(_TypeMapBaseOutputDir)AndroidManifest.xml" Condition="Exists('$(_TypeMapBaseOutputDir)AndroidManifest.xml')" />
+      <FileWrites Include="$(IntermediateOutputPath)AndroidManifest.xml" Condition="Exists('$(IntermediateOutputPath)AndroidManifest.xml')" />
+      <FileWrites Include="$(IntermediateOutputPath)acw-map.txt" Condition="Exists('$(IntermediateOutputPath)acw-map.txt')" />
+      <FileWrites Include="$(IntermediateOutputPath)android/src/net/dot/android/ApplicationRegistration.java" Condition="Exists('$(IntermediateOutputPath)android/src/net/dot/android/ApplicationRegistration.java')" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Populates @(_AdditionalNativeConfigResolvedAssemblies) with the trimmable TypeMap DLLs
+    so that GenerateNativeApplicationConfigSources (in _GeneratePackageManagerJava) accounts
+    for them.  This must NOT live inside _GenerateJavaStubs because that target can be
+    skipped on incremental builds, which would leave the item group empty.
+  -->
+  <Target Name="_PrepareTrimmableNativeConfigAssemblies"
+      Condition=" '$(_AndroidTypeMapImplementation)' == 'trimmable' "
+      BeforeTargets="_GeneratePackageManagerJava"
+      DependsOnTargets="_ReadGeneratedTrimmableTypeMapAssemblies">
+    <ItemGroup>
+      <_AdditionalNativeConfigResolvedAssemblies Remove="@(_AdditionalNativeConfigResolvedAssemblies)" />
+      <_AdditionalNativeConfigResolvedAssemblies Include="@(_GeneratedTypeMapAssembliesFromList)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Populate the TypeMap assembly items used by packaging and native config from
+    the generated files on disk.  This must NOT live inside _GenerateJavaStubs
+    because that target can be skipped on incremental builds, which would leave
+    the item groups empty for targets such as Install.
+  -->
+  <Target Name="_PrepareTrimmableTypeMapAssemblies"
+      Condition=" '$(_AndroidTypeMapImplementation)' == 'trimmable' "
+      BeforeTargets="_CollectAssembliesToCompress;_GeneratePackageManagerJava;_RemoveRegisterAttribute"
+      DependsOnTargets="_ReadGeneratedTrimmableTypeMapAssemblies;_DefineBuildTargetAbis">
+    <PropertyGroup>
+      <_TypeMapFirstAbi Condition=" '$(AndroidSupportedAbis)' != '' ">$([System.String]::Copy('$(AndroidSupportedAbis)').Split(';')[0])</_TypeMapFirstAbi>
+      <_TypeMapFirstAbi Condition=" '$(_TypeMapFirstAbi)' == '' ">arm64-v8a</_TypeMapFirstAbi>
+      <_TypeMapFirstRid Condition=" '$(_TypeMapFirstAbi)' == 'arm64-v8a' ">android-arm64</_TypeMapFirstRid>
+      <_TypeMapFirstRid Condition=" '$(_TypeMapFirstAbi)' == 'armeabi-v7a' ">android-arm</_TypeMapFirstRid>
+      <_TypeMapFirstRid Condition=" '$(_TypeMapFirstAbi)' == 'x86_64' ">android-x64</_TypeMapFirstRid>
+      <_TypeMapFirstRid Condition=" '$(_TypeMapFirstAbi)' == 'x86' ">android-x86</_TypeMapFirstRid>
+    </PropertyGroup>
+
+    <!-- Add TypeMap DLLs to _ResolvedAssemblies and _ShrunkAssemblies so they are counted by
+         GenerateNativeApplicationConfigSources (in _GeneratePackageManagerJava),
+         included in the assembly store hash table, and keep _RemoveRegisterAttribute
+         source/destination counts in sync. -->
+    <ItemGroup>
+      <_TrimmableTypeMapResolvedAssemblies Remove="@(_TrimmableTypeMapResolvedAssemblies)" />
+      <_TrimmableTypeMapResolvedAssemblies Include="@(_GeneratedTypeMapAssembliesFromList)">
+        <Abi>$(_TypeMapFirstAbi)</Abi>
+        <RuntimeIdentifier>$(_TypeMapFirstRid)</RuntimeIdentifier>
+        <DestinationSubPath>$(_TypeMapFirstAbi)/%(Filename)%(Extension)</DestinationSubPath>
+        <DestinationSubDirectory>$(_TypeMapFirstAbi)/</DestinationSubDirectory>
+      </_TrimmableTypeMapResolvedAssemblies>
+      <_ResolvedAssemblies Include="@(_TrimmableTypeMapResolvedAssemblies)" />
+      <_ShrunkAssemblies Include="@(_TrimmableTypeMapResolvedAssemblies)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Override _RemoveRegisterAttribute for the trimmable typemap path.
+
+    The base target (Xamarin.Android.Common.targets) copies every @(_ResolvedAssemblies)
+    into its @(_ShrunkAssemblies) location. For PublishTrimmed builds the framework/user
+    @(_ShrunkAssemblies) destinations live inside the shared NuGet runtime pack
+    (e.g. .../runtimes/<rid>/lib/net11.0/shrunk/<assembly>.dll).
+
+    On NativeAOT the managed framework/user assemblies are compiled to a native shared
+    library by ILC and are never packaged, so these shrunk copies are not consumed:
+    CollectAssemblyFilesToCompress (the only task that reads their content) is gated to
+    '$(_AndroidRuntime)' != 'NativeAOT'. Staging them into the shared runtime pack is
+    therefore unsafe: concurrent builds (multiple projects and the parallel per-RID inner
+    builds) target the same shared files, so they race and fail intermittently with
+    XACIC7028 (FileNotFoundException) on a clean pack cache.
+
+    For NativeAOT, redirect the shrunk copies to a project-local intermediate directory
+    instead of the shared runtime pack. They are still produced with CopyIfChanged so the
+    copies keep stable timestamps (only rewritten when content actually changes), which
+    preserves the incremental up-to-date checks that consume @(_ShrunkAssemblies) /
+    @(_ShrunkFrameworkAssemblies) as inputs — while never writing into the shared pack.
+
+    CoreCLR (and any other trimmable runtime) keeps the base behavior because it still
+    packages the managed assemblies and therefore needs the shrunk copies in place.
+  -->
+  <Target Name="_RemoveRegisterAttribute"
+      DependsOnTargets="_PrepareAssemblies"
+      Condition="'$(AndroidLinkMode)' != 'None' AND '$(AndroidIncludeDebugSymbols)' != 'true'">
+    <ItemGroup Condition=" '$(_AndroidRuntime)' == 'NativeAOT' ">
+      <_ShrunkAssemblies Remove="@(_ShrunkAssemblies)" />
+      <_ShrunkAssemblies Include="@(_ResolvedAssemblies->'$(MonoAndroidIntermediateAssemblyDir)shrunk\%(DestinationSubPath)')" />
+      <_ShrunkFrameworkAssemblies Remove="@(_ShrunkFrameworkAssemblies)" />
+      <_ShrunkFrameworkAssemblies Include="@(_ResolvedFrameworkAssemblies->'$(MonoAndroidIntermediateAssemblyDir)shrunk\%(DestinationSubPath)')" />
+      <_ShrunkUserAssemblies Remove="@(_ShrunkUserAssemblies)" />
+      <_ShrunkUserAssemblies Include="@(_ResolvedUserAssemblies->'$(MonoAndroidIntermediateAssemblyDir)shrunk\%(DestinationSubPath)')" />
+    </ItemGroup>
+    <CopyIfChanged
+      SourceFiles="@(_ResolvedAssemblies)"
+      DestinationFiles="@(_ShrunkAssemblies)" />
+    <CopyIfChanged
+      SourceFiles="@(_ResolvedAssemblies->'%(Identity).config')"
+      DestinationFiles="@(_ShrunkAssemblies->'%(Identity).config')" />
+    <MakeDir Directories="$(MonoAndroidIntermediateAssemblyDir)shrunk" />
+  </Target>
+
+  <!--
+    _GenerateJavaStubs: overrides the legacy target from BuildOrder.targets.
+    In the trimmable path, TypeMap generation already happened in _GenerateTrimmableTypeMap,
+    so this target only handles JCW file copying, manifest, assembly store setup, and native config.
+    We keep the name _GenerateJavaStubs because BuildOrder.targets references it.
+
+    Inputs uses the TypeMap output stamp as a focused sentinel — _GenerateTrimmableTypeMap
+    touches it whenever any of its own inputs (assemblies, manifest, etc.) change, and is
+    skipped (leaving the stamp stable) on no-op builds. The Copy below then updates
+    android/src only for Java sources whose content changed.
+    We keep _GetGenerateJavaStubsInputs in DependsOnTargets so that downstream targets
+    (_GetGeneratePackageManagerJavaInputs) can still read @(_GenerateJavaStubsInputs).
+  -->
+  <Target Name="_GenerateJavaStubs"
+      DependsOnTargets="_SetLatestTargetFrameworkVersion;_PrepareAssemblies;_GetGenerateJavaStubsInputs;_DefineBuildTargetAbis;_PrepareNativeAssemblySources"
+      Inputs="$(_TrimmableJavaSourceStamp);@(_EnvironmentFiles)"
+      Outputs="$(_AndroidStampDirectory)_GenerateJavaStubs.stamp">
+
+    <ItemGroup>
+      <_TypeMapJavaFiles Include="$(_TypeMapJavaStubsSourceDirectory)/**/*.java" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_TypeMapJavaFiles)" DestinationFolder="$(IntermediateOutputPath)android/src/%(RecursiveDir)" SkipUnchangedFiles="true" />
+
+    <ItemGroup>
+      <FileWrites Include="@(_TypeMapJavaFiles->'$(IntermediateOutputPath)android/src/%(RecursiveDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
+
+    <!-- NativeAOT bootstrap Java sources depend on environment files, so include them as inputs -->
+    <GenerateNativeAotBootstrapSources
+        Condition=" '$(_AndroidRuntime)' == 'NativeAOT' "
+        OutputDirectory="$(IntermediateOutputPath)android"
+        TargetName="$(TargetName)"
+        Environments="@(_EnvironmentFiles)"
+        AdditionalProviderSources="@(_AdditionalProviderSources)"
+        EnableSGenConcurrent="$(AndroidEnableSGenConcurrent)" />
+
+    <!-- Copy generated manifest to expected location -->
+    <Copy SourceFiles="$(_TypeMapBaseOutputDir)AndroidManifest.xml"
+        DestinationFiles="$(IntermediateOutputPath)AndroidManifest.xml"
+        SkipUnchangedFiles="true"
+        Condition="Exists('$(_TypeMapBaseOutputDir)AndroidManifest.xml')" />
+
+    <!-- The manifestmerger.jar path runs _ManifestMerger to produce android\AndroidManifest.xml from the
+         generated manifest. The legacy merger has no equivalent step, so on the trimmable path (where the
+         merged manifest was already produced, placeholders included, by _GenerateTrimmableTypeMap) copy it
+         into place directly; otherwise _ReadAndroidManifest and downstream packaging cannot find it. -->
+    <Copy SourceFiles="$(_TypeMapBaseOutputDir)AndroidManifest.xml"
+        DestinationFiles="$(IntermediateOutputPath)android\AndroidManifest.xml"
+        SkipUnchangedFiles="true"
+        Condition=" '$(AndroidManifestMerger)' != 'manifestmerger.jar' and Exists('$(_TypeMapBaseOutputDir)AndroidManifest.xml') " />
+
+    <!-- acw-map.txt is populated by _GenerateTrimmableTypeMap with real managed→Java mappings.
+         If that target was skipped (e.g., no input assemblies), create an empty placeholder so
+         downstream targets (_ConvertCustomView, _UpdateAndroidResgen) can evaluate their Inputs. -->
+    <Touch Files="$(IntermediateOutputPath)acw-map.txt" AlwaysCreate="true"
+        Condition="!Exists('$(IntermediateOutputPath)acw-map.txt')" />
+
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)android/src/net/dot/android/ApplicationRegistration.java" />
+      <FileWrites Include="$(IntermediateOutputPath)AndroidManifest.xml" />
+      <FileWrites Include="$(IntermediateOutputPath)android\AndroidManifest.xml"
+          Condition=" '$(AndroidManifestMerger)' != 'manifestmerger.jar' " />
+      <FileWrites Include="$(IntermediateOutputPath)acw-map.txt" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(_AndroidStampDirectory)" Condition=" !Exists('$(_AndroidStampDirectory)') " />
+    <Touch Files="$(_AndroidStampDirectory)_GenerateJavaStubs.stamp" AlwaysCreate="True" />
+  </Target>
+
+  <!-- Native typemap stubs -->
+  <Target Name="_PrepareNativeAssemblySources"
+      Condition=" '$(_AndroidRuntime)' != 'NativeAOT' "
+      Inputs="@(_BuildTargetAbis)"
+      Outputs="@(_BuildTargetAbis->'$(_NativeAssemblySourceDir)typemap.%(Identity).ll')">
+    <ItemGroup>
+      <_TypeMapStubAbis Include="@(_BuildTargetAbis)" />
+    </ItemGroup>
+    <MakeDir Directories="$(_NativeAssemblySourceDir)" />
+    <GenerateEmptyTypemapStub
+        OutputDirectory="$(_NativeAssemblySourceDir)"
+        Abis="@(_TypeMapStubAbis)"
+        Debug="$(AndroidIncludeDebugSymbols)">
+      <Output TaskParameter="Sources" ItemName="_TypeMapAssemblySource" />
+    </GenerateEmptyTypemapStub>
+    <ItemGroup>
+      <FileWrites Include="@(_TypeMapAssemblySource)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Keep the resource designer assembly on the trimmable type map path.
+
+    The non-trimmable path (Microsoft.Android.Sdk.TypeMap.LlvmIr.targets) runs
+    PreTrimmingFixLegacyDesigner, which rewrites legacy resource field loads into designer
+    property-getter calls so the trimmer can drop unused designer members. The trimmable path
+    does not run that rewrite. More importantly, resource ids are resolved via reflection at
+    runtime (Android.Runtime.ResourceIdManager then ResourceDesignerAttribute then Type.GetType /
+    UpdateIdValues), which neither ILLink nor ILC can follow. If the designer assembly is left
+    trimmable it gets removed entirely, and accessing any resource id (e.g. from a reflection-only
+    code path) throws a TypeInitializationException wrapping
+    System.IO.FileNotFoundException: _Microsoft.Android.Resource.Designer at runtime.
+
+    Keep the whole _Microsoft.Android.Resource.Designer assembly. Two things are required on the
+    NativeAOT (ILC) path:
+      * ILC only loads the assemblies passed to it as references; the designer is a compile-time
+        reference but is NOT in @(IlcReference), so add it. Rooting an assembly ILC never loaded
+        fails hard with "Failed to load assembly '_Microsoft.Android.Resource.Designer'".
+      * Root it so ILC/ILLink keep it whole (TrimMode-based rooting can't be used here because
+        _AndroidComputeIlcCompileInputs clears @(_IlcManagedInputAssemblies)).
+
+    Drive both off @(ReferencePath) filtered to the designer: the item is empty when the designer
+    assembly was not generated (e.g. no resources / AndroidGenerateResourceDesigner=false), so we
+    never reference or root a non-existent assembly. @(IlcReference) is ignored by ILLink, so the
+    CoreCLR path just gets the root.
+  -->
+  <Target Name="_RootResourceDesignerForTrimmableTypeMap"
+      Condition=" '$(AndroidUseDesignerAssembly)' == 'True' and '$(PublishTrimmed)' == 'true' "
+      BeforeTargets="PrepareForILLink;WriteIlcRspFileForCompilation">
+    <ItemGroup>
+      <_ResourceDesignerReferenceToRoot Include="@(ReferencePath)"
+          Condition=" '%(Filename)' == '_Microsoft.Android.Resource.Designer' " />
+      <IlcReference Include="@(_ResourceDesignerReferenceToRoot->'%(FullPath)')" />
+      <TrimmerRootAssembly Include="@(_ResourceDesignerReferenceToRoot->'%(Filename)')" />
+    </ItemGroup>
+  </Target>
+</Project>

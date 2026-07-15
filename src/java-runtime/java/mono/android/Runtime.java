@@ -9,6 +9,7 @@ public class Runtime {
 	static java.lang.Class java_util_TimeZone = java.util.TimeZone.class;
 	static java.lang.Class mono_android_IGCUserPeer = mono.android.IGCUserPeer.class;
 	static java.lang.Class mono_android_GCUserPeer = mono.android.GCUserPeer.class;
+	static java.lang.Class net_dot_jni_GCUserPeerable = net.dot.jni.GCUserPeerable.class;
 
 	static {
 		Thread.setDefaultUncaughtExceptionHandler (new XamarinUncaughtExceptionHandler (Thread.getDefaultUncaughtExceptionHandler ()));
@@ -27,6 +28,7 @@ public class Runtime {
 		boolean haveSplitApks
 	);
 	public static native void register (String managedType, java.lang.Class nativeClass, String methods);
+	public static native void registerNatives (java.lang.Class nativeClass);
 	public static native void notifyTimeZoneChanged ();
 	public static native int createNewContext (String[] runtimeApks, String[] assemblies, ClassLoader loader);
 	public static native int createNewContextWithData (String[] runtimeApks, String[] assemblies, byte[][] assembliesBytes, String[] assembliesPaths, ClassLoader loader, boolean forcePreloadAssemblies);

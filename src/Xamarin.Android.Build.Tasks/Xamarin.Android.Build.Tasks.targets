@@ -1,14 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.GenerateProfile" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.GenerateSupportedPlatforms" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.UnzipDirectoryChildren" />
-  <UsingTask AssemblyFile="$(PrepTasksAssembly)"      TaskName="Xamarin.Android.BuildTools.PrepTasks.ReplaceFileContents" />
-  <UsingTask AssemblyFile="$(PrepTasksAssembly)"      TaskName="Xamarin.Android.BuildTools.PrepTasks.Which" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.GenerateSupportedPlatforms" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.UnzipDirectoryChildren" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(PrepTasksAssembly)"      TaskName="Xamarin.Android.BuildTools.PrepTasks.ReplaceFileContents" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(PrepTasksAssembly)"      TaskName="Xamarin.Android.BuildTools.PrepTasks.Which" TaskFactory="TaskHostFactory" Runtime="NET" />
 
   <PropertyGroup>
     <_SharedRuntimeBuildPath Condition=" '$(_SharedRuntimeBuildPath)' == '' ">$(XAInstallPrefix)xbuild-frameworks\MonoAndroid\</_SharedRuntimeBuildPath>
-    <_GeneratedProfileClass>$(MSBuildThisFileDirectory)$(IntermediateOutputPath)Profile.g.cs</_GeneratedProfileClass>
     <ResolveReferencesDependsOn>
       $(ResolveReferencesDependsOn);
       _GenerateSupportedPlatforms;
@@ -21,20 +19,12 @@
       _CopyExtraPackageContent;
       _GenerateBundledVersions;
       _CopyNetSdkTargets;
-      _CopyVSExtensionTargets;
       _WriteVersionFiles;
     </BuildDependsOn>
     <_AndroidSdkLocation Condition="'$(_AndroidSdkLocation)'==''">$(AndroidSdkDirectory)</_AndroidSdkLocation>
     <_MultiDexAarInAndroidSdk>extras\android\m2repository\com\android\support\multidex\1.0.1\multidex-1.0.1.aar</_MultiDexAarInAndroidSdk>
-    <_SupportLicense Condition="Exists('$(_AndroidSdkLocation)\extras\android\m2repository\NOTICE.txt')">$(_AndroidSdkLocation)\extras\android\m2repository\NOTICE.txt</_SupportLicense>
-    <_SupportLicense Condition="Exists('$(_AndroidSdkLocation)\extras\android\m2repository\m2repository\NOTICE.txt')">$(_AndroidSdkLocation)\extras\android\m2repository\m2repository\NOTICE.txt</_SupportLicense>
   </PropertyGroup>
   <ItemGroup>
-    <None
-        Include="MSBuild\Xamarin\Android\Xamarin.Android.Bindings.Before.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>Xamarin.Android.Bindings.Before.targets</Link>
-    </None>
     <None
         Include="MSBuild\Xamarin\Android\Xamarin.Android.Bindings.ClassParse.targets">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -71,29 +61,9 @@
       <Link>Microsoft.Android.Sdk.Bindings.Gradle.targets</Link>
     </None>
     <None
-        Include="MSBuild\Xamarin\Android\Xamarin.Android.Common\ImportAfter\Microsoft.Cpp.Android.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>Xamarin.Android.Common\ImportAfter\Microsoft.Cpp.Android.targets</Link>
-    </None>
-    <None
         Include="MSBuild\Xamarin\Android\Xamarin.Android.AvailableItems.targets">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>Xamarin.Android.AvailableItems.targets</Link>
-    </None>
-    <None
-        Include="MSBuild\Xamarin\Android\Xamarin.Android.Common.After.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>Xamarin.Android.Common.After.targets</Link>
-    </None>
-    <None
-        Include="MSBuild\Xamarin\Android\Xamarin.Android.Common.Before.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>Xamarin.Android.Common.Before.targets</Link>
-    </None>
-    <None
-        Include="MSBuild\Xamarin\Android\Xamarin.Android.DefaultOutputPaths.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>Xamarin.Android.DefaultOutputPaths.targets</Link>
     </None>
     <None Include="MSBuild\Xamarin\Android\Xamarin.Android.Designer.targets">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -118,9 +88,6 @@
     <None Include="Xamarin.Android.Application.targets">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="Xamarin.Android.Bindings.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Include="Xamarin.Android.Common.props">
       <SubType>Designer</SubType>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -133,9 +100,6 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <SubType>Designer</SubType>
     </None>
-    <None Include="Xamarin.Android.CSharp.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Include="Xamarin.Android.D8.targets">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -145,19 +109,7 @@
     <None Include="Xamarin.Android.EmbeddedResource.targets">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="Xamarin.Android.FSharp.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="Xamarin.Android.PCLSupport.props">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="Xamarin.Android.PCLSupport.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Include="Xamarin.Android.Tooling.targets">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="Xamarin.Android.VisualBasic.targets">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
@@ -165,16 +117,6 @@
     <None Include="ManifestOverlays\Timing.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-  </ItemGroup>
-  <ItemGroup>
-    <_SharedRuntimeAssemblies Include="@(MonoProfileAssembly->'$(_SharedRuntimeBuildPath)v1.0\%(Identity)')" />
-    <_SharedRuntimeAssemblies Include="$(_SharedRuntimeBuildPath)v1.0\Mono.Data.Sqlite.dll" />
-    <_SharedRuntimeAssemblies Include="$(_SharedRuntimeBuildPath)v1.0\Mono.Posix.dll" />
-    <_SharedRuntimeAssemblies Include="$(_SharedRuntimeBuildPath)v1.0\Java.Interop.dll" />
-    <_SharedRuntimeAssemblies Include="$(_SharedRuntimeBuildPath)v1.0\System.EnterpriseServices.dll" />
-    <_SharedRuntimeAssemblies Include="$(_SharedRuntimeBuildPath)$(AndroidFrameworkVersion)\Mono.Android.Export.dll" />
-    <!-- These files are build after Xamarin.Android.Build.Tasks but MUST be included in Profile.g.cs -->
-    <_SharedRuntimeAssemblies Include="$(_SharedRuntimeBuildPath)$(AndroidFrameworkVersion)\Mono.Android.dll" />
   </ItemGroup>
 
   <Target Name="_GenerateMonoAndroidEnums"
@@ -195,7 +137,7 @@
     <ReplaceFileContents
         SourceFile="Xamarin.Android.BuildInfo.txt.in"
         DestinationFile="Xamarin.Android.BuildInfo.txt"
-        Replacements="@JAVA_INTEROP_COMMIT@=$(_BuildInfo_JavaInteropCommit);@SQLITE_COMMIT@=$(_BuildInfo_SqliteCommit);@XAMARIN_ANDROID_TOOLS_COMMIT@=$(_BuildInfo_XamarinAndroidToolsCommit);">
+        Replacements="@JAVA_INTEROP_COMMIT@=in-tree;@SQLITE_COMMIT@=$(_BuildInfo_SqliteCommit);@XAMARIN_ANDROID_TOOLS_COMMIT@=in-tree;">
     </ReplaceFileContents>
     <ItemGroup>
       <_XACommonPropsReplacement Include="@COMMAND_LINE_TOOLS_VERSION@=$(CommandLineToolsFolder)" />
@@ -212,7 +154,7 @@
       <_XACommonPropsReplacement Include="@PACKAGE_VERSION@=$(ProductVersion)" />
       <_XACommonPropsReplacement Include="@SDK_BUILD_TOOLS_VERSION@=$(XABuildToolsFolder)" />
       <_XACommonPropsReplacement Include="@SDK_PLATFORM_TOOLS_VERSION@=$(XAPlatformToolsVersion)" />
-      <_XACommonPropsReplacement Include="@SDK_PLATFORM_VERSION@=android-$(AndroidLatestStableApiLevel)" />
+      <_XACommonPropsReplacement Include="@SDK_PLATFORM_VERSION@=android-$(AndroidLatestStablePlatformId)" />
     </ItemGroup>
     <ReplaceFileContents
         SourceFile="Xamarin.Android.Common.props.in"
@@ -221,7 +163,7 @@
     </ReplaceFileContents>
   </Target>
   <Target Name="_GenerateSupportedPlatforms"
-      Inputs="$(BootstrapTasksAssembly);$(MSBuildThisFile);..\..\bin\Build$(Configuration)\Mono.Android.Apis.projitems"
+      Inputs="$(BootstrapTasksAssembly);$(MSBuildThisFile);..\..\src\Mono.Android\Mono.Android.Apis.projitems"
       Outputs="Microsoft.Android.Sdk\targets\Microsoft.Android.Sdk.SupportedPlatforms.targets">
     <GenerateSupportedPlatforms
         AndroidApiInfo="@(AndroidApiInfo)"
@@ -230,23 +172,23 @@
         OutputFile="Microsoft.Android.Sdk\targets\Microsoft.Android.Sdk.SupportedPlatforms.targets"
     />
   </Target>
-  <Target Name="_GenerateProfileClass"
-      BeforeTargets="CoreCompile"
-      Inputs="@(_SharedRuntimeAssemblies)"
-      Outputs="$(_GeneratedProfileClass)">
-    <GenerateProfile Files="@(_SharedRuntimeAssemblies)" OutputFile="$(_GeneratedProfileClass)" />
-    <WriteLinesToFile
-        File="$(IntermediateOutputPath)$(CleanFile)"
-        Lines="$(_GeneratedProfileClass)"
-        Overwrite="false"/>
-    <ItemGroup>
-      <FileWrites Include="$(_GeneratedProfileClass)" />
-    </ItemGroup>
-  </Target>
 
   <Target Name="_CopyExtractedMultiDexJar"
-    Inputs="$(_AndroidSdkLocation)\$(_MultiDexAarInAndroidSdk);$(_SupportLicense)"
+    Inputs="$(_AndroidSdkLocation)\$(_MultiDexAarInAndroidSdk)"
     Outputs="$(OutputPath)android-support-multidex.jar;$(OutputPath)MULTIDEX_JAR_LICENSE">
+    <!--
+      _SupportLicense is resolved at target-execution time because the m2repository is
+      now extracted by src/androidsdk during this same build; a static (file-load time)
+      Exists() check would resolve to empty on a clean build and silently produce a Copy
+      no-op followed by a Touch failure.
+    -->
+    <PropertyGroup>
+      <_SupportLicense Condition="Exists('$(_AndroidSdkLocation)\extras\android\m2repository\NOTICE.txt')">$(_AndroidSdkLocation)\extras\android\m2repository\NOTICE.txt</_SupportLicense>
+      <_SupportLicense Condition="'$(_SupportLicense)' == '' and Exists('$(_AndroidSdkLocation)\extras\android\m2repository\m2repository\NOTICE.txt')">$(_AndroidSdkLocation)\extras\android\m2repository\m2repository\NOTICE.txt</_SupportLicense>
+    </PropertyGroup>
+    <Error
+      Condition=" '$(_SupportLicense)' == '' "
+      Text="Could not locate NOTICE.txt under '$(_AndroidSdkLocation)\extras\android\m2repository'." />
     <UnzipDirectoryChildren
       NoSubdirectory="true"
       SourceFiles="$(_AndroidSdkLocation)\$(_MultiDexAarInAndroidSdk)"
@@ -270,7 +212,6 @@
     <_MonoScriptSourceDirectory>..\..\tools\scripts</_MonoScriptSourceDirectory>
   </PropertyGroup>
   <ItemGroup>
-    <_MonoScript Include="mono-symbolicate" />
     <_MonoScript Include="illinkanalyzer" />
     <_MonoScript Include="jit-times" />
     <_MonoScript Include="aprofutil" />
@@ -335,16 +276,44 @@
     </PropertyGroup>
   </Target>
 
+  <Target Name="_WriteBundledVersionsCache"
+      DependsOnTargets="GetXAVersionInfo">
+    <ItemGroup>
+      <_BundledVersionsCacheLines Include="AndroidPackVersionLong=$(AndroidPackVersionLong)" />
+      <_BundledVersionsCacheLines Include="AndroidLatestStableApiLevel=$(AndroidLatestStableApiLevel)" />
+      <_BundledVersionsCacheLines Include="AndroidLatestUnstableApiLevel=$(AndroidLatestUnstableApiLevel)" />
+      <_BundledVersionsCacheLines Include="DotNetTargetFramework=$(DotNetTargetFramework)" />
+      <_BundledVersionsCacheLines Include="DotNetTargetFrameworkVersion=$(DotNetTargetFrameworkVersion)" />
+      <_BundledVersionsCacheLines Include="MicrosoftNETCoreAppRefPackageVersion=$(MicrosoftNETCoreAppRefPackageVersion)" />
+    </ItemGroup>
+    <WriteLinesToFile
+        File="$(IntermediateOutputPath)_GenerateBundledVersions.cache"
+        Lines="@(_BundledVersionsCacheLines)"
+        Overwrite="true"
+        WriteOnlyWhenDifferent="true"
+    />
+  </Target>
+
   <!-- Generate and include this file in our SDK for now, but we may eventually want to migrate to:
        https://github.com/dotnet/installer/blob/d98f5f18bce44014aeacd2f99923b4779d89459d/src/redist/targets/GenerateBundledVersions.targets
        -->
   <Target Name="_GenerateBundledVersions"
-      DependsOnTargets="GetXAVersionInfo">
+      DependsOnTargets="_WriteBundledVersionsCache"
+      Inputs="$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\in\Microsoft.Android.Sdk.BundledVersions.in.targets;$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\Sdk\AutoImport.in.props;$(IntermediateOutputPath)_GenerateBundledVersions.cache"
+      Outputs="$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\targets\Microsoft.Android.Sdk.BundledVersions.targets;$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\Sdk\AutoImport.props">
     <ReplaceFileContents
         SourceFile="$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\in\Microsoft.Android.Sdk.BundledVersions.in.targets"
         DestinationFile="$(MSBuildThisFileDirectory)\Microsoft.Android.Sdk\targets\Microsoft.Android.Sdk.BundledVersions.targets"
-        Replacements="@ANDROID_PACK_VERSION_LONG@=$(AndroidPackVersionLong);@ANDROID_LATEST_STABLE_API_LEVEL@=$(AndroidLatestStableApiLevel);@ANDROID_LATEST_UNSTABLE_API_LEVEL@=$(AndroidLatestUnstableApiLevel);@DOTNET_TARGET_FRAMEWORK@=$(DotNetTargetFramework)" >
+        Replacements="@ANDROID_PACK_VERSION_LONG@=$(AndroidPackVersionLong);@ANDROID_LATEST_STABLE_API_LEVEL@=$(AndroidLatestStableApiLevel);@ANDROID_LATEST_UNSTABLE_API_LEVEL@=$(AndroidLatestUnstableApiLevel);@DOTNET_TARGET_FRAMEWORK@=$(DotNetTargetFramework);@MICROSOFT_NETCORE_APP_REF_PACKAGE_VERSION@=$(MicrosoftNETCoreAppRefPackageVersion)" >
     </ReplaceFileContents>
+    <ReplaceFileContents
+        SourceFile="$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\Sdk\AutoImport.in.props"
+        DestinationFile="$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\Sdk\AutoImport.props"
+        Replacements="@DOTNET_TARGET_FRAMEWORK_VERSION@=$(DotNetTargetFrameworkVersion)">
+    </ReplaceFileContents>
+    <Touch
+        Files="$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\targets\Microsoft.Android.Sdk.BundledVersions.targets;$(MSBuildThisFileDirectory)Microsoft.Android.Sdk\Sdk\AutoImport.props"
+    />
   </Target>
 
   <Target Name="_CopyNetSdkTargets">
@@ -362,21 +331,6 @@
         SourceFiles="@(_SdkTargetsDirFiles)"
         DestinationFolder="$(MicrosoftAndroidSdkPackDir)targets"
         SkipUnchangedFiles="true"
-    />
-  </Target>
-
-  <ItemGroup>
-    <_VSExtensionTargets Include="$(MSBuildThisFileDirectory)MSBuild\Xamarin\Xamarin.Android.Sdk.props" />
-    <_VSExtensionTargets Include="$(MSBuildThisFileDirectory)MSBuild\Xamarin\Xamarin.Android.Sdk.targets" />
-  </ItemGroup>
-  <Target Name="_CopyVSExtensionTargets"
-      Inputs="@(_VSExtensionTargets)"
-      Outputs="@(_VSExtensionTargets->'$(XAInstallPrefix)xbuild\Xamarin\%(FileName)%(Extension)')"
-      DependsOnTargets="_MakeMonoUnixFatBinariesOSX">
-    <Copy
-        SourceFiles="@(_VSExtensionTargets)"
-        DestinationFiles="@(_VSExtensionTargets->'$(XAInstallPrefix)xbuild\Xamarin\%(FileName)%(Extension)')"
-        SkipUnchangedFiles="True"
     />
   </Target>
 

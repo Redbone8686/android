@@ -3,15 +3,15 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
 using System.Threading;
 using System.Reflection;
 
 using Java.Interop;
 using Java.Interop.Tools.TypeNameMappings;
+using Microsoft.Android.Runtime;
 using System.Diagnostics.CodeAnalysis;
+using RuntimeFeature = Microsoft.Android.Runtime.RuntimeFeature;
 
 #if JAVA_INTEROP
 namespace Android.Runtime {
@@ -23,12 +23,14 @@ namespace Android.Runtime {
 		internal AndroidRuntime (IntPtr jnienv,
 				IntPtr vm,
 				IntPtr classLoader,
-				IntPtr classLoader_loadClass,
+				JniRuntime.JniTypeManager typeManager,
+				JniRuntime.JniValueManager valueManager,
 				bool jniAddNativeMethodRegistrationAttributePresent)
 			: base (new AndroidRuntimeOptions (jnienv,
 					vm,
 					classLoader,
-					classLoader_loadClass,
+					typeManager,
+					valueManager,
 					jniAddNativeMethodRegistrationAttributePresent))
 		{
 			// This is not ideal, but we need to set this while the runtime is initializing but we can't do it directly from the `JNIEnvInit.Initialize` method, since
@@ -56,7 +58,11 @@ namespace Android.Runtime {
 		{
 			if (!reference.IsValid)
 				return null;
-			var peeked      = JNIEnvInit.AndroidValueManager?.PeekPeer (reference);
+			var peeked      = JniEnvironment.Runtime.ValueManager.PeekPeer (reference);
+			if (peeked is JavaProxyThrowable proxyThrowable) {
+				JniObjectReference.Dispose (ref reference, options);
+				return proxyThrowable.InnerException;
+			}
 			var peekedExc   = peeked as Exception;
 			if (peekedExc == null) {
 				var throwable = Java.Lang.Object.GetObject<Java.Lang.Throwable> (reference.Handle, JniHandleOwnership.DoNotTransfer);
@@ -64,21 +70,33 @@ namespace Android.Runtime {
 				return throwable;
 			}
 			JniObjectReference.Dispose (ref reference, options);
-			var unwrapped = JNIEnvInit.AndroidValueManager?.UnboxException (peeked!);
+			var unwrapped = JniEnvironment.Runtime.ValueManager.PeekValue (peeked!.PeerReference) as Exception;
 			if (unwrapped != null) {
 				return unwrapped;
 			}
 			return peekedExc;
 		}
 
+		public override void OnUserUnhandledException (ref JniTransition transition, Exception e)
+		{
+			// Raise the UnhandledExceptionRaiser event via TryRaiseUnhandledException().
+			// If a subscriber sets Handled = true, the exception is considered handled
+			// and we return without transitioning to JNI.
+			// See: https://github.com/dotnet/android/issues/10654
+			if (AndroidEnvironment.TryRaiseUnhandledException (e)) {
+				return;
+			}
+
+			base.OnUserUnhandledException (ref transition, e);
+		}
+
 		public override void RaisePendingException (Exception pendingException)
 		{
-			var je  = pendingException as JavaProxyThrowable;
+			var je  = pendingException as JavaException;
 			if (je == null) {
 				je  = JavaProxyThrowable.Create (pendingException);
 			}
-			var r = new JniObjectReference (je.Handle);
-			JniEnvironment.Exceptions.Throw (r);
+			JniEnvironment.Exceptions.Throw (je.PeerReference);
 		}
 	}
 
@@ -86,22 +104,21 @@ namespace Android.Runtime {
 		public AndroidRuntimeOptions (IntPtr jnienv,
 				IntPtr vm,
 				IntPtr classLoader,
-				IntPtr classLoader_loadClass,
+				JniRuntime.JniTypeManager typeManager,
+				JniRuntime.JniValueManager valueManager,
 				bool jniAddNativeMethodRegistrationAttributePresent)
 		{
 			EnvironmentPointer      = jnienv;
 			ClassLoader             = new JniObjectReference (classLoader, JniObjectReferenceType.Global);
-			ClassLoader_LoadClass_id= classLoader_loadClass;
 			InvocationPointer       = vm;
 			ObjectReferenceManager  = new AndroidObjectReferenceManager ();
-			TypeManager             = new AndroidTypeManager (jniAddNativeMethodRegistrationAttributePresent);
-			ValueManager            = new AndroidValueManager ();
-			UseMarshalMemberBuilder = false;
+			TypeManager             = typeManager;
+			ValueManager            = valueManager;
 			JniAddNativeMethodRegistrationAttributePresent = jniAddNativeMethodRegistrationAttributePresent;
 		}
 	}
 
-	class AndroidObjectReferenceManager : JniRuntime.JniObjectReferenceManager {
+	internal class AndroidObjectReferenceManager : JniRuntime.JniObjectReferenceManager {
 		public override int GlobalReferenceCount {
 			get {return RuntimeNativeMethods._monodroid_gref_get ();}
 		}
@@ -114,11 +131,13 @@ namespace Android.Runtime {
 		{
 			var r = base.CreateLocalReference (value, ref localReferenceCount);
 
-			if (Logger.LogLocalRef) {
-				var tname = Thread.CurrentThread.Name;
-				var tid   = Thread.CurrentThread.ManagedThreadId;;
-				var from  = new StringBuilder (new StackTrace (true).ToString ());
-				RuntimeNativeMethods._monodroid_lref_log_new (localReferenceCount, r.Handle, (byte) 'L', tname, tid, from, 1);
+			if (RuntimeFeature.ObjectReferenceLogging) {
+				if (Logger.LogLocalRef) {
+					var tname = Thread.CurrentThread.Name;
+					var tid   = Thread.CurrentThread.ManagedThreadId;
+					var from  = new StackTrace (true).ToString ();
+					RuntimeNativeMethods._monodroid_lref_log_new (localReferenceCount, r.Handle, (byte) 'L', tname, tid, from, 1);
+				}
 			}
 
 			return r;
@@ -126,11 +145,13 @@ namespace Android.Runtime {
 
 		public override void DeleteLocalReference (ref JniObjectReference value, ref int localReferenceCount)
 		{
-			if (Logger.LogLocalRef) {
-				var tname = Thread.CurrentThread.Name;
-				var tid   = Thread.CurrentThread.ManagedThreadId;;
-				var from  = new StringBuilder (new StackTrace (true).ToString ());
-				RuntimeNativeMethods._monodroid_lref_log_delete (localReferenceCount-1, value.Handle, (byte) 'L', tname, tid, from, 1);
+			if (RuntimeFeature.ObjectReferenceLogging) {
+				if (Logger.LogLocalRef) {
+					var tname = Thread.CurrentThread.Name;
+					var tid   = Thread.CurrentThread.ManagedThreadId;
+					var from  = new StackTrace (true).ToString ();
+					RuntimeNativeMethods._monodroid_lref_log_delete (localReferenceCount - 1, value.Handle, (byte) 'L', tname, tid, from, 1);
+				}
 			}
 			base.DeleteLocalReference (ref value, ref localReferenceCount);
 		}
@@ -138,44 +159,84 @@ namespace Android.Runtime {
 		public override void CreatedLocalReference (JniObjectReference value, ref int localReferenceCount)
 		{
 			base.CreatedLocalReference (value, ref localReferenceCount);
-			if (Logger.LogLocalRef) {
-				var tname = Thread.CurrentThread.Name;
-				var tid   = Thread.CurrentThread.ManagedThreadId;;
-				var from  = new StringBuilder (new StackTrace (true).ToString ());
-				RuntimeNativeMethods._monodroid_lref_log_new (localReferenceCount, value.Handle, (byte) 'L', tname, tid, from, 1);
+			if (RuntimeFeature.ObjectReferenceLogging) {
+				if (Logger.LogLocalRef) {
+					var tname = Thread.CurrentThread.Name;
+					var tid   = Thread.CurrentThread.ManagedThreadId;
+					var from  = new StackTrace (true).ToString ();
+					RuntimeNativeMethods._monodroid_lref_log_new (localReferenceCount, value.Handle, (byte) 'L', tname, tid, from, 1);
+				}
 			}
 		}
 
 		public override IntPtr ReleaseLocalReference (ref JniObjectReference value, ref int localReferenceCount)
 		{
 			var r = base.ReleaseLocalReference (ref value, ref localReferenceCount);
-			if (Logger.LogLocalRef) {
-				var tname = Thread.CurrentThread.Name;
-				var tid   = Thread.CurrentThread.ManagedThreadId;;
-				var from  = new StringBuilder (new StackTrace (true).ToString ());
-				RuntimeNativeMethods._monodroid_lref_log_delete (localReferenceCount-1, value.Handle, (byte) 'L', tname, tid, from, 1);
+			if (RuntimeFeature.ObjectReferenceLogging) {
+				if (Logger.LogLocalRef) {
+					var tname = Thread.CurrentThread.Name;
+					var tid   = Thread.CurrentThread.ManagedThreadId;
+					var from  = new StackTrace (true).ToString ();
+					RuntimeNativeMethods._monodroid_lref_log_delete (localReferenceCount - 1, value.Handle, (byte) 'L', tname, tid, from, 1);
+				}
 			}
 			return r;
 		}
 
+		public override bool LogGlobalReferenceMessages => Logger.LogGlobalRef;
+		public override bool LogLocalReferenceMessages  => Logger.LogLocalRef;
+
+		public override void WriteLocalReferenceLine (string format, params object?[] args)
+		{
+			if (!RuntimeFeature.ObjectReferenceLogging) {
+				return;
+			}
+			if (!Logger.LogLocalRef) {
+				return;
+			}
+
+			RuntimeNativeMethods._monodroid_gref_log ("[LREF] " + string.Format (CultureInfo.InvariantCulture, format, args));
+			RuntimeNativeMethods._monodroid_gref_log ("\n");
+		}
+
 		public override void WriteGlobalReferenceLine (string format, params object?[] args)
 		{
+			if (!RuntimeFeature.ObjectReferenceLogging) {
+				return;
+			}
+			if (!Logger.LogGlobalRef) {
+				return;
+			}
+
 			RuntimeNativeMethods._monodroid_gref_log (string.Format (CultureInfo.InvariantCulture, format, args));
+			RuntimeNativeMethods._monodroid_gref_log ("\n");
 		}
 
 		public override JniObjectReference CreateGlobalReference (JniObjectReference value)
 		{
-			var r     = base.CreateGlobalReference (value);
+			var r = base.CreateGlobalReference (value);
 
-			var log		= Logger.LogGlobalRef;
-			var ctype	= log ? GetObjectRefType (value.Type) : (byte) '*';
-			var ntype	= log ? GetObjectRefType (r.Type) : (byte) '*';
-			var tname = log ? Thread.CurrentThread.Name : null;
-			var tid   = log ? Thread.CurrentThread.ManagedThreadId : 0;
-			var from  = log ? new StringBuilder (new StackTrace (true).ToString ()) : null;
-			int gc 		= RuntimeNativeMethods._monodroid_gref_log_new (value.Handle, ctype, r.Handle, ntype, tname, tid, from, 1);
+			int gc;
+			if (RuntimeFeature.ObjectReferenceLogging) {
+				if (Logger.LogGlobalRef) {
+					var ctype = GetObjectRefType (value.Type);
+					var ntype = GetObjectRefType (r.Type);
+					var tname = Thread.CurrentThread.Name;
+					var tid   = Thread.CurrentThread.ManagedThreadId;
+					var from  = new StackTrace (true).ToString ();
+					gc = RuntimeNativeMethods._monodroid_gref_log_new (value.Handle, ctype, r.Handle, ntype, tname, tid, from, 1);
+				} else {
+					gc = RuntimeNativeMethods._monodroid_gref_inc ();
+				}
+			} else {
+				// Duplicated intentionally: the trimmer removes the outer `if` block entirely when
+				// ObjectReferenceLogging is disabled, so the counter increment must appear in both branches.
+				gc = RuntimeNativeMethods._monodroid_gref_inc ();
+			}
+
 			if (gc >= JNIEnvInit.gref_gc_threshold) {
-				Logger.Log (LogLevel.Info, "monodroid-gc", gc + " outstanding GREFs. Performing a full GC!");
+				Logger.Log (LogLevel.Warn, "monodroid-gc", gc + " outstanding GREFs. Performing a full GC!");
+				System.GC.WaitForPendingFinalizers ();
 				System.GC.Collect ();
 			}
 
@@ -195,12 +256,19 @@ namespace Android.Runtime {
 
 		public override void DeleteGlobalReference (ref JniObjectReference value)
 		{
-			var log		= Logger.LogGlobalRef;
-			var ctype	= log ? GetObjectRefType (value.Type) : (byte) '*';
-			var tname = log ? Thread.CurrentThread.Name : null;
-			var tid   = log ? Thread.CurrentThread.ManagedThreadId : 0;
-			var from  = log ? new StringBuilder (new StackTrace (true).ToString ()) : null;
-			RuntimeNativeMethods._monodroid_gref_log_delete (value.Handle, ctype, tname, tid, from, 1);
+			if (RuntimeFeature.ObjectReferenceLogging) {
+				if (Logger.LogGlobalRef) {
+					var ctype = GetObjectRefType (value.Type);
+					var tname = Thread.CurrentThread.Name;
+					var tid   = Thread.CurrentThread.ManagedThreadId;
+					var from  = new StackTrace (true).ToString ();
+					RuntimeNativeMethods._monodroid_gref_log_delete (value.Handle, ctype, tname, tid, from, 1);
+				} else {
+					RuntimeNativeMethods._monodroid_gref_dec ();
+				}
+			} else {
+				RuntimeNativeMethods._monodroid_gref_dec ();
+			}
 
 			base.DeleteGlobalReference (ref value);
 		}
@@ -209,42 +277,50 @@ namespace Android.Runtime {
 		{
 			var r = base.CreateWeakGlobalReference (value);
 
-			var log		= Logger.LogGlobalRef;
-			var ctype	= log ? GetObjectRefType (value.Type) : (byte) '*';
-			var ntype	= log ? GetObjectRefType (r.Type) : (byte) '*';
-			var tname = log ? Thread.CurrentThread.Name : null;
-			var tid   = log ? Thread.CurrentThread.ManagedThreadId : 0;
-			var from  = log ? new StringBuilder (new StackTrace (true).ToString ()) : null;
-			RuntimeNativeMethods._monodroid_weak_gref_new (value.Handle, ctype, r.Handle, ntype, tname, tid, from, 1);
+			if (RuntimeFeature.ObjectReferenceLogging) {
+				if (Logger.LogGlobalRef) {
+					var ctype = GetObjectRefType (value.Type);
+					var ntype = GetObjectRefType (r.Type);
+					var tname = Thread.CurrentThread.Name;
+					var tid   = Thread.CurrentThread.ManagedThreadId;
+					var from  = new StackTrace (true).ToString ();
+					RuntimeNativeMethods._monodroid_weak_gref_new (value.Handle, ctype, r.Handle, ntype, tname, tid, from, 1);
+				} else {
+					RuntimeNativeMethods._monodroid_weak_gref_inc ();
+				}
+			} else {
+				RuntimeNativeMethods._monodroid_weak_gref_inc ();
+			}
 
 			return r;
 		}
 
 		public override void DeleteWeakGlobalReference (ref JniObjectReference value)
 		{
-			var log		= Logger.LogGlobalRef;
-			var ctype	= log ? GetObjectRefType (value.Type) : (byte) '*';
-			var tname = log ? Thread.CurrentThread.Name : null;
-			var tid   = log ? Thread.CurrentThread.ManagedThreadId : 0;
-			var from  = log ? new StringBuilder (new StackTrace (true).ToString ()) : null;
-			RuntimeNativeMethods._monodroid_weak_gref_delete (value.Handle, ctype, tname, tid, from, 1);
+			if (RuntimeFeature.ObjectReferenceLogging) {
+				if (Logger.LogGlobalRef) {
+					var ctype = GetObjectRefType (value.Type);
+					var tname = Thread.CurrentThread.Name;
+					var tid   = Thread.CurrentThread.ManagedThreadId;
+					var from  = new StackTrace (true).ToString ();
+					RuntimeNativeMethods._monodroid_weak_gref_delete (value.Handle, ctype, tname, tid, from, 1);
+				} else {
+					RuntimeNativeMethods._monodroid_weak_gref_dec ();
+				}
+			} else {
+				RuntimeNativeMethods._monodroid_weak_gref_dec ();
+			}
 
 			base.DeleteWeakGlobalReference (ref value);
 		}
 	}
 
-	class AndroidTypeManager : JniRuntime.JniTypeManager {
-		struct JniRemappingReplacementMethod
-		{
-			public string target_type;
-			public string target_name;
-			public bool     is_static;
-		};
-
+	[RequiresDynamicCode ("This type manager is reflection-backed and is not compatible with Native AOT.")]
+	[RequiresUnreferencedCode ("This type manager is reflection-backed and is not trimming-compatible.")]
+	class AndroidTypeManager : JniRuntime.ReflectionJniTypeManager {
 		bool jniAddNativeMethodRegistrationAttributePresent;
 
-		const DynamicallyAccessedMemberTypes Methods = DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.NonPublicMethods;
-		const DynamicallyAccessedMemberTypes MethodsAndPrivateNested = Methods | DynamicallyAccessedMemberTypes.NonPublicNestedTypes;
+		const DynamicallyAccessedMemberTypes Constructors = DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors;
 
 		public AndroidTypeManager (bool jniAddNativeMethodRegistrationAttributePresent)
 		{
@@ -261,143 +337,72 @@ namespace Android.Runtime {
 				yield return t;
 		}
 
+		protected override Type? GetTypeForSimpleReference (string jniSimpleReference)
+		{
+			var type = base.GetTypeForSimpleReference (jniSimpleReference);
+			if (type != null) {
+				return type;
+			}
+
+			return Java.Interop.TypeManager.GetJavaToManagedType (jniSimpleReference);
+		}
+
 		protected override string? GetSimpleReference (Type type)
 		{
 			string? j = JNIEnv.TypemapManagedToJava (type);
 			if (j != null) {
 				return GetReplacementTypeCore (j) ?? j;
 			}
-			if (JNIEnvInit.IsRunningOnDesktop) {
-				return JavaNativeTypeManager.ToJniName (type);
-			}
+			// Intentionally don't call base.GetSimpleReference(type): Android's
+			// non-trimmable runtime uses the generated/registered typemap, not
+			// Java.Interop's JniTypeSignatureAttribute fallback.
 			return null;
 		}
 
 		protected override IEnumerable<string> GetSimpleReferences (Type type)
 		{
 			string? j = JNIEnv.TypemapManagedToJava (type);
-			j   = GetReplacementTypeCore (j) ?? j;
+			j	   = GetReplacementTypeCore (j) ?? j;
 
-			if (JNIEnvInit.IsRunningOnDesktop) {
-				string? d = JavaNativeTypeManager.ToJniName (type);
-				if (j != null && d != null) {
-					return new[]{j, d};
-				}
-				if (d != null) {
-					return new[]{d};
-				}
-			}
 			if (j != null) {
-				return new[]{j};
+				return [j];
 			}
-			return Array.Empty<string> ();
+			// Keep this in sync with GetSimpleReference(): no base fallback.
+			return [];
 		}
 
 		protected override IReadOnlyList<string>? GetStaticMethodFallbackTypesCore (string jniSimpleReference)
 		{
-			ReadOnlySpan<char>  name    = jniSimpleReference;
-			int slash                   = name.LastIndexOf ('/');
-			var desugarType             = new StringBuilder (jniSimpleReference.Length + "Desugar".Length);
-			if (slash > 0) {
-				desugarType.Append (name.Slice (0, slash+1))
-					.Append ("Desugar")
-					.Append (name.Slice (slash+1));
-			} else {
-				desugarType.Append ("Desugar").Append (name);
-			}
-
-			var typeWithPrefix  = desugarType.ToString ();
-			var typeWithSuffix  = $"{jniSimpleReference}$-CC";
-
-			var replacements    = new[]{
-				GetReplacementTypeCore (typeWithPrefix) ?? typeWithPrefix,
-				GetReplacementTypeCore (typeWithSuffix) ?? typeWithSuffix,
-			};
-
-			if (Logger.LogAssembly) {
-				var message = $"Remapping type `{jniSimpleReference}` to one one of {{ `{replacements[0]}`, `{replacements[1]}` }}";
-				Logger.Log (LogLevel.Debug, "monodroid-assembly", message);
-			}
-			return replacements;
+			return JniRemappingLookup.GetStaticMethodFallbackTypes (jniSimpleReference, useReplacementTypes: true);
 		}
 
-		protected override string? GetReplacementTypeCore (string jniSimpleReference)
+		protected override string? GetReplacementTypeCore (string? jniSimpleReference)
 		{
-			if (!JNIEnvInit.jniRemappingInUse) {
-				return null;
-			}
-
-			IntPtr ret = RuntimeNativeMethods._monodroid_lookup_replacement_type (jniSimpleReference);
-			if (ret == IntPtr.Zero) {
-				return null;
-			}
-
-			return Marshal.PtrToStringAnsi (ret);
+			return JniRemappingLookup.GetReplacementType (jniSimpleReference);
 		}
 
 		protected override JniRuntime.ReplacementMethodInfo? GetReplacementMethodInfoCore (string jniSourceType, string jniMethodName, string jniMethodSignature)
 		{
-			if (!JNIEnvInit.jniRemappingInUse) {
-				return null;
+			return JniRemappingLookup.GetReplacementMethodInfo (jniSourceType, jniMethodName, jniMethodSignature);
+		}
+
+		protected override Type? GetInvokerTypeCore (Type type)
+		{
+			if (type.IsInterface || type.IsAbstract) {
+				return JavaObjectExtensions.GetInvokerType (type)
+					?? base.GetInvokerTypeCore (type);
 			}
 
-			IntPtr retInfo = RuntimeNativeMethods._monodroid_lookup_replacement_method_info (jniSourceType, jniMethodName, jniMethodSignature);
-			if (retInfo == IntPtr.Zero) {
-				return null;
-			}
-
-			var method = new JniRemappingReplacementMethod ();
-			method = Marshal.PtrToStructure<JniRemappingReplacementMethod>(retInfo);
-			var newSignature = jniMethodSignature;
-
-			int? paramCount = null;
-			if (method.is_static) {
-				paramCount = JniMemberSignature.GetParameterCountFromMethodSignature (jniMethodSignature) + 1;
-				newSignature = $"(L{jniSourceType};" + jniMethodSignature.Substring ("(".Length);
-			}
-
-			if (Logger.LogAssembly) {
-				var message = $"Remapping method `{jniSourceType}.{jniMethodName}{jniMethodSignature}` to " +
-					$"`{method.target_type}.{method.target_name}{newSignature}`; " +
-					$"param-count: {paramCount}; instance-to-static? {method.is_static}";
-				Logger.Log (LogLevel.Debug, "monodroid-assembly", message);
-			}
-
-			return new JniRuntime.ReplacementMethodInfo {
-					SourceJniType                   = jniSourceType,
-					SourceJniMethodName             = jniMethodName,
-					SourceJniMethodSignature        = jniMethodSignature,
-					TargetJniType                   = method.target_type,
-					TargetJniMethodName             = method.target_name,
-					TargetJniMethodSignature        = newSignature,
-					TargetJniMethodParameterCount   = paramCount,
-					TargetJniMethodInstanceToStatic = method.is_static,
-			};
+			return null;
 		}
 
 		delegate Delegate GetCallbackHandler ();
 
-		static MethodInfo? dynamic_callback_gen;
-
-		// See ExportAttribute.cs
-		[UnconditionalSuppressMessage ("Trimming", "IL2026", Justification = "Mono.Android.Export.dll is preserved when [Export] is used via [DynamicDependency].")]
-		[UnconditionalSuppressMessage ("Trimming", "IL2075", Justification = "Mono.Android.Export.dll is preserved when [Export] is used via [DynamicDependency].")]
-		static Delegate CreateDynamicCallback (MethodInfo method)
-		{
-			if (dynamic_callback_gen == null) {
-				var assembly = Assembly.Load ("Mono.Android.Export");
-				if (assembly == null)
-					throw new InvalidOperationException ("To use methods marked with ExportAttribute, Mono.Android.Export.dll needs to be referenced in the application");
-				var type = assembly.GetType ("Java.Interop.DynamicCallbackCodeGenerator");
-				if (type == null)
-					throw new InvalidOperationException ("The referenced Mono.Android.Export.dll does not match the expected version. The required type was not found.");
-				dynamic_callback_gen = type.GetMethod ("Create");
-				if (dynamic_callback_gen == null)
-					throw new InvalidOperationException ("The referenced Mono.Android.Export.dll does not match the expected version. The required method was not found.");
-			}
-			return (Delegate)dynamic_callback_gen.Invoke (null, new object [] { method })!;
-		}
-
+		// [Export] callback delegates are created dynamically via DynamicCallbackCodeGenerator and are not
+		// cached in static fields (unlike non-[Export] connector delegates). Without rooting them here,
+		// CoreCLR's GC can collect them between JNI registration and first invocation, causing a crash.
+		static readonly Lock prevent_delegate_gc_lock = new Lock ();
+		static readonly List<Delegate> prevent_delegate_gc = new List<Delegate> ();
 		static List<JniNativeMethodRegistration> sharedRegistrations = new List<JniNativeMethodRegistration> ();
 
 		static bool FastRegisterNativeMembers (JniType nativeClass, Type type, ReadOnlySpan<char> methods)
@@ -470,20 +475,11 @@ namespace Android.Runtime {
 			}
 		}
 
-		public override void RegisterNativeMembers (
-				JniType nativeClass,
-				[DynamicallyAccessedMembers (MethodsAndPrivateNested)]
-				Type type,
-				string? methods) =>
+		[Obsolete ("Use RegisterNativeMembers(JniType, Type, ReadOnlySpan<char>) instead.")]
+		public override void RegisterNativeMembers (JniType nativeClass, Type type, string? methods) =>
 			RegisterNativeMembers (nativeClass, type, methods.AsSpan ());
 
-		[UnconditionalSuppressMessage ("Trimming", "IL2057", Justification = "Type.GetType() can never statically know the string value parsed from parameter 'methods'.")]
-		[UnconditionalSuppressMessage ("Trimming", "IL2067", Justification = "Delegate.CreateDelegate() can never statically know the string value parsed from parameter 'methods'.")]
-		[UnconditionalSuppressMessage ("Trimming", "IL2072", Justification = "Delegate.CreateDelegate() can never statically know the string value parsed from parameter 'methods'.")]
-		public void RegisterNativeMembers (
-				JniType nativeClass,
-				[DynamicallyAccessedMembers (MethodsAndPrivateNested)] Type type,
-				ReadOnlySpan<char> methods)
+		public override void RegisterNativeMembers (JniType nativeClass, Type type, ReadOnlySpan<char> methods)
 		{
 			try {
 				if (methods.IsEmpty) {
@@ -533,7 +529,14 @@ namespace Android.Runtime {
 
 							if (minfo == null)
 								throw new InvalidOperationException (FormattableString.Invariant ($"Specified managed method '{mname.ToString ()}' was not found. Signature: {signature.ToString ()}"));
-							callback = CreateDynamicCallback (minfo);
+
+							var exportAttribute = minfo.GetCustomAttribute<BaseExportAttribute> ()
+								?? throw new InvalidOperationException (FormattableString.Invariant ($"Specified managed method '{mname.ToString ()}' does not have [Export] attribute. Signature: {signature.ToString ()}"));
+
+							callback = exportAttribute.CreateDynamicCallback (minfo);
+							lock (prevent_delegate_gc_lock) {
+								prevent_delegate_gc.Add (callback);
+							}
 							needToRegisterNatives = true;
 						} else {
 							Type callbackDeclaringType = type;
@@ -563,15 +566,6 @@ namespace Android.Runtime {
 				}
 			} catch (Exception e) {
 				JniEnvironment.Runtime.RaisePendingException (e);
-			}
-
-			bool ShouldRegisterDynamically (string callbackTypeName, string callbackString, string typeName, string callbackName)
-			{
-				if (String.Compare (typeName, callbackTypeName, StringComparison.Ordinal) != 0) {
-					return false;
-				}
-
-				return String.Compare (callbackName, callbackString, StringComparison.Ordinal) == 0;
 			}
 		}
 
@@ -609,13 +603,17 @@ namespace Android.Runtime {
 		}
 	}
 
-	class AndroidValueManager : JniRuntime.JniValueManager {
+	[RequiresDynamicCode ("This value manager is reflection-backed and is not compatible with Native AOT.")]
+	[RequiresUnreferencedCode ("This value manager is reflection-backed and is not trimming-compatible.")]
+	class AndroidValueManager : JniRuntime.ReflectionJniValueManager {
 
 		Dictionary<IntPtr, IdentityHashTargets>         instances       = new Dictionary<IntPtr, IdentityHashTargets> ();
 
 		public override void WaitForGCBridgeProcessing ()
 		{
-			AndroidRuntimeInternal.WaitForBridgeProcessing ();
+			if (!AndroidRuntimeInternal.BridgeProcessing)
+				return;
+			RuntimeNativeMethods._monodroid_gc_wait_for_bridge_processing ();
 		}
 
 		public override IJavaPeerable? CreatePeer (
@@ -657,7 +655,7 @@ namespace Android.Runtime {
 				for (int i = 0; i < targets.Count; ++i) {
 					IJavaPeerable? target;
 					var wref = targets [i];
-					if (ShouldReplaceMapping (wref!, reference, out target)) {
+					if (ShouldReplaceMapping (wref!, reference, value, out target)) {
 						found = true;
 						targets [i] = IdentityHashTargets.CreateWeakReference (value);
 						break;
@@ -715,7 +713,7 @@ namespace Android.Runtime {
 			}
 		}
 
-		bool ShouldReplaceMapping (WeakReference<IJavaPeerable> current, JniObjectReference reference, out IJavaPeerable? target)
+		bool ShouldReplaceMapping (WeakReference<IJavaPeerable> current, JniObjectReference reference, IJavaPeerable value, out IJavaPeerable? target)
 		{
 			target      = null;
 
@@ -739,12 +737,17 @@ namespace Android.Runtime {
 			// we want the 2nd MCW to replace the 1st, as the 2nd is
 			// the one the dev created; the 1st is an implicit intermediary.
 			//
+			// Meanwhile, a new "replaceable" instance should *not* replace an
+			// existing "replaceable" instance; see dotnet/android#9862.
+			//
 			// [0]: If Java ctor invokes overridden virtual method, we'll
 			// transition into managed code w/o a registered instance, and
 			// thus will create an "intermediary" via
 			// (IntPtr, JniHandleOwnership) .ctor.
-			if ((target.JniManagedPeerState & JniManagedPeerStates.Replaceable) == JniManagedPeerStates.Replaceable)
+			if (target.JniManagedPeerState.HasFlag (JniManagedPeerStates.Replaceable) &&
+					!value.JniManagedPeerState.HasFlag (JniManagedPeerStates.Replaceable)) {
 				return true;
+			}
 
 			return false;
 		}
@@ -811,7 +814,7 @@ namespace Android.Runtime {
 			return null;
 		}
 
-		public override void ActivatePeer (IJavaPeerable? self, JniObjectReference reference, ConstructorInfo cinfo, object? []? argumentValues)
+		public override void ActivatePeer (JniObjectReference reference, Type type, ConstructorInfo cinfo, object?[]? argumentValues)
 		{
 			Java.Interop.TypeManager.Activate (reference.Handle, cinfo, argumentValues);
 		}
@@ -824,15 +827,6 @@ namespace Android.Runtime {
 				return true;
 			}
 			return base.TryUnboxPeerObject (value, out result);
-		}
-
-		internal Exception? UnboxException (IJavaPeerable value)
-		{
-			object? r;
-			if (TryUnboxPeerObject (value, out r) && r is Exception e) {
-				return e;
-			}
-			return null;
 		}
 
 		public override void CollectPeers ()

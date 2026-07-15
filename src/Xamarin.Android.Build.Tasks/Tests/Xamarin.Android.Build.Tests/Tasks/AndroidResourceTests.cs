@@ -5,14 +5,14 @@ using Xamarin.ProjectTools;
 using System.IO;
 using System.Linq;
 using Microsoft.Build.Framework;
-using System.Text;
 using Xamarin.Android.Tasks;
 using Microsoft.Build.Utilities;
 
 namespace Xamarin.Android.Build.Tests {
 	[TestFixture]
 	[Parallelizable (ParallelScope.Self)]
-	public class AndroidResourceTests : BaseTest {
+	public class AndroidResourceTests : BaseTest
+	{
 		[Test]
 		public void RTxtParserTest ()
 		{
@@ -153,6 +153,56 @@ namespace Xamarin.Android.Build.Tests {
 			var mainText = File.ReadAllText (main);
 			Assert.True (mainText.Contains ("FixedWidth"), "'FixedWidth' was converted to 'fixedwidth'");
 			Directory.Delete (path, recursive: true);
+		}
+
+		[Test]
+		public void AdaptiveIcon ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
+		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+				SupportedOSPlatformVersion = "26",
+				AndroidResources = {
+					new AndroidItem.AndroidResource ("Resources\\values\\colors.xml") {
+						TextContent = () => """
+							<resources>
+								<color name="adaptive_icon_background">#2C3E50</color>
+								<color name="adaptive_icon_foreground">#FFFFFF</color>
+							</resources>
+						""",
+					},
+					new AndroidItem.AndroidResource ("Resources\\drawable\\ic_shortcut_add.xml") {
+						TextContent = () => """
+							<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+								<background android:drawable="@color/adaptive_icon_background"/>
+								<foreground android:drawable="@color/adaptive_icon_foreground"/>
+							</adaptive-icon>
+						""",
+					},
+					new AndroidItem.AndroidResource ("Resources\\mipmap-anydpi-v26\\adaptiveicon.xml") {
+						TextContent = () => """
+							<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+								<background android:drawable="@mipmap/AdaptiveIcon_background" />
+								<foreground android:drawable="@mipmap/AdaptiveIcon_foreground" />
+							</adaptive-icon>
+						""",
+					},
+					new AndroidItem.AndroidResource ("Resources\\mipmap-mdpi\\AdaptiveIcon_background.png") {
+						BinaryContent = () => XamarinAndroidCommonProject.icon_binary_mdpi,
+					},
+					new AndroidItem.AndroidResource ("Resources\\mipmap-mdpi\\AdaptiveIcon_foreground.png") {
+						BinaryContent = () => XamarinAndroidCommonProject.icon_binary_mdpi,
+					},
+				}
+			};
+			proj.SetRuntime (runtime);
+
+			using var b = CreateApkBuilder ();
+			Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
 		}
 	}
 }

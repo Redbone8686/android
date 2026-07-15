@@ -1,4 +1,3 @@
-#nullable enable
 using System;
 using Microsoft.Android.Build.Tasks;
 using Microsoft.Build.Utilities;
@@ -13,7 +12,7 @@ namespace Xamarin.Android.Tasks
 			log?.LogDebugMessage ("No Android NDK found");
 		}
 
-		public override int GetMinimumApiLevelFor (AndroidTargetArch arch) => throw new NotImplementedException ();
+		public override int GetMinimumApiLevelFor (AndroidTargetArch arch, AndroidRuntime runtime) => throw new NotImplementedException ();
 
 		public override string GetToolPath (NdkToolKind kind, AndroidTargetArch arch, int apiLevel) => throw new NotImplementedException ();
 

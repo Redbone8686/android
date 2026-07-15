@@ -8,58 +8,61 @@ using System.Threading;
 using Java.Interop;
 using Java.Interop.Tools.TypeNameMappings;
 
+using Microsoft.Android.Runtime;
+using RuntimeFeature = Microsoft.Android.Runtime.RuntimeFeature;
+
 namespace Android.Runtime
 {
-	static internal class JNIEnvInit
+	static internal partial class JNIEnvInit
 	{
 #pragma warning disable 0649
-		// NOTE: Keep this in sync with the native side in src/native/monodroid/monodroid-glue-internal.hh
+		// NOTE: Keep this in sync with the native side in src/native/common/include/managed-interface.hh
 		internal struct JnienvInitializeArgs {
 			public IntPtr          javaVm;
 			public IntPtr          env;
 			public IntPtr          grefLoader;
 			public IntPtr          Loader_loadClass;
 			public IntPtr          grefClass; // TODO: remove, not needed anymore
-			public IntPtr          Class_forName;
 			public uint            logCategories;
 			public int             version; // TODO: remove, not needed anymore
 			public int             grefGcThreshold;
 			public IntPtr          grefIGCUserPeer;
-			public int             isRunningOnDesktop;
 			public byte            brokenExceptionTransitions;
 			public int             packageNamingPolicy;
 			public byte            ioExceptionType;
 			public int             jniAddNativeMethodRegistrationAttributePresent;
 			public bool            jniRemappingInUse;
 			public bool            marshalMethodsEnabled;
+			public IntPtr          grefGCUserPeerable;
+			public bool            managedMarshalMethodsLookupEnabled;
+			public IntPtr          propagateUncaughtExceptionFn;
+			public IntPtr          registerJniNativesFn;
 		}
 #pragma warning restore 0649
 
-		internal static AndroidValueManager? AndroidValueManager;
-		internal static bool IsRunningOnDesktop;
 		internal static bool jniRemappingInUse;
-		internal static bool LogAssemblyCategory;
 		internal static bool MarshalMethodsEnabled;
 		internal static bool PropagateExceptions;
 		internal static BoundExceptionType BoundExceptionType;
 		internal static int gref_gc_threshold;
 		internal static IntPtr grefIGCUserPeer_class;
+		internal static IntPtr grefGCUserPeerable_class;
 		internal static IntPtr java_class_loader;
-		internal static JniMethodInfo? mid_Class_forName;
 
-		internal static AndroidRuntime? androidRuntime;
+		internal static JniRuntime? androidRuntime;
 
 		[UnmanagedCallersOnly]
+		static void PropagateUncaughtException (IntPtr env, IntPtr javaThread, IntPtr javaException)
+		{
+			JNIEnv.PropagateUncaughtException (env, javaThread, javaException);
+		}
+
+		[UnmanagedCallersOnly]
+		[RequiresUnreferencedCode ("Uses reflection to access System.StartupHookProvider.")]
 		static unsafe void RegisterJniNatives (IntPtr typeName_ptr, int typeName_len, IntPtr jniClass, IntPtr methods_ptr, int methods_len)
 		{
-			// FIXME: https://github.com/xamarin/xamarin-android/issues/8724
-			[UnconditionalSuppressMessage ("Trimming", "IL2057", Justification = "Type should be preserved by the MarkJavaObjects trimmer step.")]
-			[return: DynamicallyAccessedMembers (DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.NonPublicMethods | DynamicallyAccessedMemberTypes.NonPublicNestedTypes)]
-			static Type TypeGetType (string typeName) =>
-				Type.GetType (typeName, throwOnError: false);
-
 			string typeName = new string ((char*) typeName_ptr, 0, typeName_len);
-			var type = TypeGetType (typeName);
+			var type = Type.GetType (typeName, throwOnError: false);
 			if (type == null) {
 				RuntimeNativeMethods.monodroid_log (LogLevel.Error,
 				               LogCategories.Default,
@@ -74,48 +77,227 @@ namespace Android.Runtime
 			JniType.GetCachedJniType (ref jniType, className);
 
 			ReadOnlySpan<char> methods = new ReadOnlySpan<char> ((void*) methods_ptr, methods_len);
-			((AndroidTypeManager)androidRuntime!.TypeManager).RegisterNativeMembers (jniType, type, methods);
+			if (androidRuntime is null) {
+				throw new InvalidOperationException ("androidRuntime has not been initialized");
+			}
+			androidRuntime.TypeManager.RegisterNativeMembers (jniType, type, methods);
 		}
 
-		[UnmanagedCallersOnly]
-		internal static unsafe void Initialize (JnienvInitializeArgs* args)
+		// This must be called by NativeAOT before InitializeJniRuntime, as early as possible
+		internal static void NativeAotInitializeMaxGrefGet ()
 		{
-			IntPtr total_timing_sequence = IntPtr.Zero;
-			IntPtr partial_timing_sequence = IntPtr.Zero;
+			gref_gc_threshold = RuntimeNativeMethods._monodroid_max_gref_get ();
+			if (gref_gc_threshold != int.MaxValue) {
+				gref_gc_threshold = checked((gref_gc_threshold * 9) / 10);
+			}
+		}
 
-			LogAssemblyCategory = (args->logCategories & (uint)LogCategories.Assembly) != 0;
+		internal static void InitializeBeforeRuntimeCreation (JnienvInitializeArgs args)
+		{
+			InitializeCommonState (args);
+			InitializeTrimmableTypeMapDataIfNeeded ();
+		}
 
-			gref_gc_threshold = args->grefGcThreshold;
-
-			jniRemappingInUse = args->jniRemappingInUse;
-			MarshalMethodsEnabled = args->marshalMethodsEnabled;
-			java_class_loader = args->grefLoader;
-
-			mid_Class_forName = new JniMethodInfo (args->Class_forName, isStatic: true);
-
-			BoundExceptionType = (BoundExceptionType)args->ioExceptionType;
-			androidRuntime = new AndroidRuntime (args->env, args->javaVm, args->grefLoader, args->Loader_loadClass, args->jniAddNativeMethodRegistrationAttributePresent != 0);
-			AndroidValueManager = (AndroidValueManager) androidRuntime.ValueManager;
-
-			IsRunningOnDesktop = args->isRunningOnDesktop == 1;
-
-			grefIGCUserPeer_class = args->grefIGCUserPeer;
-
-			PropagateExceptions = args->brokenExceptionTransitions == 0;
-
-			JavaNativeTypeManager.PackageNamingPolicy = (PackageNamingPolicy)args->packageNamingPolicy;
-			if (IsRunningOnDesktop) {
-				var packageNamingPolicy = Environment.GetEnvironmentVariable ("__XA_PACKAGE_NAMING_POLICY__");
-				if (Enum.TryParse (packageNamingPolicy, out PackageNamingPolicy pnp)) {
-					JavaNativeTypeManager.PackageNamingPolicy = pnp;
-				}
+		// NOTE: should have different name than `Initialize` to avoid:
+		// * Assertion at /__w/1/s/src/mono/mono/metadata/icall.c:6258, condition `!only_unmanaged_callers_only' not met
+		// Only used for NativeAOT after the runtime has been created. MonoVM and CoreCLR use Initialize().
+		internal static void InitializeNativeAotRuntime (JniRuntime runtime, JnienvInitializeArgs args)
+		{
+			if (!RuntimeFeature.IsNativeAotRuntime) {
+				throw new NotSupportedException ("JNIEnvInit.InitializeNativeAotRuntime can only be used to initialize NativeAOT.");
+			}
+			if (RuntimeFeature.IsMonoRuntime || RuntimeFeature.IsCoreClrRuntime) {
+				throw new NotSupportedException ("Internal error: NativeAOT cannot be enabled with MonoVM or CoreCLR.");
 			}
 
+			androidRuntime = runtime;
+			JniRuntime.SetCurrent (runtime);
+			RegisterTrimmableTypeMapNativeMethodsIfNeeded ();
 			SetSynchronizationContext ();
 		}
 
-		// NOTE: prevents Android.App.Application static ctor from running
+		// Only used for MonoVM and CoreCLR. NativeAOT uses InitializeNativeAotRuntime().
+		[UnmanagedCallersOnly]
+		internal static unsafe void Initialize (JnienvInitializeArgs* args)
+		{
+			if (RuntimeFeature.IsNativeAotRuntime) {
+				throw new NotSupportedException ("JNIEnvInit.Initialize cannot be used to initialize NativeAOT.");
+			}
+			if (RuntimeFeature.IsMonoRuntime == RuntimeFeature.IsCoreClrRuntime) {
+				throw new NotSupportedException ("Internal error: exactly one of RuntimeFeature.IsMonoRuntime or RuntimeFeature.IsCoreClrRuntime must be enabled.");
+			}
+
+			IntPtr total_timing_sequence = IntPtr.Zero;
+			IntPtr partial_timing_sequence = IntPtr.Zero;
+
+			InitializeBeforeRuntimeCreation (*args);
+
+			JniRuntime.JniTypeManager typeManager = CreateTypeManager (*args);
+			JniRuntime.JniValueManager valueManager = CreateValueManager ();
+			androidRuntime = new AndroidRuntime (
+					args->env,
+					args->javaVm,
+					args->grefLoader,
+					typeManager,
+					valueManager,
+					args->jniAddNativeMethodRegistrationAttributePresent != 0
+			);
+			JniRuntime.SetCurrent (androidRuntime);
+			RegisterTrimmableTypeMapNativeMethodsIfNeeded ();
+
+			if (args->managedMarshalMethodsLookupEnabled) {
+				delegate* unmanaged <int, int, int, IntPtr*, void> getFunctionPointer = &ManagedMarshalMethodsLookupTable.GetFunctionPointer;
+				xamarin_app_init (args->env, getFunctionPointer);
+			}
+
+			args->propagateUncaughtExceptionFn = (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&PropagateUncaughtException;
+
+			if (!RuntimeFeature.TrimmableTypeMap) {
+				args->registerJniNativesFn = GetRegisterJniNativesFnPtr ();
+			}
+			RunStartupHooksIfNeeded ();
+			SetSynchronizationContext ();
+
+			[UnconditionalSuppressMessage ("Trimming", "IL2026", Justification = "This method is never used with the trimmable type map.")]
+			IntPtr GetRegisterJniNativesFnPtr () =>
+				(IntPtr)(delegate* unmanaged<IntPtr, int, IntPtr, IntPtr, int, void>)&RegisterJniNatives;
+		}
+
+		[LibraryImport (RuntimeConstants.InternalDllName)]
+		[UnmanagedCallConv (CallConvs = new[] { typeof (CallConvCdecl) })]
+		private static unsafe partial void xamarin_app_init (IntPtr env, delegate* unmanaged <int, int, int, IntPtr*, void> get_function_pointer);
+
+		[UnconditionalSuppressMessage ("Trimming", "IL2026", Justification = "The AndroidTypeManager branch is only reached when RuntimeFeature.TrimmableTypeMap is false; the linker substitutes the feature switch and trims this branch in trimmable apps.")]
+		internal static JniRuntime.JniTypeManager CreateTypeManager (JnienvInitializeArgs args)
+		{
+			if (RuntimeFeature.TrimmableTypeMap) {
+				return new TrimmableTypeMapTypeManager ();
+			}
+
+			if (RuntimeFeature.IsNativeAotRuntime || RuntimeFeature.ManagedTypeMap) {
+				return CreateManagedTypeManager ();
+			}
+
+			return CreateAndroidTypeManager (args);
+
+			[UnconditionalSuppressMessage ("Trimming", "IL2026", Justification = "Managed type manager is preserved by the MarkJavaObjects trimmer step.")]
+			[UnconditionalSuppressMessage ("Trimming", "IL3050", Justification = "This type manager won't be used in Native AOT builds in the future.")]
+			static JniRuntime.JniTypeManager CreateManagedTypeManager () => new ManagedTypeManager ();
+
+			[UnconditionalSuppressMessage ("Trimming", "IL2026", Justification = "This type manager won't be used in Native AOT builds.")]
+			[UnconditionalSuppressMessage ("Trimming", "IL3050", Justification = "This type manager won't be used in Native AOT builds.")]
+			static JniRuntime.JniTypeManager CreateAndroidTypeManager (JnienvInitializeArgs args) => new AndroidTypeManager (args.jniAddNativeMethodRegistrationAttributePresent != 0);
+		}
+
+		internal static JniRuntime.JniValueManager CreateValueManager ()
+		{
+			if (RuntimeFeature.TrimmableTypeMap) {
+				return new TrimmableTypeMapValueManager ();
+			}
+
+			if (RuntimeFeature.IsMonoRuntime) {
+				return CreateAndroidValueManager ();
+			}
+
+			if (RuntimeFeature.IsCoreClrRuntime) {
+				return CreateJavaMarshalValueManager ();
+			}
+
+			if (RuntimeFeature.IsNativeAotRuntime) {
+				return CreateJavaMarshalValueManager ();
+			}
+
+			throw new NotSupportedException ("Internal error: unknown runtime not supported");
+
+			[UnconditionalSuppressMessage ("Trimming", "IL2026", Justification = "CoreCLR value manager is preserved by the MarkJavaObjects trimmer step.")]
+			[UnconditionalSuppressMessage ("Trimming", "IL3050", Justification = "This value manager won't be used in Native AOT builds in the future.")]
+			JniRuntime.JniValueManager CreateJavaMarshalValueManager () => new JavaMarshalValueManager ();
+
+			[UnconditionalSuppressMessage ("Trimming", "IL2026", Justification = "Mono value manager is preserved by the MarkJavaObjects trimmer step.")]
+			[UnconditionalSuppressMessage ("Trimming", "IL3050", Justification = "This value manager won't be used in Native AOT builds in the future.")]
+			JniRuntime.JniValueManager CreateAndroidValueManager () => new AndroidValueManager ();
+		}
+
+		static void InitializeCommonState (JnienvInitializeArgs args)
+		{
+			Logger.SetLogCategories ((LogCategories)args.logCategories);
+
+			gref_gc_threshold = args.grefGcThreshold;
+			jniRemappingInUse = args.jniRemappingInUse;
+			MarshalMethodsEnabled = args.marshalMethodsEnabled;
+			java_class_loader = args.grefLoader;
+
+			BoundExceptionType = (BoundExceptionType)args.ioExceptionType;
+			grefIGCUserPeer_class = args.grefIGCUserPeer;
+			grefGCUserPeerable_class = args.grefGCUserPeerable;
+			PropagateExceptions = args.brokenExceptionTransitions == 0;
+
+			JavaNativeTypeManager.PackageNamingPolicy = (PackageNamingPolicy)args.packageNamingPolicy;
+		}
+
+		static void InitializeTrimmableTypeMapDataIfNeeded ()
+		{
+			if (RuntimeFeature.TrimmableTypeMap) {
+				InitializeTrimmableTypeMapData ();
+			}
+		}
+
+		static void RegisterTrimmableTypeMapNativeMethodsIfNeeded ()
+		{
+			if (RuntimeFeature.TrimmableTypeMap) {
+				// TypeMapLoader.Initialize() only loads managed typemap data. Registering
+				// mono.android.Runtime natives requires JniRuntime.Current and its ClassLoader.
+				TrimmableTypeMap.RegisterNativeMethods ();
+			}
+		}
+
+		// Separate method so the JIT doesn't try to resolve TypeMapLoader (from _Microsoft.Android.TypeMaps.dll)
+		// when compiling JNIEnvInit.Initialize() in non-trimmable builds where that assembly isn't present.
 		[MethodImpl (MethodImplOptions.NoInlining)]
+		static void InitializeTrimmableTypeMapData ()
+		{
+			TypeMapLoader.Initialize ();
+		}
+
+		static void RunStartupHooksIfNeeded ()
+		{
+			// Return if startup hooks are disabled or not CoreCLR
+			if (!RuntimeFeature.IsCoreClrRuntime)
+				return;
+			if (!RuntimeFeature.StartupHookSupport)
+				return;
+
+			RunStartupHooks ();
+		}
+
+		[RequiresUnreferencedCode ("Uses reflection to access System.StartupHookProvider.")]
+		static void RunStartupHooks ()
+		{
+			const string typeName = "System.StartupHookProvider";
+			const string methodName = "ProcessStartupHooks";
+
+			var type = typeof(object).Assembly.GetType (typeName, throwOnError: false);
+			if (type is null) {
+				RuntimeNativeMethods.monodroid_log (LogLevel.Warn, LogCategories.Default,
+					$"Could not load type '{typeName}'. Skipping startup hooks.");
+				return;
+			}
+
+			var method = type.GetMethod (methodName, 
+				BindingFlags.NonPublic | BindingFlags.Static, null, [ typeof(string) ], null);
+			if (method is null) {
+				RuntimeNativeMethods.monodroid_log (LogLevel.Warn, LogCategories.Default,
+					$"Could not load method '{typeName}.{methodName}'. Skipping startup hooks.");
+				return;
+			}
+
+			// ProcessStartupHooks accepts startup hooks directly via parameter.
+			// It will also read STARTUP_HOOKS from AppContext internally.
+			// Pass DOTNET_STARTUP_HOOKS env var value so it works without needing AppContext setup.
+			string? startupHooks = Environment.GetEnvironmentVariable ("DOTNET_STARTUP_HOOKS");
+			method.Invoke (null, [ startupHooks ?? "" ]);
+		}
+
 		static void SetSynchronizationContext () =>
 			SynchronizationContext.SetSynchronizationContext (Android.App.Application.SynchronizationContext);
 	}

@@ -1,6 +1,6 @@
 parameters:
   installerArtifactName: $(InstallerArtifactName)
-  xaSourcePath: $(System.DefaultWorkingDirectory)/xamarin-android
+  xaSourcePath: $(System.DefaultWorkingDirectory)/android
   makeMSBuildArgs: ''
   nugetArtifactName: $(NuGetArtifactName)
   testAssembliesArtifactName: $(TestAssembliesArtifactName)
@@ -8,8 +8,10 @@ parameters:
   use1ESTemplate: true
 
 steps:
-- script: echo "##vso[task.setvariable variable=JI_JAVA_HOME]$HOME/android-toolchain/jdk-17"
-  displayName: set JI_JAVA_HOME
+- template: /build-tools/automation/yaml-templates/setup-jdk-variables.yaml
+  parameters:
+    useAgentJdkPath: false
+    jdkMajorVersion: $(LatestJavaSdkMajorVersion)
 
 - template: /build-tools/automation/yaml-templates/use-dot-net.yaml
   parameters:
@@ -24,24 +26,19 @@ steps:
 #  https://learn.microsoft.com/en-us/azure/devops/pipelines/repos/multi-repo-checkout?view=azure-devops#checkout-path
 - checkout: maui
 
-- ${{ if ne(variables['System.PullRequest.IsFork'], 'True') }}:
-  - checkout: android-platform-support
-    submodules: recursive
-    path: s/xamarin-android/external/android-platform-support
-    persistCredentials: true
-
-  - script: make prepare-external-git-dependencies PREPARE_CI=1 CONFIGURATION=$(XA.Build.Configuration)
-    workingDirectory: ${{ parameters.xaSourcePath }}
-    displayName: make prepare-external-git-dependencies
-
 - task: CodeQL3000Init@0
   displayName: CodeQL 3000 Init
   condition: and(succeeded(), eq(variables['Codeql.Enabled'], 'true'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
 
 # Prepare and Build everything
-- script: make jenkins CONFIGURATION=$(XA.Build.Configuration) PREPARE_CI=1 PREPARE_AUTOPROVISION=1 MSBUILD_ARGS='${{ parameters.makeMSBuildArgs }}'
+- script: make jenkins CONFIGURATION=$(XA.Build.Configuration) MSBUILD_ARGS='${{ parameters.makeMSBuildArgs }}'
   workingDirectory: ${{ parameters.xaSourcePath }}
   displayName: make jenkins
+
+- template: /build-tools/automation/yaml-templates/generate-cgmanifest.yaml
+  parameters:
+    configuration: $(XA.Build.Configuration)
+    xaSourcePath: ${{ parameters.xaSourcePath }}
 
 - task: CodeQL3000Finalize@0
   displayName: CodeQL 3000 Finalize
@@ -49,7 +46,7 @@ steps:
 
 - task: DotNetCoreCLI@2
   displayName: macOS signing - add runtime entitlements
-  condition: and(succeeded(), eq(variables['MicroBuildSignType'], 'Real'))
+  condition: and(succeeded(), and(startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'), ne(variables['Build.Reason'], 'PullRequest'), eq(variables['Build.DefinitionName'], 'Xamarin.Android')))
   inputs:
     projects: ${{ parameters.xaSourcePath }}/build-tools/installers/sign-content.proj
     arguments: >-
@@ -67,12 +64,31 @@ steps:
   workingDirectory: ${{ parameters.xaSourcePath }}
   displayName: zip Windows toolchain pdb files
 
+- task: CopyFiles@2
+  inputs:
+    SourceFolder: ${{ parameters.xaSourcePath }}/bin/Build$(XA.Build.Configuration)/nuget-unsigned
+    Contents: |
+      **/*.symbols.nupkg
+      **/SignList.xml
+    TargetFolder: ${{ parameters.xaSourcePath }}/bin/Build$(XA.Build.Configuration)/nuget-unsigned-symbols
+
+- task: DeleteFiles@1
+  inputs:
+    SourceFolder: ${{ parameters.xaSourcePath }}/bin/Build$(XA.Build.Configuration)/nuget-unsigned
+    Contents: '*.symbols.nupkg'
+
 - ${{ if ne(parameters.use1ESTemplate, true) }}:
   - task: PublishPipelineArtifact@1
     displayName: upload nupkgs
     inputs:
       artifactName: ${{ parameters.nugetArtifactName }}
       targetPath: ${{ parameters.xaSourcePath }}/bin/Build$(XA.Build.Configuration)/nuget-unsigned
+
+  - task: PublishPipelineArtifact@1
+    displayName: upload symbols nupkgs
+    inputs:
+      artifactName: ${{ parameters.nugetArtifactName }}-symbols
+      targetPath: ${{ parameters.xaSourcePath }}/bin/Build$(XA.Build.Configuration)/nuget-unsigned-symbols
 
   - task: PublishPipelineArtifact@1
     displayName: upload test assemblies

@@ -1,3 +1,5 @@
+#nullable disable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -12,37 +14,20 @@ using Mono.Linker;
 using Mono.Linker.Steps;
 
 using Mono.Tuner;
-#if ILLINK
-using Microsoft.Android.Sdk.ILLink;
-using Resources = Microsoft.Android.Sdk.ILLink.Properties.Resources;
-#else   // !ILLINK
 using Resources = Xamarin.Android.Tasks.Properties.Resources;
-#endif  // ILLINK
 
 namespace MonoDroid.Tuner
 {
-	public class FixLegacyResourceDesignerStep : LinkDesignerBase
+	public class FixLegacyResourceDesignerStep : LinkDesignerBase, Xamarin.Android.Tasks.IAssemblyModifierPipelineStep
 	{
 		internal const string DesignerAssemblyName = "_Microsoft.Android.Resource.Designer";
 		internal const string DesignerAssemblyNamespace = "_Microsoft.Android.Resource.Designer";
-
-#if !ILLINK
-		public FixLegacyResourceDesignerStep (IMetadataResolver cache) : base (cache) { }
-#endif
 
 		bool designerLoaded = false;
 		AssemblyDefinition designerAssembly = null;
 		TypeDefinition designerType = null;
 		Dictionary<string, MethodDefinition> lookup;
 		Dictionary<string, MethodDefinition> lookupCaseInsensitive;
-
-		protected override void EndProcess ()
-		{
-			if (designerAssembly != null) {
-				LogMessage ($"  Setting Action on {designerAssembly.Name} to Link.");
-				Annotations.SetAction (designerAssembly, AssemblyAction.Link);
-			}
-		}
 
 		protected override void LoadDesigner ()
 		{
@@ -70,6 +55,15 @@ namespace MonoDroid.Tuner
 			} finally {
 				designerLoaded = true;
 			}
+		}
+
+		public void ProcessAssembly (AssemblyDefinition assembly, Xamarin.Android.Tasks.StepContext context)
+		{
+			// Only run this step on non-main user Android assemblies
+			if (context.IsMainAssembly || !context.IsAndroidUserAssembly)
+				return;
+
+			context.IsAssemblyModified |= ProcessAssemblyDesigner (assembly);
 		}
 
 		internal override bool ProcessAssemblyDesigner (AssemblyDefinition assembly)
@@ -156,7 +150,11 @@ namespace MonoDroid.Tuner
 				try {
 					var resolved  = Cache.Resolve (fieldRef);
 					canResolve    = resolved != null;
-				} catch (Exception) {
+				} catch (AssemblyResolutionException) {
+					// Expected when the field's declaring assembly is not available
+					LogMessage ($"   Could not resolve field reference {fieldRef.FullName} (assembly not available).");
+				} catch (Exception ex) {
+					LogMessage ($"   Unexpected error resolving field reference {fieldRef.FullName}: {ex}");
 				}
 				if (canResolve)
 					return null;

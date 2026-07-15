@@ -1,37 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- NOTE: Do NOT use TaskFactory="TaskHostFactory" Runtime="NET" on these UsingTask elements.
+       MSBuild 18+ (dotnet/msbuild#13175) added app host support which changed how TaskHostFactory
+       spawns .NET task hosts. The MetadataLoadContext used to inspect task assemblies is disposed
+       before output validation completes, causing MSB4027. TaskHostFactory without Runtime="NET"
+       still infers .NET on .NET Core MSBuild, so it must be removed entirely. These tasks only
+       run git commands and don't need out-of-proc isolation. -->
   <UsingTask AssemblyFile="$(PrepTasksAssembly)"  TaskName="Xamarin.Android.BuildTools.PrepTasks.GitBlame" />
   <UsingTask AssemblyFile="$(PrepTasksAssembly)"  TaskName="Xamarin.Android.BuildTools.PrepTasks.GitBranch" />
   <UsingTask AssemblyFile="$(PrepTasksAssembly)"  TaskName="Xamarin.Android.BuildTools.PrepTasks.GitCommitHash" />
   <UsingTask AssemblyFile="$(PrepTasksAssembly)"  TaskName="Xamarin.Android.BuildTools.PrepTasks.GitCommitsInRange" />
-  <UsingTask AssemblyFile="$(PrepTasksAssembly)"  TaskName="Xamarin.Android.BuildTools.PrepTasks.GitCommitTime" />
-  <UsingTask AssemblyFile="$(PrepTasksAssembly)"  TaskName="Xamarin.Android.BuildTools.PrepTasks.GitCommitInfo" />
-  <Target Name="_GetSubmodulesVersionInfo">
-    <ItemGroup>
-      <!-- If anything changes in this list, make sure to update:
-           src/Xamarin.Android.Build.Tasks/Xamarin.Android.Build.Tasks.targets (the _GenerateXACommonProps target)
-           build-tools/create-vsix/create-vsix.targets (the _CreateDependencies target)
-      -->
-      <_SubmoduleBranchInfo Include="external/Java.Interop">
-        <OutputPropertyName>_BuildInfo_JavaInteropCommit</OutputPropertyName>
-      </_SubmoduleBranchInfo>
-      <_SubmoduleBranchInfo Include="external/xamarin-android-tools">
-        <OutputPropertyName>_BuildInfo_XamarinAndroidToolsCommit</OutputPropertyName>
-      </_SubmoduleBranchInfo>
-    </ItemGroup>
-
-    <Message Text="Getting git branch for: %(_SubmoduleBranchInfo.Identity)" />
-    <GitCommitInfo
-        WorkingDirectory="$(XamarinAndroidSourcePath)\%(_SubmoduleBranchInfo.Identity)"
-        XASourceDirectory="$(XamarinAndroidSourcePath)"
-        SubmoduleName="%(_SubmoduleBranchInfo.Identity)"
-        GitPath="$(GitToolPath)$(GitToolExe)">
-      <Output TaskParameter="CommitInfo" PropertyName="%(_SubmoduleBranchInfo.OutputPropertyName)" />
-    </GitCommitInfo>
-  </Target>
-
-  <Target Name="GetXAVersionInfo"
-      DependsOnTargets="_GetSubmodulesVersionInfo">
+  <!-- Java.Interop and xamarin-android-tools are no longer submodules; they
+       both live in-tree (external/Java.Interop/, external/xamarin-android-tools/)
+       and their commit is the dotnet/android commit. No submodules contribute
+       version info anymore, so there is no _GetSubmodulesVersionInfo target. -->
+  <Target Name="GetXAVersionInfo">
     <GitBlame
         FileName="Directory.Build.props"
         LineFilter="&lt;ProductVersion&gt;"
@@ -41,6 +24,7 @@
       <Output TaskParameter="Commits"                 ItemName="_XAVersionCommit" />
     </GitBlame>
     <GitCommitsInRange
+        ContinueOnError="true"
         StartCommit="%(_XAVersionCommit.CommitHash)"
         WorkingDirectory="$(XamarinAndroidSourcePath)"
         ToolPath="$(GitToolPath)"
@@ -48,7 +32,7 @@
       <Output TaskParameter="CommitCount"             PropertyName="XAVersionCommitCount"   Condition=" '$(XAVersionCommitCount)' == '' " />
     </GitCommitsInRange>
     <GitBlame
-        FileName="Directory.Build.props"
+        FileName="eng/Versions.props"
         LineFilter="&lt;AndroidPackVersion&gt;"
         WorkingDirectory="$(XamarinAndroidSourcePath)"
         ToolPath="$(GitToolPath)"
@@ -56,6 +40,7 @@
       <Output TaskParameter="Commits"                 ItemName="_PackVersionCommit" />
     </GitBlame>
     <GitCommitsInRange
+        ContinueOnError="true"
         StartCommit="%(_PackVersionCommit.CommitHash)"
         WorkingDirectory="$(XamarinAndroidSourcePath)"
         ToolPath="$(GitToolPath)"

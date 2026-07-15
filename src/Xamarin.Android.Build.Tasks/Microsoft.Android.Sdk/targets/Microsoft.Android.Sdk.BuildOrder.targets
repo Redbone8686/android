@@ -31,6 +31,10 @@ properties that determine build ordering.
     </_AndroidBuildDependsOn>
   </PropertyGroup>
 
+  <PropertyGroup Condition=" '$(AndroidApplication)' == 'true' And '$(_AndroidRuntime)' == 'CoreCLR' ">
+    <_NativeRuntimeLinking>_LinkNativeRuntime</_NativeRuntimeLinking>
+  </PropertyGroup>
+
   <PropertyGroup Condition=" '$(AndroidApplication)' == 'True' ">
     <BuildDependsOn>
       $(_AndroidBuildDependsOn);
@@ -47,6 +51,7 @@ properties that determine build ordering.
       _CopyPackage;
       _Sign;
       _CreateUniversalApkFromBundle;
+      _CollectApplicationArtifacts;
     </BuildDependsOn>
     <IncrementalCleanDependsOn>
       _PrepareAssemblies;
@@ -58,6 +63,7 @@ properties that determine build ordering.
     <_PackageForAndroidDependsOn>
       Build;
       _CopyPackage;
+      _CollectApplicationArtifacts;
     </_PackageForAndroidDependsOn>
     <_PrepareBuildApkDependsOnTargets>
       _SetLatestTargetFrameworkVersion;
@@ -67,6 +73,7 @@ properties that determine build ordering.
       _ResolveSatellitePaths;
       _CreatePackageWorkspace;
       _LinkAssemblies;
+      _AfterILLinkAdditionalSteps;
       _GenerateJavaStubs;
       _ManifestMerger;
       _ConvertCustomView;
@@ -75,6 +82,7 @@ properties that determine build ordering.
       _ReadAndroidManifest;
       _CompileJava;
       _CreateApplicationSharedLibraries;
+      $(_NativeRuntimeLinking);
       _CompileDex;
       $(_AfterCompileDex);
       _CreateBaseApk;
@@ -86,6 +94,49 @@ properties that determine build ordering.
       _CheckGoogleSdkRequirements;
       BuildAndroidAssetPacks;
     </_PrepareBuildApkDependsOnTargets>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <InstallDependsOnTargets>
+      SignAndroidPackage;
+      _DeployApk;
+      _DeployAppBundle;
+      _AndroidConfigureAdbReverse;
+    </InstallDependsOnTargets>
+    <UninstallDependsOnTargets>
+      AndroidPrepareForBuild;
+      _Uninstall
+    </UninstallDependsOnTargets>
+    <!-- When inside an IDE, Build has just been run. This is a minimal list of targets for SignAndroidPackage. -->
+    <_MinimalSignAndroidPackageDependsOn>
+      BuildOnlySettings;
+      _CreatePropertiesCache;
+      ResolveReferences;
+      PrepareResources;
+      CreateSatelliteAssemblies;
+      _CopyPackage;
+      _Sign;
+      _CreateUniversalApkFromBundle;
+      _CollectApplicationArtifacts;
+    </_MinimalSignAndroidPackageDependsOn>
+    <SignAndroidPackageDependsOn Condition=" '$(BuildingInsideVisualStudio)' != 'true' ">
+      Build;
+      Package;
+      _Sign;
+      _CreateUniversalApkFromBundle;
+      _CollectApplicationArtifacts;
+    </SignAndroidPackageDependsOn>
+    <SignAndroidPackageDependsOn Condition=" '$(BuildingInsideVisualStudio)' == 'true' ">
+      $(_MinimalSignAndroidPackageDependsOn);
+    </SignAndroidPackageDependsOn>
+    <!-- This should function similar to SignAndroidPackage inside VS plus also deploy -->
+    <DeployToDeviceDependsOnTargets>
+      $(_MinimalSignAndroidPackageDependsOn);
+      _GenerateEnvironmentFiles;
+      _EnsureDeviceBooted;
+      _Upload;
+      _AndroidConfigureAdbReverse;
+    </DeployToDeviceDependsOnTargets>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(AndroidApplication)' != 'True' ">
@@ -112,22 +163,15 @@ properties that determine build ordering.
     <ResolveReferencesDependsOn>
       $(CoreResolveReferencesDependsOn);
       UpdateAndroidResources;
-      _BuildResourceDesigner;
       UpdateAndroidInterfaceProxies;
       _CheckForInvalidDesignerConfig;
     </ResolveReferencesDependsOn>
-    <DesignTimeResolveAssemblyReferencesDependsOn>
-      $(DesignTimeResolveAssemblyReferencesDependsOn);
-      _BuildResourceDesigner;
-    </DesignTimeResolveAssemblyReferencesDependsOn>
     <_UpdateAndroidResourcesDependsOn>
       $(CoreResolveReferencesDependsOn);
       _CreatePropertiesCache;
       _CheckForDeletedResourceFile;
       _ComputeAndroidResourcePaths;
       _UpdateAndroidResgen;
-      _CreateAar;
-      _BuildResourceDesigner;
     </_UpdateAndroidResourcesDependsOn>
     <CompileDependsOn>
       _SetupMSBuildAllProjects;
@@ -142,9 +186,9 @@ properties that determine build ordering.
       _CollectGeneratedManagedBindingFiles;
       _ClearGeneratedManagedBindings;
       AddBindingsToCompile;
+      $(CompileDependsOn);
       _BuildResourceDesigner;
       _AddResourceDesignerFiles;
-      $(CompileDependsOn);
       _CheckAndroidHttpClientHandlerType;
     </CompileDependsOn>
     <CoreCompileDependsOn>
@@ -171,6 +215,7 @@ properties that determine build ordering.
     </CleanDependsOn>
     <ExportJarToXmlDependsOnTargets>
       _ResolveMonoAndroidSdks;
+      ResolveAssemblyReferences;
       _ExtractLibraryProjectImports;
       _GetLibraryImports;
       _ExtractAar;
@@ -196,6 +241,7 @@ properties that determine build ordering.
     <_IncludeAarInNuGetPackageDependsOn>
       _BuildAndroidGradleProjects;
       _CategorizeAndroidLibraries;
+      _CreateAar;
     </_IncludeAarInNuGetPackageDependsOn>
   </PropertyGroup>
 

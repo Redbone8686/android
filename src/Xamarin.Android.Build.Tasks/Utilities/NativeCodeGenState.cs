@@ -1,3 +1,4 @@
+#nullable enable
 using System.Collections.Generic;
 
 using Java.Interop.Tools.Cecil;
@@ -23,19 +24,28 @@ class NativeCodeGenState
 	/// Classifier used when scanning for Java types in the target architecture's
 	/// assemblies.  Will be **null** if marshal methods are disabled.
 	/// </summary>
-	public MarshalMethodsClassifier? Classifier                { get; }
+	public MarshalMethodsCollection? Classifier                { get; }
 
 	/// <summary>
 	/// All the Java types discovered in the target architecture's assemblies.
 	/// </summary>
 	public List<TypeDefinition> AllJavaTypes                   { get; }
 
+	/// <summary>
+	/// Contains information about p/invokes used by the managed assemblies included in the
+	/// application. Will be **null** unless native runtime linking at application build time
+	/// is enabled.
+	/// </summary>
+	public List<PinvokeScanner.PinvokeEntryInfo>? PinvokeInfos { get; set; }
+
 	public List<TypeDefinition> JavaTypesForJCW                { get; }
 	public XAAssemblyResolver Resolver                         { get; }
 	public TypeDefinitionCache TypeCache                       { get; }
 	public bool JniAddNativeMethodRegistrationAttributePresent { get; set; }
 
-	public NativeCodeGenState (AndroidTargetArch arch, TypeDefinitionCache tdCache, XAAssemblyResolver resolver, List<TypeDefinition> allJavaTypes, List<TypeDefinition> javaTypesForJCW, MarshalMethodsClassifier? classifier)
+	public ManagedMarshalMethodsLookupInfo? ManagedMarshalMethodsLookupInfo { get; set; }
+
+	public NativeCodeGenState (AndroidTargetArch arch, TypeDefinitionCache tdCache, XAAssemblyResolver resolver, List<TypeDefinition> allJavaTypes, List<TypeDefinition> javaTypesForJCW, MarshalMethodsCollection? classifier)
 	{
 		TargetArch = arch;
 		TypeCache = tdCache;

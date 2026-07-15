@@ -1,4 +1,5 @@
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
+#nullable enable
 using System;
 using System.CodeDom;
 using System.CodeDom.Compiler;
@@ -19,17 +20,17 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "GMA";
 
 		[Required]
-		public ITaskItem[] References { get; set; }
+		public ITaskItem[] References { get; set; } = [];
 
 		[Required]
-		public ITaskItem[] SourceAidlFiles { get; set; }
+		public ITaskItem[] SourceAidlFiles { get; set; } = [];
 		
 		[Required]
-		public string IntermediateOutputDirectory { get; set; }
-		
-		public string OutputNamespace { get; set; }
+		public string IntermediateOutputDirectory { get; set; } = "";
 
-		public string ParcelableHandlingOption { get; set; }
+		public string? OutputNamespace { get; set; }
+
+		public string? ParcelableHandlingOption { get; set; }
 
 		public GenerateManagedAidlProxies ()
 		{
@@ -45,10 +46,10 @@ namespace Xamarin.Android.Tasks
 				ParcelableHandling = ParcelableHandling.Ignore,
 			};
 
-			if (!string.IsNullOrEmpty (ParcelableHandlingOption))
+			if (!ParcelableHandlingOption.IsNullOrEmpty ())
 				opts.ParcelableHandling = ToParcelableHandling (ParcelableHandlingOption);
 
-			if (!string.IsNullOrEmpty (OutputNamespace))
+			if (!OutputNamespace.IsNullOrEmpty ())
 				opts.OutputNS = OutputNamespace;
 
 			foreach (var file in References) {
@@ -80,7 +81,7 @@ namespace Xamarin.Android.Tasks
 			return true;
 		}
 		
-		static ParcelableHandling ToParcelableHandling (string option)
+		static ParcelableHandling ToParcelableHandling (string? option)
 		{
 			switch (option) {
 			case "ignore": return ParcelableHandling.Ignore;

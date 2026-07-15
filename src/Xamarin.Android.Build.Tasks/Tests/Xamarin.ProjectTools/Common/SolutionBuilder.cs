@@ -1,16 +1,17 @@
-﻿using System;
+﻿#nullable enable
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
-using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Xamarin.ProjectTools
 {
 	public class SolutionBuilder : Builder
 	{
 		public IList<XamarinProject> Projects { get; }
-		public string SolutionPath { get; set; }
-		public string SolutionName { get; set; }
+		public string? SolutionPath { get; set; }
+		public string SolutionName { get; set; } = "";
 		public bool BuildSucceeded { get; set; }
 
 		public SolutionBuilder (string solutionName) : base()
@@ -19,8 +20,10 @@ namespace Xamarin.ProjectTools
 			Projects = new List<XamarinProject> ();
 		}
 
+		[MemberNotNull (nameof (SolutionPath))]
 		public void Save ()
 		{
+			ArgumentNullException.ThrowIfNull (SolutionPath);
 			foreach (var p in Projects) {
 				using (var pb = new ProjectBuilder (Path.Combine (SolutionPath, p.ProjectName))) {
 					pb.Save (p);
@@ -65,6 +68,7 @@ namespace Xamarin.ProjectTools
 
 		public bool BuildProject(XamarinProject project, string target = "Build")
 		{
+			ArgumentNullException.ThrowIfNull (SolutionPath);
 			BuildSucceeded = BuildInternal(Path.Combine (SolutionPath, project.ProjectName, project.ProjectFilePath), target, restore: project.ShouldRestorePackageReferences);
 			return BuildSucceeded;
 		}
@@ -93,9 +97,9 @@ namespace Xamarin.ProjectTools
 		protected override void Dispose (bool disposing)
 		{
 			if (disposing)
-				if (BuildSucceeded)
+				if (BuildSucceeded && !string.IsNullOrEmpty (SolutionPath))
 					try {
-						Directory.Delete (SolutionPath, recursive: true);
+						FileSystemUtils.DeleteDirectoryWithRetry (SolutionPath);
 					} catch (Exception) {
 						// This happens on CI occasionally, let's not fail the test
 					}

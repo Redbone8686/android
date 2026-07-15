@@ -1,0 +1,125 @@
+# Shared test environment setup steps for both public and private pipelines
+# This template contains the actual setup logic without references to private repos
+
+parameters:
+  configuration: $(XA.Build.Configuration)
+  xaSourcePath: $(System.DefaultWorkingDirectory)
+  jdkMajorVersion: $(DefaultJavaSdkMajorVersion)
+  useAgentJdkPath: true
+  remove_dotnet: false
+  dotnetVersion: $(DotNetSdkVersion)
+  dotnetQuality: $(DotNetSdkQuality)
+  installTestSlicer: false
+  installApkDiff: true
+  androidSdkPlatforms: $(DefaultTestSdkPlatforms)
+  use1ESTemplate: true
+
+steps:
+- template: /build-tools/automation/yaml-templates/setup-jdk-variables.yaml
+  parameters:
+    jdkMajorVersion: ${{ parameters.jdkMajorVersion }}
+    useAgentJdkPath: ${{ parameters.useAgentJdkPath }}
+
+# Install latest .NET
+- template: /build-tools/automation/yaml-templates/use-dot-net.yaml
+  parameters:
+    version: ${{ parameters.dotnetVersion }}
+    quality: ${{ parameters.dotnetQuality }}
+    remove_dotnet: ${{ parameters.remove_dotnet }}
+
+- task: DotNetCoreCLI@2
+  displayName: shut down existing build daemons
+  inputs:
+    command: custom
+    custom: build-server
+    arguments: shutdown
+
+# Install p7zip on Linux/macOS for public agents
+- ${{ if ne(parameters.use1ESTemplate, true) }}:
+  - bash: |
+      set -e
+      sudo apt-get update
+      sudo apt-get install -y p7zip-full
+    displayName: Install p7zip on Linux
+    condition: and(succeeded(), eq(variables['agent.os'], 'Linux'))
+
+  - bash: |
+      set -e
+      brew install p7zip
+    displayName: Install p7zip on macOS
+    condition: and(succeeded(), eq(variables['agent.os'], 'Darwin'))
+
+- template: /build-tools/automation/yaml-templates/cache-android-archives.yaml
+  parameters:
+    xaSourcePath: ${{ parameters.xaSourcePath }}
+    condition: and(succeeded(), eq(variables['agent.os'], 'Darwin'))
+
+- pwsh: |
+    & "${{ parameters.xaSourcePath }}/eng/install-dotnet.ps1" -configuration ${{ parameters.configuration }}
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  displayName: install .NET SDK to bin/${{ parameters.configuration }}/dotnet
+  condition: and(succeeded(), eq(variables['agent.os'], 'Windows_NT'))
+
+- bash: |
+    set -e
+    bash "${{ parameters.xaSourcePath }}/eng/install-dotnet.sh"
+  displayName: install .NET SDK to bin/${{ parameters.configuration }}/dotnet
+  condition: and(succeeded(), ne(variables['agent.os'], 'Windows_NT'))
+  env:
+    CONFIGURATION: ${{ parameters.configuration }}
+
+- task: DotNetCoreCLI@2
+  displayName: prepare .NET workloads
+  inputs:
+    projects: ${{ parameters.xaSourcePath }}/src/workloads/workloads.csproj
+    arguments: -c ${{ parameters.configuration }} -bl:${{ parameters.xaSourcePath }}/bin/Test${{ parameters.configuration }}/workloads.binlog
+
+- task: DotNetCoreCLI@2
+  displayName: build Xamarin.Android.Tools.BootstrapTasks.csproj
+  inputs:
+    projects: ${{ parameters.xaSourcePath }}/build-tools/Xamarin.Android.Tools.BootstrapTasks/Xamarin.Android.Tools.BootstrapTasks.csproj
+    arguments: -c ${{ parameters.configuration }} -bl:${{ parameters.xaSourcePath }}/bin/Test${{ parameters.configuration }}/BootstrapTasks.binlog
+
+- template: /build-tools/automation/yaml-templates/run-dotnet-preview.yaml
+  parameters:
+    displayName: install OpenJDK and accept Android SDK licenses
+    xaSourcePath: ${{ parameters.xaSourcePath }}
+    project: ${{ parameters.xaSourcePath }}/src/androidsdk/androidsdk.csproj
+    arguments: -c ${{ parameters.configuration }} -bl:${{ parameters.xaSourcePath }}/bin/Test${{ parameters.configuration }}/androidsdk.binlog
+    continueOnError: false
+    retryCountOnTaskFailure: 2
+    env:
+      AndroidSdkPlatforms: ${{ parameters.androidSdkPlatforms }}
+
+# Download and install .NET nupkgs
+- task: DownloadPipelineArtifact@2
+  inputs:
+    artifactName: $(NuGetArtifactName)
+    downloadPath: ${{ parameters.xaSourcePath }}/bin/Build${{ parameters.configuration }}/nuget-unsigned
+
+- task: DownloadPipelineArtifact@2
+  inputs:
+    artifactName: $(LinuxNuGetArtifactName)
+    downloadPath: ${{ parameters.xaSourcePath }}/bin/Build${{ parameters.configuration }}/nuget-unsigned
+  condition: and(succeeded(), eq(variables['agent.os'], 'Linux'))
+
+- template: /build-tools/automation/yaml-templates/run-dotnet-preview.yaml
+  parameters:
+    displayName: extract workload packs
+    xaSourcePath: ${{ parameters.xaSourcePath }}
+    project: ${{ parameters.xaSourcePath }}/build-tools/create-packs/Microsoft.Android.Sdk.proj
+    arguments: -t:ExtractWorkloadPacks -c ${{ parameters.configuration }} -v:n -bl:${{ parameters.xaSourcePath }}/bin/Test${{ parameters.configuration }}/extract-workloads.binlog
+    continueOnError: false
+    retryCountOnTaskFailure: 2
+
+- ${{ if eq(parameters.installApkDiff, true) }}:
+  - template: /build-tools/automation/yaml-templates/install-dotnet-tool.yaml
+    parameters:
+      toolName: apkdiff
+      version: $(ApkDiffToolVersion)
+
+- ${{ if eq(parameters.installTestSlicer, true) }}:
+  - template: /build-tools/automation/yaml-templates/install-dotnet-tool.yaml
+    parameters:
+      toolName: dotnet-test-slicer
+      version: $(TestSlicerToolVersion)

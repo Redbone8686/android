@@ -58,221 +58,74 @@ namespace Xamarin.Android.Build.Tests
 			StringAssertEx.ContainsRegex (@$"Method.*emitted at", b.LastBuildOutput, "Should contain verbose AOT compiler output", RegexOptions.IgnoreCase);
 		}
 
-		[Test, Category ("ProfiledAOT")]
-		public void BuildBasicApplicationReleaseProfiledAot ([Values (true, false)] bool enableLLVM)
+		static IEnumerable<object[]> Get_BuildAotApplicationWithSpecialCharactersInProjectData ()
 		{
-			if (TestEnvironment.IsWindows && enableLLVM) {
-				Assert.Ignore("https://github.com/dotnet/runtime/issues/93788");
+			var ret = new List<object[]> ();
+
+			foreach (AndroidRuntime runtime in new[] { AndroidRuntime.CoreCLR }) {
+				AddTestData ("テスト", false, false, runtime);
+				AddTestData ("テスト", true, true, runtime);
+				AddTestData ("テスト", true, false, runtime);
+				AddTestData ("随机生成器", false, false, runtime);
+				AddTestData ("随机生成器", true, true, runtime);
+				AddTestData ("随机生成器", true, false, runtime);
+				AddTestData ("中国", false, false, runtime);
+				AddTestData ("中国", true, true, runtime);
+				AddTestData ("中国", true, false, runtime);
 			}
 
-			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
-				AndroidEnableProfiledAot = true,
-			};
-			proj.SetProperty ("EnableLLVM", enableLLVM.ToString ());
-			proj.SetProperty (proj.ActiveConfigurationProperties, "AndroidExtraAotOptions", "--verbose");
-			using var b = CreateApkBuilder ();
-			b.Verbosity = LoggerVerbosity.Detailed;
-			Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
-			AssertProfiledAotBuildMessages (b);
-		}
+			return ret;
 
-		[Test, Category ("ProfiledAOT")]
-		public void BuildBasicApplicationReleaseWithCustomAotProfile ()
-		{
-			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
-				AndroidEnableProfiledAot = true,
-			};
-			proj.SetProperty (proj.ActiveConfigurationProperties, "AndroidExtraAotOptions", "--verbose");
-
-			byte [] custom_aot_profile = XamarinAndroidCommonProject.GetResourceContents ("Xamarin.ProjectTools.Resources.Base.custom.aotprofile");
-			proj.OtherBuildItems.Add (new BuildItem ("AndroidAotProfile", "custom.aotprofile") { BinaryContent = () => custom_aot_profile });
-
-			using var b = CreateApkBuilder ();
-			b.Verbosity = LoggerVerbosity.Detailed;
-			Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
-			AssertProfiledAotBuildMessages (b);
-		}
-
-		[Test, Category ("ProfiledAOT")]
-		public void BuildBasicApplicationReleaseProfiledAotWithoutDefaultProfile ()
-		{
-			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
-				AndroidEnableProfiledAot = true,
-			};
-			proj.SetProperty (proj.ActiveConfigurationProperties, "AndroidUseDefaultAotProfile", "false");
-			using var b = CreateApkBuilder ();
-			b.Verbosity = LoggerVerbosity.Detailed;
-			Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
-			StringAssertEx.DoesNotContainRegex (@$"Using profile data file.*dotnet\.aotprofile", b.LastBuildOutput, "Should not use default AOT profile", RegexOptions.IgnoreCase);
+			void AddTestData (string testName, bool isRelease, bool aot, AndroidRuntime runtime)
+			{
+				ret.Add (new object[] {
+					testName,
+					isRelease,
+					aot,
+					runtime,
+				});
+			}
 		}
 
 		[Test]
-		[TestCase ("テスト", false, false)]
-		[TestCase ("テスト", true, true)]
-		[TestCase ("テスト", true, false)]
-		[TestCase ("随机生成器", false, false)]
-		[TestCase ("随机生成器", true, true)]
-		[TestCase ("随机生成器", true, false)]
-		[TestCase ("中国", false, false)]
-		[TestCase ("中国", true, true)]
-		[TestCase ("中国", true, false)]
-		public void BuildAotApplicationWithSpecialCharactersInProject (string testName, bool isRelease, bool aot)
+		[TestCaseSource (nameof (Get_BuildAotApplicationWithSpecialCharactersInProjectData))]
+		public void BuildAotApplicationWithSpecialCharactersInProject (string testName, bool isRelease, bool aot, AndroidRuntime runtime)
 		{
+			if (aot && runtime == AndroidRuntime.CoreCLR) {
+				Assert.Ignore ("AOT + CoreCLR == NativeAOT; Not supported yet here");
+				return;
+			}
+
 			var rootPath = Path.Combine (Root, "temp", TestName);
 			var proj = new XamarinAndroidApplicationProject () {
 				ProjectName = testName,
 				IsRelease = isRelease,
 				AotAssemblies = aot,
 			};
-			proj.SetAndroidSupportedAbis ("armeabi-v7a",  "arm64-v8a", "x86", "x86_64");
+			proj.SetRuntime (runtime);
 			using (var builder = CreateApkBuilder (Path.Combine (rootPath, proj.ProjectName))){
 				Assert.IsTrue (builder.Build (proj), "Build should have succeeded.");
 			}
 		}
 
-		static object [] AotChecks () => new object [] {
-			new object[] {
-				/* supportedAbis */   "arm64-v8a",
-				/* enableLLVM */      false,
-				/* usesAssemblyBlobs */ false,
-			},
-			new object[] {
-				/* supportedAbis */   "armeabi-v7a;x86",
-				/* enableLLVM */      true,
-				/* usesAssemblyBlobs */ true,
-			},
-			new object[] {
-				/* supportedAbis */   "armeabi-v7a;arm64-v8a;x86;x86_64",
-				/* enableLLVM */      false,
-				/* usesAssemblyBlobs */ true,
-			},
-			new object[] {
-				/* supportedAbis */   "armeabi-v7a;arm64-v8a;x86;x86_64",
-				/* enableLLVM */      true,
-				/* usesAssemblyBlobs */ false,
-			},
-		};
 
 		[Test]
-		[TestCaseSource (nameof (AotChecks))]
-		public void BuildAotApplicationWithNdkAndBundleAndÜmläüts (string supportedAbis, bool enableLLVM, bool usesAssemblyBlobs)
-		{
-			if (IsWindows)
-				Assert.Ignore ("https://github.com/dotnet/runtime/issues/88625");
-
-			var abisSanitized = supportedAbis.Replace (";", "").Replace ("-", "").Replace ("_", "");
-			var path = Path.Combine ("temp", string.Format ("BuildAotNdk AndÜmläüts_{0}_{1}_{2}", abisSanitized, enableLLVM, usesAssemblyBlobs));
-			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
-				AotAssemblies = true,
-				PackageName = "com.xamarin.buildaotappwithspecialchars",
-			};
-
-			proj.SetProperty ("AndroidNdkDirectory", AndroidNdkPath);
-			proj.SetRuntimeIdentifiers (supportedAbis.Split (';'));
-			proj.SetProperty ("EnableLLVM", enableLLVM.ToString ());
-			proj.SetProperty ("AndroidUseAssemblyStore", usesAssemblyBlobs.ToString ());
-			bool checkMinLlvmPath = enableLLVM && (supportedAbis == "armeabi-v7a" || supportedAbis == "x86");
-			if (checkMinLlvmPath) {
-				// Set //uses-sdk/@android:minSdkVersion so that LLVM uses the right libc.so
-				proj.AndroidManifest = $@"<?xml version=""1.0"" encoding=""utf-8""?>
-<manifest xmlns:android=""http://schemas.android.com/apk/res/android"" android:versionCode=""1"" android:versionName=""1.0"" package=""{proj.PackageName}"">
-	<uses-sdk android:minSdkVersion=""{Xamarin.Android.Tools.XABuildConfig.AndroidMinimumDotNetApiLevel}"" />
-	<application android:label=""{proj.ProjectName}"">
-	</application>
-</manifest>";
-			}
-			using (var b = CreateApkBuilder (path)) {
-				b.ThrowOnBuildFailure = false;
-				Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
-				foreach (var abi in supportedAbis.Split (new char [] { ';' })) {
-					var intermediate = Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath);
-					var aotNativeLibrary = Path.Combine (intermediate, AbiUtils.AbiToRuntimeIdentifier (abi), "aot", "UnnamedProject.dll.so");
-					FileAssert.Exists (aotNativeLibrary);
-					var apk = Path.Combine (Root, b.ProjectDirectory,
-						proj.OutputPath, $"{proj.PackageName}-Signed.apk");
-
-					var helper = new ArchiveAssemblyHelper (apk, usesAssemblyBlobs);
-					Assert.IsTrue (helper.Exists ($"assemblies/{abi}/UnnamedProject.dll"), $"{abi}/UnnamedProject.dll should be in {proj.PackageName}-Signed.apk");
-					using (var zipFile = ZipHelper.OpenZip (apk)) {
-						Assert.IsNotNull (ZipHelper.ReadFileFromZip (zipFile,
-							string.Format ("lib/{0}/libaot-UnnamedProject.dll.so", abi)),
-							$"lib/{0}/libaot-UnnamedProject.dll.so should be in the {proj.PackageName}-Signed.apk", abi);
-					}
-				}
-				Assert.IsTrue (b.Build (proj), "Second Build should have succeeded.");
-				Assert.IsTrue (
-					b.Output.IsTargetSkipped ("_CompileJava"),
-					"the _CompileJava target should be skipped");
-				Assert.IsTrue (
-					b.Output.IsTargetSkipped ("_BuildApkEmbed"),
-					"the _BuildApkEmbed target should be skipped");
-			}
-		}
-
-		[Test]
-		[TestCaseSource (nameof (AotChecks))]
-		public void BuildAotApplicationAndÜmläüts (string supportedAbis, bool enableLLVM, bool usesAssemblyBlobs)
-		{
-			if (IsWindows)
-				Assert.Ignore ("https://github.com/dotnet/runtime/issues/88625");
-
-			var abisSanitized = supportedAbis.Replace (";", "").Replace ("-", "").Replace ("_", "");
-			var path = Path.Combine ("temp", string.Format ("BuildAot AndÜmläüts_{0}_{1}_{2}", abisSanitized, enableLLVM, usesAssemblyBlobs));
-			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
-				AotAssemblies = true,
-				PackageName = "com.xamarin.buildaotappandbundlewithspecialchars",
-			};
-			proj.SetRuntimeIdentifiers (supportedAbis.Split (';'));
-			proj.SetProperty ("EnableLLVM", enableLLVM.ToString ());
-			proj.SetProperty ("AndroidUseAssemblyStore", usesAssemblyBlobs.ToString ());
-			using (var b = CreateApkBuilder (path)) {
-				b.ThrowOnBuildFailure = false;
-				Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
-				foreach (var abi in supportedAbis.Split (new char [] { ';' })) {
-					var intermediate = Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath);
-					var aotNativeLibrary = Path.Combine (intermediate, AbiUtils.AbiToRuntimeIdentifier (abi), "aot", "UnnamedProject.dll.so");
-					FileAssert.Exists (aotNativeLibrary);
-					var apk = Path.Combine (Root, b.ProjectDirectory,
-						proj.OutputPath, $"{proj.PackageName}-Signed.apk");
-
-					var helper = new ArchiveAssemblyHelper (apk, usesAssemblyBlobs);
-					Assert.IsTrue (helper.Exists ($"assemblies/{abi}/UnnamedProject.dll"), $"{abi}/UnnamedProject.dll should be in {proj.PackageName}-Signed.apk");
-					using (var zipFile = ZipHelper.OpenZip (apk)) {
-						Assert.IsNotNull (ZipHelper.ReadFileFromZip (zipFile,
-							string.Format ("lib/{0}/libaot-UnnamedProject.dll.so", abi)),
-							$"lib/{0}/libaot-UnnamedProject.dll.so should be in the {proj.PackageName}-Signed.apk", abi);
-					}
-				}
-				Assert.IsTrue (b.Build (proj), "Second Build should have succeeded.");
-				Assert.IsTrue (
-					b.Output.IsTargetSkipped ("_CompileJava"),
-					"the _CompileJava target should be skipped");
-				Assert.IsTrue (
-					b.Output.IsTargetSkipped ("_BuildApkEmbed"),
-					"the _BuildApkEmbed target should be skipped");
-			}
-		}
-
-		[Test]
+		[TestCase (AndroidRuntime.CoreCLR)]
 		[NonParallelizable]
 		[Category ("XamarinBuildDownload")]
-		public void BuildAMassiveApp ()
+		public void BuildAMassiveApp (AndroidRuntime runtime)
 		{
-			var testPath = Path.Combine ("temp", "BuildAMassiveApp");
+			var testPath = Path.Combine ("temp", "BuildAMassiveApp", runtime.ToString ());
 			TestOutputDirectories [TestContext.CurrentContext.Test.ID] = Path.Combine (Root, testPath);
 			var sb = new SolutionBuilder ("BuildAMassiveApp.sln") {
 				SolutionPath = Path.Combine (Root, testPath),
 			};
 			var app1 = new XamarinFormsMapsApplicationProject {
 				ProjectName = "App1",
-				AotAssemblies = true,
+				AotAssemblies = runtime == AndroidRuntime.MonoVM,
 				IsRelease = true,
 			};
+			app1.SetRuntime (runtime);
 			//NOTE: BuildingInsideVisualStudio prevents the projects from being built as dependencies
 			sb.BuildingInsideVisualStudio = false;
 			app1.Imports.Add (new Import ("foo.targets") {
@@ -343,107 +196,37 @@ namespace "+ libName + @" {
 		}
 
 		[Test]
-		[Category ("LLVM")]
-		public void NoSymbolsArgShouldReduceAppSize ([Values (false, true)] bool skipDebugSymbols)
+		public void RunAOTCompilationWithCoreClrFailsBuild ()
 		{
-			if (IsWindows)
-				Assert.Ignore ("https://github.com/dotnet/runtime/issues/88625");
-
-			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
-				AotAssemblies = true,
-			};
-			var supportedAbi = "arm64-v8a";
-			proj.SetAndroidSupportedAbis (supportedAbi);
-			proj.SetProperty ("EnableLLVM", true.ToString ());
-
-			var xaAssemblySize = 0;
-			var xaAssemblySizeNoSymbol = 0;
-
-			using (var b = CreateApkBuilder ()) {
-				b.ThrowOnBuildFailure = false;
-				Assert.IsTrue (b.Build (proj), "First build should have succeeded.");
-				var apkPath = Path.Combine (Root, b.ProjectDirectory, proj.OutputPath, $"{proj.PackageName}-Signed.apk");
-				FileAssert.Exists (apkPath);
-				using (var apk = ZipHelper.OpenZip (apkPath)) {
-					xaAssemblySize = ZipHelper.ReadFileFromZip (apk, $"lib/{supportedAbi}/libaot-Mono.Android.dll.so").Length;
-				}
-
-				string additionalArgs = "no-write-symbols";
-				if (skipDebugSymbols) {
-					additionalArgs += ",nodebug";
-				}
-				proj.SetProperty ("AndroidAotAdditionalArguments", additionalArgs);
-				Assert.IsTrue (b.Build (proj), "Second build should have succeeded.");
-				FileAssert.Exists (apkPath);
-				using (var apk = ZipHelper.OpenZip (apkPath)) {
-					xaAssemblySizeNoSymbol = ZipHelper.ReadFileFromZip (apk, $"lib/{supportedAbi}/libaot-Mono.Android.dll.so").Length;
-				}
-				Assert.IsTrue (xaAssemblySize > 0 && xaAssemblySizeNoSymbol > 0, $"Mono.Android.dll.so size was not updated after first or second build. Before: '{xaAssemblySize}' After: '{xaAssemblySizeNoSymbol}'.");
-				Assert.Less (xaAssemblySizeNoSymbol, xaAssemblySize, "Mono.Android.dll.so should have been smaller after 'no-write-symbols' build.");
-			}
-		}
-
-		[Test]
-		[Category ("AOT")]
-		public void AotAssembliesInIDE ()
-		{
-			string supportedAbis = "arm64-v8a";
-			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
-				AotAssemblies = true,
-			};
-			proj.SetAndroidSupportedAbis (supportedAbis);
-			using var b = CreateApkBuilder ();
-			Assert.IsTrue (b.RunTarget (proj, target: "Build"));
-
-			// .apk won't exist yet
-			var apk = Path.Combine (Root, b.ProjectDirectory, proj.OutputPath, $"{proj.PackageName}-Signed.apk");
-			FileAssert.DoesNotExist (apk);
-
-			Assert.IsTrue (b.RunTarget (proj, target: "SignAndroidPackage"));
-			FileAssert.Exists (apk);
-
-			using var zipFile = ZipHelper.OpenZip (apk);
-			foreach (var abi in supportedAbis.Split (';')) {
-				var path = $"lib/{abi}/libaot-Mono.Android.dll.so";
-				var entry = ZipHelper.ReadFileFromZip (zipFile, path);
-				Assert.IsNotNull (entry, $"{path} should be in {apk}", abi);
-			}
-		}
-
-		[Test]
-		public void CheckWhetherLibcAndLibmAreReferencedInAOTLibraries ()
-		{
-			if (IsWindows)
-				Assert.Ignore ("https://github.com/dotnet/runtime/issues/88625");
-
 			var proj = new XamarinAndroidApplicationProject {
 				IsRelease = true,
-				EmbedAssembliesIntoApk = true,
-				AotAssemblies = true,
 			};
-			proj.SetProperty ("EnableLLVM", "True");
+			proj.SetRuntime (AndroidRuntime.CoreCLR);
+			proj.SetProperty ("RunAOTCompilation", "true");
 
-			var abis = new [] { "arm64-v8a", "x86_64" };
-			proj.SetAndroidSupportedAbis (abis);
+			using var b = CreateApkBuilder ();
+			b.ThrowOnBuildFailure = false;
+			Assert.IsFalse (b.Build (proj), "Build should have failed.");
+			StringAssertEx.Contains ("error XA1044", b.LastBuildOutput, "Build output should contain error XA1044");
+			StringAssertEx.Contains ("RunAOTCompilation", b.LastBuildOutput, "Build output should mention RunAOTCompilation");
+			StringAssertEx.Contains ("CoreCLR", b.LastBuildOutput, "Build output should mention CoreCLR");
+		}
 
-			var libPaths = new List<string> ();
-			libPaths.Add (Path.Combine ("android-arm64", "aot", "Mono.Android.dll.so"));
-			libPaths.Add (Path.Combine ("android-x64", "aot", "Mono.Android.dll.so"));
+		[Test]
+		public void EnableLLVMWithCoreClrFailsBuild ()
+		{
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = true,
+			};
+			proj.SetRuntime (AndroidRuntime.CoreCLR);
+			proj.SetProperty ("EnableLLVM", "true");
 
-			using (var b = CreateApkBuilder ()) {
-				Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
-				string objPath = Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath);
-
-				foreach (string libPath in libPaths) {
-					string lib = Path.Combine (objPath, libPath);
-
-					Assert.IsTrue (File.Exists (lib), $"Library {lib} should exist on disk");
-					Assert.IsTrue (ELFHelper.ReferencesLibrary (lib, "libc.so"), $"Library {lib} should reference libc.so");
-					Assert.IsTrue (ELFHelper.ReferencesLibrary (lib, "libm.so"), $"Library {lib} should reference libm.so");
-				}
-			}
+			using var b = CreateApkBuilder ();
+			b.ThrowOnBuildFailure = false;
+			Assert.IsFalse (b.Build (proj), "Build should have failed.");
+			StringAssertEx.Contains ("error XA1044", b.LastBuildOutput, "Build output should contain error XA1044");
+			StringAssertEx.Contains ("EnableLLVM", b.LastBuildOutput, "Build output should mention EnableLLVM");
+			StringAssertEx.Contains ("CoreCLR", b.LastBuildOutput, "Build output should mention CoreCLR");
 		}
 
 	}

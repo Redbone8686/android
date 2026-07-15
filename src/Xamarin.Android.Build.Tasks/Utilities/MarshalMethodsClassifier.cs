@@ -1,9 +1,10 @@
+#nullable disable
+
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.Diagnostics.CodeAnalysis;
 
 using Java.Interop.Tools.Cecil;
-using Java.Interop.Tools.JavaCallableWrappers;
 using Java.Interop.Tools.TypeNameMappings;
 
 using Microsoft.Android.Build.Tasks;
@@ -13,7 +14,34 @@ using Xamarin.Android.Tools;
 
 namespace Xamarin.Android.Tasks
 {
-	sealed class MarshalMethodEntry
+	/// <summary>
+	/// Base class representing a method entry that contains information about 
+	/// a method and its declaring type. Used as a foundation for marshal method entries.
+	/// </summary>
+	class MethodEntry
+	{
+		/// <summary>
+		/// Gets the type that declares this method.
+		/// </summary>
+		public TypeDefinition DeclaringType { get; }
+
+		/// <summary>
+		/// Initializes a new instance of the <see cref="MethodEntry"/> class.
+		/// </summary>
+		/// <param name="declaringType">The type that declares this method. Cannot be null.</param>
+		/// <exception cref="ArgumentNullException">Thrown when <paramref name="declaringType"/> is null.</exception>
+		public MethodEntry (TypeDefinition declaringType)
+		{
+			DeclaringType = declaringType ?? throw new ArgumentNullException (nameof (declaringType));
+		}
+	}
+
+	/// <summary>
+	/// Represents a marshal method entry containing all information needed to generate 
+	/// a native callback method and its associated metadata. This is the core data structure
+	/// used throughout the marshal method generation pipeline.
+	/// </summary>
+	class MarshalMethodEntry : MethodEntry
 	{
 		/// <summary>
 		/// The "real" native callback, used if it doesn't contain any non-blittable types in its parameters
@@ -27,26 +55,83 @@ namespace Xamarin.Android.Tasks
 		/// a non-blittable return type or a parameter of a non-blittable type.
 		/// </summary>
 		public MethodDefinition? NativeCallbackWrapper { get; set; }
-		public TypeDefinition DeclaringType            { get; }
+		
+		/// <summary>
+		/// The connector method that returns the delegate for this marshal method. 
+		/// May be null for converted marshal methods where the connector has been removed.
+		/// </summary>
 		public MethodDefinition? Connector             { get; }
+		
+		/// <summary>
+		/// The original registered method that was marked with [Register] attribute.
+		/// This is the .NET method that should be called from native code.
+		/// </summary>
 		public MethodDefinition? RegisteredMethod      { get; }
+		
+		/// <summary>
+		/// The actual implementation method that contains the business logic.
+		/// This may be the same as RegisteredMethod or a different method.
+		/// </summary>
 		public MethodDefinition? ImplementedMethod     { get; }
+		
+		/// <summary>
+		/// The delegate field that holds the callback delegate. May be null if the field doesn't exist.
+		/// </summary>
 		public FieldDefinition? CallbackField          { get; }
+		
+		/// <summary>
+		/// The JNI type name (e.g., "com/example/MyClass") for the Java class that owns this method.
+		/// </summary>
 		public string JniTypeName                      { get; }
+		
+		/// <summary>
+		/// The JNI method name for this method as it appears in Java/JNI.
+		/// </summary>
 		public string JniMethodName                    { get; }
+		
+		/// <summary>
+		/// The JNI method signature (e.g., "(ILjava/lang/String;)V") describing parameter and return types.
+		/// </summary>
 		public string JniMethodSignature               { get; }
+		
+		/// <summary>
+		/// Indicates whether this method requires a blittable workaround wrapper due to 
+		/// non-blittable parameter or return types.
+		/// </summary>
 		public bool NeedsBlittableWorkaround           { get; }
 
+		/// <summary>
+		/// Gets the native callback method to use. Returns the wrapper if it exists, otherwise the real callback.
+		/// </summary>
 		public MethodDefinition NativeCallback         => NativeCallbackWrapper ?? nativeCallbackReal;
+		
+		/// <summary>
+		/// Indicates whether this is a special case marshal method (e.g., TypeManager methods).
+		/// </summary>
 		public bool IsSpecial                          { get; }
 
+		/// <summary>
+		/// Initializes a new instance of the <see cref="MarshalMethodEntry"/> class for a standard marshal method.
+		/// </summary>
+		/// <param name="declaringType">The type that declares this method.</param>
+		/// <param name="nativeCallback">The native callback method.</param>
+		/// <param name="connector">The connector method that returns the delegate.</param>
+		/// <param name="registeredMethod">The registered method marked with [Register] attribute.</param>
+		/// <param name="implementedMethod">The actual implementation method.</param>
+		/// <param name="callbackField">The delegate field that holds the callback delegate.</param>
+		/// <param name="jniTypeName">The JNI type name for the Java class.</param>
+		/// <param name="jniName">The JNI method name.</param>
+		/// <param name="jniSignature">The JNI method signature.</param>
+		/// <param name="needsBlittableWorkaround">Whether this method needs a blittable workaround wrapper.</param>
+		/// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
+		/// <exception cref="ArgumentException">Thrown when JNI names or signatures are null or empty.</exception>
 		public MarshalMethodEntry (TypeDefinition declaringType, MethodDefinition nativeCallback, MethodDefinition connector, MethodDefinition
 		                           registeredMethod, MethodDefinition implementedMethod, FieldDefinition callbackField, string jniTypeName,
 		                           string jniName, string jniSignature, bool needsBlittableWorkaround)
+			: base (declaringType)
 		{
-			DeclaringType = declaringType ?? throw new ArgumentNullException (nameof (declaringType));
 			nativeCallbackReal = nativeCallback ?? throw new ArgumentNullException (nameof (nativeCallback));
-			Connector = connector ?? throw new ArgumentNullException (nameof (connector));
+			Connector = connector;  // The connector will not exist for converted marshal methods
 			RegisteredMethod = registeredMethod ?? throw new ArgumentNullException (nameof (registeredMethod));
 			ImplementedMethod = implementedMethod ?? throw new ArgumentNullException (nameof (implementedMethod));
 			CallbackField = callbackField; // we don't require the callback field to exist
@@ -57,9 +142,20 @@ namespace Xamarin.Android.Tasks
 			IsSpecial = false;
 		}
 
+		/// <summary>
+		/// Initializes a new instance of the <see cref="MarshalMethodEntry"/> class for a special case method.
+		/// Special case methods are typically hand-written methods like TypeManager methods.
+		/// </summary>
+		/// <param name="declaringType">The type that declares this method.</param>
+		/// <param name="nativeCallback">The native callback method.</param>
+		/// <param name="jniTypeName">The JNI type name for the Java class.</param>
+		/// <param name="jniName">The JNI method name.</param>
+		/// <param name="jniSignature">The JNI method signature.</param>
+		/// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
+		/// <exception cref="ArgumentException">Thrown when JNI names or signatures are null or empty.</exception>
 		public MarshalMethodEntry (TypeDefinition declaringType, MethodDefinition nativeCallback, string jniTypeName, string jniName, string jniSignature)
+			: base (declaringType)
 		{
-			DeclaringType = declaringType ?? throw new ArgumentNullException (nameof (declaringType));
 			nativeCallbackReal = nativeCallback ?? throw new ArgumentNullException (nameof (nativeCallback));
 			JniTypeName = EnsureNonEmpty (jniTypeName, nameof (jniTypeName));
 			JniMethodName = EnsureNonEmpty (jniName, nameof (jniName));
@@ -67,12 +163,26 @@ namespace Xamarin.Android.Tasks
 			IsSpecial = true;
 		}
 
+		/// <summary>
+		/// Initializes a new instance of the <see cref="MarshalMethodEntry"/> class by copying from another entry
+		/// but with a different native callback method. Used when creating wrapper methods.
+		/// </summary>
+		/// <param name="other">The source marshal method entry to copy from.</param>
+		/// <param name="nativeCallback">The new native callback method to use.</param>
+		/// <exception cref="ArgumentNullException">Thrown when parameters are null.</exception>
 		public MarshalMethodEntry (MarshalMethodEntry other, MethodDefinition nativeCallback)
 			: this (other.DeclaringType, nativeCallback, other.Connector, other.RegisteredMethod,
 			        other.ImplementedMethod, other.CallbackField, other.JniTypeName, other.JniMethodName,
 			        other.JniMethodSignature, other.NeedsBlittableWorkaround)
 		{}
 
+		/// <summary>
+		/// Ensures that the specified string is not null or empty.
+		/// </summary>
+		/// <param name="s">The string to validate.</param>
+		/// <param name="argName">The name of the argument for error reporting.</param>
+		/// <returns>The validated string.</returns>
+		/// <exception cref="ArgumentException">Thrown when the string is null or empty.</exception>
 		string EnsureNonEmpty (string s, string argName)
 		{
 			if (String.IsNullOrEmpty (s)) {
@@ -82,6 +192,13 @@ namespace Xamarin.Android.Tasks
 			return s;
 		}
 
+		/// <summary>
+		/// Gets a unique key for storing this marshal method entry. The key includes
+		/// the type name, assembly information, and method name.
+		/// </summary>
+		/// <param name="tdCache">The type definition cache for resolving assembly information.</param>
+		/// <returns>A unique string key for this marshal method entry.</returns>
+		/// <exception cref="ArgumentNullException">Thrown when RegisteredMethod is null.</exception>
 		public string GetStoreMethodKey (TypeDefinitionCache tdCache)
 		{
 			MethodDefinition registeredMethod = RegisteredMethod;
@@ -90,16 +207,120 @@ namespace Xamarin.Android.Tasks
 		}
 	}
 
-	class MarshalMethodsClassifier : JavaCallableMethodClassifier
+	/// <summary>
+	/// Represents a marshal method entry that has been converted from its original form
+	/// to an optimized native callback. This is used when marshal methods have been 
+	/// pre-processed and converted to a more efficient form.
+	/// </summary>
+	sealed class ConvertedMarshalMethodEntry : MarshalMethodEntry
 	{
-		sealed class ConnectorInfo
+		/// <summary>
+		/// Gets the converted native callback method that has been optimized for performance.
+		/// </summary>
+		public MethodDefinition ConvertedNativeCallback { get; }
+
+		/// <summary>
+		/// Initializes a new instance of the <see cref="ConvertedMarshalMethodEntry"/> class.
+		/// </summary>
+		/// <param name="declaringType">The type that declares this method.</param>
+		/// <param name="nativeCallback">The original native callback method.</param>
+		/// <param name="connector">The connector method that returns the delegate.</param>
+		/// <param name="registeredMethod">The registered method marked with [Register] attribute.</param>
+		/// <param name="implementedMethod">The actual implementation method.</param>
+		/// <param name="callbackField">The delegate field that holds the callback delegate.</param>
+		/// <param name="jniTypeName">The JNI type name for the Java class.</param>
+		/// <param name="jniName">The JNI method name.</param>
+		/// <param name="jniSignature">The JNI method signature.</param>
+		/// <param name="needsBlittableWorkaround">Whether this method needs a blittable workaround wrapper.</param>
+		/// <param name="convertedNativeCallback">The converted/optimized native callback method.</param>
+		/// <exception cref="ArgumentNullException">Thrown when convertedNativeCallback is null.</exception>
+		public ConvertedMarshalMethodEntry (TypeDefinition declaringType, MethodDefinition nativeCallback, MethodDefinition connector, MethodDefinition
+					   registeredMethod, MethodDefinition implementedMethod, FieldDefinition callbackField, string jniTypeName,
+					   string jniName, string jniSignature, bool needsBlittableWorkaround, MethodDefinition convertedNativeCallback)
+			: base (declaringType, nativeCallback, connector, registeredMethod, implementedMethod, callbackField, jniTypeName, jniName, jniSignature, needsBlittableWorkaround)
 		{
+			ConvertedNativeCallback = convertedNativeCallback ?? throw new ArgumentNullException (nameof (convertedNativeCallback));
+		}
+	}
+
+	/// <summary>
+	/// Represents a marshal method that cannot be converted to a static native callback
+	/// and must be registered dynamically at runtime. This typically happens when
+	/// the method signature or attributes don't meet the requirements for static marshaling.
+	/// </summary>
+	sealed class DynamicallyRegisteredMarshalMethodEntry : MethodEntry
+	{
+		/// <summary>
+		/// Gets the actual implementation method that contains the business logic.
+		/// </summary>
+		public MethodDefinition ImplementedMethod { get; }
+		
+		/// <summary>
+		/// Gets the [Register] attribute that was applied to the method.
+		/// </summary>
+		public CustomAttribute RegisterAttribute { get; }
+		
+		/// <summary>
+		/// Gets the registered method that was marked with the [Register] attribute.
+		/// </summary>
+		public MethodDefinition RegisteredMethod { get; }
+
+		/// <summary>
+		/// Initializes a new instance of the <see cref="DynamicallyRegisteredMarshalMethodEntry"/> class.
+		/// </summary>
+		/// <param name="declaringType">The type that declares this method.</param>
+		/// <param name="implementedMethod">The actual implementation method.</param>
+		/// <param name="registeredMethod">The registered method marked with [Register] attribute.</param>
+		/// <param name="registerAttribute">The [Register] attribute applied to the method.</param>
+		public DynamicallyRegisteredMarshalMethodEntry (TypeDefinition declaringType, MethodDefinition implementedMethod, MethodDefinition registeredMethod, CustomAttribute registerAttribute)
+			: base (declaringType)
+		{
+			ImplementedMethod = implementedMethod;
+			RegisteredMethod = registeredMethod;
+			RegisterAttribute = registerAttribute;
+		}
+	}
+
+	/// <summary>
+	/// Analyzes and classifies methods in .NET assemblies to determine which can be converted
+	/// to efficient marshal methods and which must be registered dynamically. This is a core
+	/// component of the marshal method generation pipeline that examines method signatures,
+	/// attributes, and types to make classification decisions.
+	/// </summary>
+	class MarshalMethodsClassifier
+	{
+		/// <summary>
+		/// Contains information about a connector method parsed from a connector specification string.
+		/// Connector methods are responsible for returning delegates that bridge between .NET and native code.
+		/// </summary>
+		public sealed class ConnectorInfo
+		{
+			/// <summary>
+			/// Gets the name of the connector method (e.g., "GetMyMethodHandler").
+			/// </summary>
 			public string MethodName                  { get; }
+			
+			/// <summary>
+			/// Gets the full type name that contains the connector method.
+			/// </summary>
 			public string TypeName                    { get; }
+			
+			/// <summary>
+			/// Gets the assembly name reference for the assembly containing the connector method.
+			/// </summary>
 			public AssemblyNameReference AssemblyName { get; }
 
+			/// <summary>
+			/// Initializes a new instance of the <see cref="ConnectorInfo"/> class by parsing
+			/// a connector specification string.
+			/// </summary>
+			/// <param name="spec">
+			/// The connector specification string in the format: "MethodName:TypeName, AssemblyName"
+			/// For example: "GetMyMethodHandler:MyNamespace.MyType, MyAssembly"
+			/// </param>
 			public ConnectorInfo (string spec)
 			{
+				// Parse connector specification: "MethodName:TypeName, AssemblyName"
 				string[] connectorSpec = spec.Split (':');
 				MethodName = connectorSpec[0];
 
@@ -107,6 +328,7 @@ namespace Xamarin.Android.Tasks
 					return;
 				}
 
+				// Extract type name and assembly name from the full type specification
 				string fullTypeName = connectorSpec[1];
 				int comma = fullTypeName.IndexOf (',');
 				TypeName = fullTypeName.Substring (0, comma);
@@ -114,13 +336,32 @@ namespace Xamarin.Android.Tasks
 			}
 		}
 
+		/// <summary>
+		/// Interface for matching method signatures when searching for methods.
+		/// Implementations can provide custom logic for determining if a method's signature matches expected criteria.
+		/// </summary>
 		interface IMethodSignatureMatcher
 		{
+			/// <summary>
+			/// Determines whether the specified method matches the expected signature.
+			/// </summary>
+			/// <param name="method">The method to check.</param>
+			/// <returns>true if the method matches the expected signature; otherwise, false.</returns>
 			bool Matches (MethodDefinition method);
 		}
 
+		/// <summary>
+		/// Implements <see cref="IMethodSignatureMatcher"/> to match native callback method signatures.
+		/// This class generates the expected native callback signature based on a target .NET method
+		/// and can verify if candidate methods match that signature. Native callbacks must follow
+		/// specific patterns to be compatible with JNI and the marshal method system.
+		/// </summary>
 		sealed class NativeCallbackSignature : IMethodSignatureMatcher
 		{
+			/// <summary>
+			/// Set of .NET types that can be passed directly to native code without marshaling.
+			/// These are blittable types that have the same representation in both managed and native memory.
+			/// </summary>
 			static readonly HashSet<string> verbatimTypes = new HashSet<string> (StringComparer.Ordinal) {
 				"System.Boolean",
 				"System.Byte",
@@ -143,55 +384,88 @@ namespace Xamarin.Android.Tasks
 			readonly TaskLoggingHelper log;
 			readonly TypeDefinitionCache cache;
 
+			/// <summary>
+			/// Initializes a new instance of the <see cref="NativeCallbackSignature"/> class.
+			/// Analyzes the target method and generates the expected native callback signature.
+			/// </summary>
+			/// <param name="target">The target .NET method to generate a native callback signature for.</param>
+			/// <param name="log">The logging helper for diagnostic messages.</param>
+			/// <param name="cache">The type definition cache for resolving types.</param>
 			public NativeCallbackSignature (MethodDefinition target, TaskLoggingHelper log, TypeDefinitionCache cache)
 			{
 				this.log = log;
 				this.cache = cache;
+				
+				// Map the return type to its native equivalent
 				returnType = MapType (target.ReturnType);
+				
+				// Native callbacks always start with JNIEnv* and jobject/jclass parameters
 				paramTypes = new List<string> {
 					"System.IntPtr", // jnienv
 					"System.IntPtr", // native__this
 				};
 
+				// Add mapped parameter types
 				foreach (ParameterDefinition pd in target.Parameters) {
 					paramTypes.Add (MapType (pd.ParameterType));
 				}
 			}
 
+			/// <summary>
+			/// Maps a .NET type reference to its corresponding native type for use in native callbacks.
+			/// This handles the conversion from managed types to types that can be passed through JNI.
+			/// </summary>
+			/// <param name="typeRef">The .NET type reference to map.</param>
+			/// <returns>The full name of the corresponding native type.</returns>
+			/// <exception cref="InvalidOperationException">Thrown when a type cannot be resolved.</exception>
 			string MapType (TypeReference typeRef)
 			{
 				string? typeName = null;
+				
+				// Handle non-generic, non-array types that might be enums
 				if (!typeRef.IsGenericParameter && !typeRef.IsArray) {
 					TypeDefinition typeDef = cache.Resolve (typeRef);
 					if (typeDef == null) {
 						throw new InvalidOperationException ($"Unable to resolve type '{typeRef.FullName}'");
 					}
 
+					// Enums are represented by their underlying type in native code
 					if (typeDef.IsEnum) {
 						return GetEnumUnderlyingType (typeDef).FullName;
 					}
 				}
 
+				// Use the full type name if not already determined
 				if (String.IsNullOrEmpty (typeName)) {
 					typeName = typeRef.FullName;
 				}
 
+				// Types that can be passed directly without conversion
 				if (verbatimTypes.Contains (typeName)) {
 					return typeName;
 				}
 
-				// Android.Graphics.Color is mapped to/from a native `int`
-				if (String.Compare (typeName, "Android.Graphics.Color", StringComparison.Ordinal) == 0) {
+				// Special case: Android.Graphics.Color is mapped to/from a native `int`
+				if (MonoAndroidHelper.StringEquals (typeName, "Android.Graphics.Color")) {
 					return "System.Int32";
 				}
 
+				// All other types are passed as IntPtr (jobject references)
 				return "System.IntPtr";
 			}
 
+			/// <summary>
+			/// Gets the underlying type of an enumeration. Enums in .NET have an underlying integral type
+			/// that is used when passing them through JNI.
+			/// </summary>
+			/// <param name="td">The enumeration type definition.</param>
+			/// <returns>The underlying type reference of the enumeration.</returns>
+			/// <exception cref="InvalidOperationException">Thrown when the underlying type cannot be determined.</exception>
 			static TypeReference GetEnumUnderlyingType (TypeDefinition td)
 			{
 				var fields = td.Fields;
 
+				// The first non-static field in an enum is the value field containing the underlying type
 				for (int i = 0; i < fields.Count; i++) {
 					var field = fields [i];
 					if (!field.IsStatic)
@@ -201,29 +475,39 @@ namespace Xamarin.Android.Tasks
 				throw new InvalidOperationException ($"Unable to determine underlying type of the '{td.FullName}' enum");
 			}
 
+			/// <summary>
+			/// Determines whether the specified method matches the expected native callback signature.
+			/// This includes checking parameter count, parameter types, return type, and that the method is static.
+			/// </summary>
+			/// <param name="method">The method to check against the expected signature.</param>
+			/// <returns>true if the method matches the expected signature; otherwise, false.</returns>
 			public bool Matches (MethodDefinition method)
 			{
+				// Native callbacks must be static and have the correct number of parameters
 				if (method.Parameters.Count != paramTypes.Count || !method.IsStatic) {
 					log.LogWarning ($"Method '{method.FullName}' doesn't match native callback signature (invalid parameter count or not static)");
 					return false;
 				}
 
-				if (String.Compare (returnType, method.ReturnType.FullName, StringComparison.Ordinal) != 0) {
+				// Check return type match
+				if (!TypeMatches (returnType, method.ReturnType.FullName)) {
 					log.LogWarning ($"Method '{method.FullName}' doesn't match native callback signature (invalid return type: expected '{returnType}', found '{method.ReturnType.FullName}')");
 					return false;
 				}
 
+				// Check each parameter type
 				for (int i = 0; i < method.Parameters.Count; i++) {
 					ParameterDefinition pd = method.Parameters[i];
 					string parameterTypeName;
 
+					// Handle array types specially
 					if (pd.ParameterType.IsArray) {
 						parameterTypeName = $"{pd.ParameterType.FullName}[]";
 					} else {
 						parameterTypeName = pd.ParameterType.FullName;
 					}
 
-					if (String.Compare (parameterTypeName, paramTypes[i], StringComparison.Ordinal) != 0) {
+					if (!TypeMatches (parameterTypeName, paramTypes[i])) {
 						log.LogWarning ($"Method '{method.FullName}' doesn't match native callback signature, expected parameter type '{paramTypes[i]}' at position {i}, found '{parameterTypeName}'");
 						return false;
 					}
@@ -231,204 +515,154 @@ namespace Xamarin.Android.Tasks
 
 				return true;
 			}
+
+			/// <summary>
+			/// Array of equivalent type mappings for marshaling. Some .NET types are marshaled
+			/// as different blittable types when passed through JNI, so we need to treat them as equivalent
+			/// when matching signatures.
+			/// </summary>
+			// Because these types are marshaled as different blittable types,
+			// we need to accept them as equivalent
+			static readonly (string Source, string Replacement)[] equivalent_types = [
+				(Source: "System.Boolean", Replacement: "System.SByte"),
+				(Source: "System.Char", Replacement: "System.UInt16"),
+			];
+
+			/// <summary>
+			/// Determines whether two type names are equivalent for native callback matching purposes.
+			/// This handles both exact matches and equivalent type mappings used during marshaling.
+			/// </summary>
+			/// <param name="type">The expected type name.</param>
+			/// <param name="methodType">The actual method type name.</param>
+			/// <returns>true if the types are equivalent; otherwise, false.</returns>
+			static bool TypeMatches (string type, string methodType)
+			{
+				// Check for exact match first
+				if (MonoAndroidHelper.StringEquals (type, methodType))
+					return true;
+
+				// Check for equivalent type mappings in both directions
+				foreach (var eq in equivalent_types) {
+					if (string.Compare (eq.Source, type, StringComparison.Ordinal) == 0 && string.Compare (eq.Replacement, methodType, StringComparison.Ordinal) == 0)
+						return true;
+
+					if (string.Compare (eq.Source, methodType, StringComparison.Ordinal) == 0 && string.Compare (eq.Replacement, type, StringComparison.Ordinal) == 0)
+						return true;
+				}
+
+				return false;
+			}
 		}
 
+		// Core dependencies for the classifier
 		TypeDefinitionCache tdCache;
 		IAssemblyResolver resolver;
-		Dictionary<string, IList<MarshalMethodEntry>> marshalMethods;
-		HashSet<AssemblyDefinition> assemblies;
 		TaskLoggingHelper log;
-		HashSet<TypeDefinition> typesWithDynamicallyRegisteredMethods;
-		ulong rejectedMethodCount = 0;
-		ulong wrappedMethodCount = 0;
 		readonly AndroidTargetArch targetArch;
 
-		public IDictionary<string, IList<MarshalMethodEntry>> MarshalMethods => marshalMethods;
-		public ICollection<AssemblyDefinition> Assemblies => assemblies;
-		public ulong RejectedMethodCount => rejectedMethodCount;
-		public ulong WrappedMethodCount => wrappedMethodCount;
+		/// <summary>
+		/// Gets the type definition cache used for resolving type references.
+		/// </summary>
 		public TypeDefinitionCache TypeDefinitionCache => tdCache;
+		
+		/// <summary>
+		/// Gets the logging helper for diagnostic messages.
+		/// </summary>
+		public TaskLoggingHelper Log => log;
+		
+		/// <summary>
+		/// Gets the assembly resolver for loading assembly definitions.
+		/// </summary>
+		public IAssemblyResolver Resolver => resolver;
 
+		/// <summary>
+		/// Initializes a new instance of the <see cref="MarshalMethodsClassifier"/> class with target architecture.
+		/// </summary>
+		/// <param name="targetArch">The target architecture for marshal method generation.</param>
+		/// <param name="tdCache">The type definition cache for resolving types.</param>
+		/// <param name="res">The assembly resolver for loading assemblies.</param>
+		/// <param name="log">The logging helper for diagnostic messages.</param>
+		/// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
 		public MarshalMethodsClassifier (AndroidTargetArch targetArch, TypeDefinitionCache tdCache, IAssemblyResolver res, TaskLoggingHelper log)
 		{
 			this.targetArch = targetArch;
 			this.log = log ?? throw new ArgumentNullException (nameof (log));
 			this.tdCache = tdCache ?? throw new ArgumentNullException (nameof (tdCache));
 			resolver = res ?? throw new ArgumentNullException (nameof (tdCache));
-			marshalMethods = new Dictionary<string, IList<MarshalMethodEntry>> (StringComparer.Ordinal);
-			assemblies = new HashSet<AssemblyDefinition> ();
-			typesWithDynamicallyRegisteredMethods = new HashSet<TypeDefinition> ();
 		}
 
+		/// <summary>
+		/// Initializes a new instance of the <see cref="MarshalMethodsClassifier"/> class without target architecture.
+		/// Used when architecture-specific information is not needed for classification.
+		/// </summary>
+		/// <param name="tdCache">The type definition cache for resolving types.</param>
+		/// <param name="res">The assembly resolver for loading assemblies.</param>
+		/// <param name="log">The logging helper for diagnostic messages.</param>
+		/// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
 		public MarshalMethodsClassifier (TypeDefinitionCache tdCache, IAssemblyResolver res, TaskLoggingHelper log)
 		{
 			this.log = log ?? throw new ArgumentNullException (nameof (log));
 			this.tdCache = tdCache ?? throw new ArgumentNullException (nameof (tdCache));
 			resolver = res ?? throw new ArgumentNullException (nameof (tdCache));
-			marshalMethods = new Dictionary<string, IList<MarshalMethodEntry>> (StringComparer.Ordinal);
-			assemblies = new HashSet<AssemblyDefinition> ();
-			typesWithDynamicallyRegisteredMethods = new HashSet<TypeDefinition> ();
-		}
-
-		public override bool ShouldBeDynamicallyRegistered (TypeDefinition topType, MethodDefinition registeredMethod, MethodDefinition implementedMethod, CustomAttribute? registerAttribute)
-		{
-			if (registeredMethod == null) {
-				throw new ArgumentNullException (nameof (registeredMethod));
-			}
-
-			if (implementedMethod == null) {
-				throw new ArgumentNullException (nameof (registeredMethod));
-			}
-
-			if (registerAttribute == null) {
-				throw new ArgumentNullException (nameof (registerAttribute));
-			}
-
-			if (!IsDynamicallyRegistered (topType, registeredMethod, implementedMethod, registerAttribute)) {
-				return false;
-			}
-
-			typesWithDynamicallyRegisteredMethods.Add (topType);
-			return true;
-		}
-
-		public bool FoundDynamicallyRegisteredMethods (TypeDefinition type)
-		{
-			return typesWithDynamicallyRegisteredMethods.Contains (type);
-		}
-
-		void AddTypeManagerSpecialCaseMethods ()
-		{
-			const string FullTypeName = "Java.Interop.TypeManager+JavaTypeManager, Mono.Android";
-
-			AssemblyDefinition monoAndroid = resolver.Resolve ("Mono.Android");
-			TypeDefinition? typeManager = monoAndroid?.MainModule.FindType ("Java.Interop.TypeManager");
-			TypeDefinition? javaTypeManager = typeManager?.GetNestedType ("JavaTypeManager");
-
-			if (javaTypeManager == null) {
-				throw new InvalidOperationException ($"Internal error: unable to find the {FullTypeName} type in the Mono.Android assembly");
-			}
-
-			MethodDefinition? nActivate_mm = null;
-			MethodDefinition? nActivate = null;
-
-			foreach (MethodDefinition method in javaTypeManager.Methods) {
-				if (nActivate_mm == null && IsMatchingMethod (method, "n_Activate_mm")) {
-					if (method.GetCustomAttributes ("System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute").Any (cattr => cattr != null)) {
-						nActivate_mm = method;
-					} else {
-						log.LogWarning ($"Method '{method.FullName}' isn't decorated with the UnmanagedCallersOnly attribute");
-						continue;
-					}
-				}
-
-				if (nActivate == null && IsMatchingMethod (method, "n_Activate")) {
-					nActivate = method;
-				}
-
-				if (nActivate_mm != null && nActivate != null) {
-					break;
-				}
-			}
-
-			if (nActivate_mm == null) {
-				ThrowMissingMethod ("nActivate_mm");
-			}
-
-			if (nActivate == null) {
-				ThrowMissingMethod ("nActivate");
-			}
-
-			string? jniTypeName = null;
-			foreach (CustomAttribute cattr in javaTypeManager.GetCustomAttributes ("Android.Runtime.RegisterAttribute")) {
-				if (cattr.ConstructorArguments.Count != 1) {
-					log.LogDebugMessage ($"[Register] attribute on type '{FullTypeName}' is expected to have 1 constructor argument, found {cattr.ConstructorArguments.Count}");
-					continue;
-				}
-
-				jniTypeName = (string)cattr.ConstructorArguments[0].Value;
-				if (!String.IsNullOrEmpty (jniTypeName)) {
-					break;
-				}
-			}
-
-			string? jniMethodName = null;
-			string? jniSignature = null;
-			foreach (CustomAttribute cattr in nActivate.GetCustomAttributes ("Android.Runtime.RegisterAttribute")) {
-				if (cattr.ConstructorArguments.Count != 3) {
-					log.LogDebugMessage ($"[Register] attribute on method '{nActivate.FullName}' is expected to have 3 constructor arguments, found {cattr.ConstructorArguments.Count}");
-					continue;
-				}
-
-				jniMethodName = (string)cattr.ConstructorArguments[0].Value;
-				jniSignature = (string)cattr.ConstructorArguments[1].Value;
-
-				if (!String.IsNullOrEmpty (jniMethodName) && !String.IsNullOrEmpty (jniSignature)) {
-					break;
-				}
-			}
-
-			bool missingInfo = false;
-			if (String.IsNullOrEmpty (jniTypeName)) {
-				missingInfo = true;
-				log.LogDebugMessage ($"Failed to obtain Java type name from the [Register] attribute on type '{FullTypeName}'");
-			}
-
-			if (String.IsNullOrEmpty (jniMethodName)) {
-				missingInfo = true;
-				log.LogDebugMessage ($"Failed to obtain Java method name from the [Register] attribute on method '{nActivate.FullName}'");
-			}
-
-			if (String.IsNullOrEmpty (jniSignature)) {
-				missingInfo = true;
-				log.LogDebugMessage ($"Failed to obtain Java method signature from the [Register] attribute on method '{nActivate.FullName}'");
-			}
-
-			if (missingInfo) {
-				throw new InvalidOperationException ($"Missing information while constructing marshal method for the '{nActivate_mm.FullName}' method");
-			}
-
-			var entry = new MarshalMethodEntry (javaTypeManager, nActivate_mm, jniTypeName, jniMethodName, jniSignature);
-			marshalMethods.Add (".:!SpEcIaL:Java.Interop.TypeManager+JavaTypeManager::n_Activate_mm", new List<MarshalMethodEntry> { entry });
-
-			void ThrowMissingMethod (string name)
-			{
-				throw new InvalidOperationException ($"Internal error: unable to find the '{name}' method in the '{FullTypeName}' type");
-			}
-
-			bool IsMatchingMethod (MethodDefinition method, string name)
-			{
-				if (String.Compare (name, method.Name, StringComparison.Ordinal) != 0) {
-					return false;
-				}
-
-				if (!method.IsStatic) {
-					log.LogWarning ($"Method '{method.FullName}' is not static");
-					return false;
-				}
-
-				if (!method.IsPrivate) {
-					log.LogWarning ($"Method '{method.FullName}' is not private");
-					return false;
-				}
-
-				return true;
-			}
 		}
 
 		/// <summary>
-		/// Adds MarshalMethodEntry for each method that won't be returned by the JavaInterop type scanner, mostly
-		/// used for hand-written methods (e.g. Java.Interop.TypeManager+JavaTypeManager::n_Activate)
+		/// Classifies a method to determine whether it can be converted to a marshal method
+		/// or must be registered dynamically. This is the main entry point for method classification.
 		/// </summary>
-		public void AddSpecialCaseMethods ()
+		/// <param name="topType">The top-level type that owns this method (may differ from declaring type due to inheritance).</param>
+		/// <param name="registeredMethod">The method that was registered with the [Register] attribute.</param>
+		/// <param name="implementedMethod">The actual method implementation that contains the business logic.</param>
+		/// <param name="registerAttribute">The [Register] attribute applied to the method.</param>
+		/// <returns>
+		/// A <see cref="MarshalMethodEntry"/> if the method can be converted to a marshal method,
+		/// or a <see cref="DynamicallyRegisteredMarshalMethodEntry"/> if it must be registered dynamically.
+		/// </returns>
+		/// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
+		public MethodEntry ClassifyMethod (TypeDefinition topType, MethodDefinition registeredMethod, MethodDefinition implementedMethod, CustomAttribute? registerAttribute)
 		{
-			AddTypeManagerSpecialCaseMethods ();
+			topType = topType ?? throw new ArgumentNullException (nameof (topType));
+			registeredMethod = registeredMethod ?? throw new ArgumentNullException (nameof (registeredMethod));
+			implementedMethod = implementedMethod ?? throw new ArgumentNullException (nameof (implementedMethod));
+			registerAttribute = registerAttribute ?? throw new ArgumentNullException (nameof (registerAttribute));
+
+			// Try to classify as a standard marshal method first
+			if (IsDynamicallyRegistered (topType, registeredMethod, implementedMethod, registerAttribute, out var marshalMethodEntry)) {
+				// Method must be registered dynamically at runtime
+				return new DynamicallyRegisteredMarshalMethodEntry (topType, implementedMethod, registeredMethod, registerAttribute);
+			}
+
+			// Method can be converted to a marshal method
+			return marshalMethodEntry;
 		}
 
+		// Helper methods for getting assembly path information for debugging/logging
+		/// <summary>
+		/// Gets assembly path information for a field, used in diagnostic messages.
+		/// </summary>
+		/// <param name="field">The field to get assembly information for.</param>
+		/// <returns>A formatted string with assembly path and architecture information.</returns>
 		string GetAssemblyPathInfo (FieldDefinition? field)   => GetAssemblyPathInfo (field?.DeclaringType);
+		
+		/// <summary>
+		/// Gets assembly path information for a method, used in diagnostic messages.
+		/// </summary>
+		/// <param name="method">The method to get assembly information for.</param>
+		/// <returns>A formatted string with assembly path and architecture information.</returns>
 		string GetAssemblyPathInfo (MethodDefinition? method) => GetAssemblyPathInfo (method?.DeclaringType);
+		
+		/// <summary>
+		/// Gets assembly path information for a type, used in diagnostic messages.
+		/// </summary>
+		/// <param name="type">The type to get assembly information for.</param>
+		/// <returns>A formatted string with assembly path and architecture information.</returns>
 		string GetAssemblyPathInfo (TypeDefinition? type)     => GetAssemblyPathInfo (type?.Module?.Assembly);
 
+		/// <summary>
+		/// Gets assembly path information for an assembly definition, used in diagnostic messages.
+		/// </summary>
+		/// <param name="asmdef">The assembly definition to get path information for.</param>
+		/// <returns>A formatted string with assembly path and architecture information.</returns>
 		string GetAssemblyPathInfo (AssemblyDefinition? asmdef)
 		{
 			if (asmdef == null) {
@@ -443,26 +677,67 @@ namespace Xamarin.Android.Tasks
 			return $"[Arch: {targetArch}; Assembly: {path}]";
 		}
 
-		bool IsDynamicallyRegistered (TypeDefinition topType, MethodDefinition registeredMethod, MethodDefinition implementedMethod, CustomAttribute registerAttribute)
+		/// <summary>
+		/// Determines whether a method must be registered dynamically or can be converted to a marshal method.
+		/// This method analyzes the [Register] attribute and validates the method's compatibility with
+		/// the marshal method system.
+		/// </summary>
+		/// <param name="topType">The top-level type that owns this method.</param>
+		/// <param name="registeredMethod">The method that was registered with the [Register] attribute.</param>
+		/// <param name="implementedMethod">The actual method implementation.</param>
+		/// <param name="registerAttribute">The [Register] attribute applied to the method.</param>
+		/// <param name="marshalMethodEntry">
+		/// When this method returns false, contains the marshal method entry for the convertible method.
+		/// When this method returns true, this parameter is null.
+		/// </param>
+		/// <returns>
+		/// true if the method must be registered dynamically; false if it can be converted to a marshal method.
+		/// </returns>
+		bool IsDynamicallyRegistered (TypeDefinition topType, MethodDefinition registeredMethod, MethodDefinition implementedMethod, CustomAttribute registerAttribute, [NotNullWhen (false)] out MarshalMethodEntry? marshalMethodEntry)
 		{
+			marshalMethodEntry = null;
+			
+			// The [Register] attribute must have exactly 3 arguments: JNI name, JNI signature, and connector
 			if (registerAttribute.ConstructorArguments.Count != 3) {
 				log.LogWarning ($"Method '{registeredMethod.FullName}' will be registered dynamically, not enough arguments to the [Register] attribute to generate marshal method.");
 				return true;
 			}
 
+			// Parse the connector information from the third argument
 			var connector = new ConnectorInfo ((string)registerAttribute.ConstructorArguments[2].Value);
 
-			if (IsStandardHandler (topType, connector, registeredMethod, implementedMethod, jniName: (string)registerAttribute.ConstructorArguments[0].Value, jniSignature: (string)registerAttribute.ConstructorArguments[1].Value)) {
-				return false;
+			// Try to classify as a standard handler (most common case)
+			if (IsStandardHandler (topType, connector, registeredMethod, implementedMethod, jniName: (string)registerAttribute.ConstructorArguments[0].Value, jniSignature: (string)registerAttribute.ConstructorArguments[1].Value, out marshalMethodEntry)) {
+				return false; // Method can be converted to marshal method
 			}
 
+			// Method cannot be converted, must be registered dynamically
 			log.LogWarning ($"Method '{registeredMethod.FullName}' will be registered dynamically {GetAssemblyPathInfo (registeredMethod)}");
-			rejectedMethodCount++;
 			return true;
 		}
 
-		bool IsStandardHandler (TypeDefinition topType, ConnectorInfo connector, MethodDefinition registeredMethod, MethodDefinition implementedMethod, string jniName, string jniSignature)
+		/// <summary>
+		/// Determines whether a method follows the "standard handler" pattern and can be converted to a marshal method.
+		/// The standard handler pattern involves a native callback method, a connector method that returns a delegate,
+		/// and optionally a delegate backing field. This method performs extensive validation to ensure all
+		/// components exist and are compatible.
+		/// </summary>
+		/// <param name="topType">The top-level type that owns this method.</param>
+		/// <param name="connector">Information about the connector method parsed from the [Register] attribute.</param>
+		/// <param name="registeredMethod">The method that was registered with the [Register] attribute.</param>
+		/// <param name="implementedMethod">The actual method implementation.</param>
+		/// <param name="jniName">The JNI method name from the [Register] attribute.</param>
+		/// <param name="jniSignature">The JNI method signature from the [Register] attribute.</param>
+		/// <param name="marshalMethodEntry">
+		/// When this method returns true, contains the marshal method entry for the convertible method.
+		/// When this method returns false, this parameter is null.
+		/// </param>
+		/// <returns>true if the method follows the standard handler pattern; false otherwise.</returns>
+		bool IsStandardHandler (TypeDefinition topType, ConnectorInfo connector, MethodDefinition registeredMethod, MethodDefinition implementedMethod, string jniName, string jniSignature, [NotNullWhen (true)] out MarshalMethodEntry? marshalMethodEntry)
 		{
+			marshalMethodEntry = null;
+
+			// Standard handler connector names must follow the pattern: "Get{Name}Handler"
 			const string HandlerNameStart = "Get";
 			const string HandlerNameEnd = "Handler";
 
@@ -474,48 +749,68 @@ namespace Xamarin.Android.Tasks
 				return false;
 			}
 
+			// Extract the core method name from the connector name
+			// e.g., "GetMyMethodHandler" -> "MyMethod"
 			// TODO: if we can't find native callback and/or delegate field using `callbackNameCore`, fall back to `jniName` (which is the first argument to the `[Register]`
 			// attribute). Or simply use `jniName` at once - needs testing.
-
 			string callbackNameCore = connectorName.Substring (HandlerNameStart.Length, connectorName.Length - HandlerNameStart.Length - HandlerNameEnd.Length);
-			string nativeCallbackName = $"n_{callbackNameCore}";
-			string delegateFieldName = $"cb_{Char.ToLowerInvariant (callbackNameCore[0])}{callbackNameCore.Substring (1)}";
+			
+			// Generate expected method and field names based on the core name
+			string nativeCallbackName = $"n_{callbackNameCore}";                           // e.g., "n_MyMethod"
+			string nativeConvertedCallbackName = $"n_{callbackNameCore}_mm_wrapper";       // e.g., "n_MyMethod_mm_wrapper"
+			string delegateFieldName = $"cb_{Char.ToLowerInvariant (callbackNameCore[0])}{callbackNameCore.Substring (1)}"; // e.g., "cb_myMethod"
 
+			// Find the type that contains the connector method
 			TypeDefinition connectorDeclaringType = connector.AssemblyName == null ? registeredMethod.DeclaringType : FindType (resolver.Resolve (connector.AssemblyName), connector.TypeName);
 
-			MethodDefinition connectorMethod = FindMethod (connectorDeclaringType, connectorName);
-			if (connectorMethod == null) {
-				log.LogWarning ($"Connector method '{connectorName}' not found in type '{connectorDeclaringType.FullName}' {GetAssemblyPathInfo (connectorDeclaringType)}");
-				return false;
-			}
-
-			if (String.Compare ("System.Delegate", connectorMethod.ReturnType.FullName, StringComparison.Ordinal) != 0) {
-				log.LogWarning ($"Connector '{connectorName}' in type '{connectorDeclaringType.FullName}' has invalid return type, expected 'System.Delegate', found '{connectorMethod.ReturnType.FullName}' {GetAssemblyPathInfo (connectorDeclaringType)}");
-				return false;
-			}
-
+			// Create a signature matcher to validate native callback methods
 			var ncbs = new NativeCallbackSignature (registeredMethod, log, tdCache);
+			
+			// Find the native callback method with matching signature
 			MethodDefinition nativeCallbackMethod = FindMethod (connectorDeclaringType, nativeCallbackName, ncbs);
 			if (nativeCallbackMethod == null) {
 				log.LogWarning ($"Unable to find native callback method '{nativeCallbackName}' in type '{connectorDeclaringType.FullName}', matching the '{registeredMethod.FullName}' signature (jniName: '{jniName}') {GetAssemblyPathInfo (connectorDeclaringType)}");
 				return false;
 			}
 
+			// Validate that the native callback can be used with [UnmanagedCallersOnly]
 			if (!EnsureIsValidUnmanagedCallersOnlyTarget (nativeCallbackMethod, out bool needsBlittableWorkaround)) {
 				return false;
 			}
 
+			// Look for a converted callback method (indicates the method has already been processed)
+			MethodDefinition? nativeConvertedCallbackMethod = FindMethod (connectorDeclaringType, nativeConvertedCallbackName, ncbs);
+
+			// Find the connector method that returns the delegate
+			MethodDefinition connectorMethod = FindMethod (connectorDeclaringType, connectorName);
+
+			// If the marshal method has already been converted, the connector method will have been removed
+			if (connectorMethod == null && nativeConvertedCallbackMethod == null) {
+				log.LogWarning ($"Connector method '{connectorName}' not found in type '{connectorDeclaringType.FullName}' {GetAssemblyPathInfo (connectorDeclaringType)}");
+				return false;
+			}
+
+			// Validate connector method return type
+			if (connectorMethod != null && !MonoAndroidHelper.StringEquals ("System.Delegate", connectorMethod.ReturnType.FullName)) {
+				log.LogWarning ($"Connector '{connectorName}' in type '{connectorDeclaringType.FullName}' has invalid return type, expected 'System.Delegate', found '{connectorMethod.ReturnType.FullName}' {GetAssemblyPathInfo (connectorDeclaringType)}");
+				return false;
+			}
+
+			// Find the delegate backing field (optional, but validates if present)
 			// In the standard handler "pattern", the native callback backing field is private, static and thus in the same type
 			// as the native callback.
 			FieldDefinition delegateField = FindField (nativeCallbackMethod.DeclaringType, delegateFieldName);
 			if (delegateField != null) {
-				if (String.Compare ("System.Delegate", delegateField.FieldType.FullName, StringComparison.Ordinal) != 0) {
+				if (!MonoAndroidHelper.StringEquals ("System.Delegate", delegateField.FieldType.FullName)) {
 					log.LogWarning ($"delegate field '{delegateFieldName}' in type '{nativeCallbackMethod.DeclaringType.FullName}' has invalid type, expected 'System.Delegate', found '{delegateField.FieldType.FullName}' {GetAssemblyPathInfo (delegateField)}");
 					return false;
 				}
 			}
 
 			// TODO: check where DeclaringType is lost between here and rewriter, for:
+			//
+			// The following debug output shows a complex inheritance scenario where the declaring type
+			// information gets lost between classification and rewriting. This needs investigation.
 			//
 			// Classifying:
 			//         method: Java.Lang.Object Microsoft.Maui.Controls.Platform.Compatibility.ShellSearchViewAdapter::GetItem(System.Int32)
@@ -545,85 +840,114 @@ namespace Xamarin.Android.Tasks
 			// 	method.CallbackField?.DeclaringType == 'null'
 			// 	method.CallbackField?.DeclaringType.Fields == 'null'
 
-			StoreMethod (
-				new MarshalMethodEntry (
-					topType,
-					nativeCallbackMethod,
-					connectorMethod,
-					registeredMethod,
-					implementedMethod,
-					delegateField,
-					JavaNativeTypeManager.ToJniName (topType, tdCache),
-					jniName,
-					jniSignature,
-					needsBlittableWorkaround
-				)
-			);
-
-			StoreAssembly (connectorMethod.Module.Assembly);
-			StoreAssembly (nativeCallbackMethod.Module.Assembly);
-			if (delegateField != null) {
-				StoreAssembly (delegateField.Module.Assembly);
+			// Create the appropriate marshal method entry based on whether the method has been converted
+			if (nativeConvertedCallbackMethod is null) {
+				// Standard marshal method entry
+				marshalMethodEntry =
+					new MarshalMethodEntry (
+						topType,
+						nativeCallbackMethod,
+						connectorMethod,
+						registeredMethod,
+						implementedMethod,
+						delegateField,
+						JavaNativeTypeManager.ToJniName (topType, tdCache),
+						jniName,
+						jniSignature,
+						needsBlittableWorkaround
+					);
+			} else {
+				// Converted marshal method entry (method has already been processed)
+				marshalMethodEntry =
+					new ConvertedMarshalMethodEntry (
+						topType,
+						nativeCallbackMethod,
+						connectorMethod,
+						registeredMethod,
+						implementedMethod,
+						delegateField,
+						JavaNativeTypeManager.ToJniName (topType, tdCache),
+						jniName,
+						jniSignature,
+						needsBlittableWorkaround,
+						nativeConvertedCallbackMethod
+					);
 			}
 
 			return true;
 		}
 
+		/// <summary>
+		/// Validates that a method is suitable for use with the [UnmanagedCallersOnly] attribute.
+		/// This attribute has strict requirements for method signatures and parameters that must be met
+		/// for marshal methods to work correctly.
+		/// </summary>
+		/// <param name="method">The method to validate.</param>
+		/// <param name="needsBlittableWorkaround">
+		/// When this method returns true, indicates whether the method requires a blittable workaround
+		/// due to non-blittable parameter or return types.
+		/// </param>
+		/// <returns>
+		/// true if the method can be used with [UnmanagedCallersOnly] (possibly with workarounds); 
+		/// false if it has incompatible characteristics.
+		/// </returns>
 		bool EnsureIsValidUnmanagedCallersOnlyTarget (MethodDefinition method, out bool needsBlittableWorkaround)
 		{
 			needsBlittableWorkaround = false;
 
 			// Requirements: https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.unmanagedcallersonlyattribute?view=net-6.0#remarks
+			
+			// Method must be static
 			if (!method.IsStatic) {
 				return LogReasonWhyAndReturnFailure ($"is not static");
 			}
 
+			// Method cannot have generic parameters
 			if (method.HasGenericParameters) {
 				return LogReasonWhyAndReturnFailure ($"has generic parameters");
 			}
 
+			// Check return type for blittability
 			TypeReference type;
-			bool needsWrapper = false;
-			if (String.Compare ("System.Void", method.ReturnType.FullName, StringComparison.Ordinal) != 0) {
+			if (!MonoAndroidHelper.StringEquals ("System.Void", method.ReturnType.FullName)) {
 				type = GetRealType (method.ReturnType);
 				if (!IsAcceptable (type)) {
 					needsBlittableWorkaround = true;
 					WarnWhy ($"has a non-blittable return type '{type.FullName}'");
-					needsWrapper = true;
 				}
 			}
 
+			// Declaring type cannot have generic parameters
 			if (method.DeclaringType.HasGenericParameters) {
 				return LogReasonWhyAndReturnFailure ($"is declared in a type with generic parameters");
 			}
 
+			// If method has no parameters, it's valid
 			if (!method.HasParameters) {
-				return UpdateWrappedCountAndReturn (true);
+				return true;
 			}
 
+			// Check each parameter for blittability
 			foreach (ParameterDefinition pdef in method.Parameters) {
 				type = GetRealType (pdef.ParameterType);
 
 				if (!IsAcceptable (type)) {
 					needsBlittableWorkaround = true;
 					WarnWhy ($"has a parameter ({pdef.Name}) of non-blittable type '{type.FullName}'");
-					needsWrapper = true;
 				}
 			}
 
-			return UpdateWrappedCountAndReturn (true);
+			return true;
 
-			bool UpdateWrappedCountAndReturn (bool retval)
-			{
-				if (needsWrapper) {
-					wrappedMethodCount++;
-				}
-
-				return retval;
-			}
-
+			/// <summary>
+			/// Determines if a type is acceptable for [UnmanagedCallersOnly] methods.
+			/// This includes blittable types and single-dimensional arrays of blittable types.
+			/// </summary>
+			/// <param name="type">The type to check.</param>
+			/// <returns>true if the type is acceptable; otherwise, false.</returns>
 			bool IsAcceptable (TypeReference type)
 			{
+				// Multi-dimensional arrays are not allowed
 				if (type.IsArray) {
 					var array = new ArrayType (type);
 					if (array.Rank > 1) {
@@ -634,6 +958,11 @@ namespace Xamarin.Android.Tasks
 				return type.IsBlittable ();
 			}
 
+			/// <summary>
+			/// Gets the real type from a type reference, handling array types by returning their element type.
+			/// </summary>
+			/// <param name="type">The type reference to process.</param>
+			/// <returns>The element type for arrays, or the original type for non-arrays.</returns>
 			TypeReference GetRealType (TypeReference type)
 			{
 				if (type.IsArray) {
@@ -643,12 +972,21 @@ namespace Xamarin.Android.Tasks
 				return type;
 			}
 
+			/// <summary>
+			/// Logs a reason why a method cannot be used with [UnmanagedCallersOnly] and returns false.
+			/// </summary>
+			/// <param name="why">The reason why the method is not compatible.</param>
+			/// <returns>Always returns false.</returns>
 			bool LogReasonWhyAndReturnFailure (string why)
 			{
 				log.LogWarning ($"Method '{method.FullName}' {why}. It cannot be used with the `[UnmanagedCallersOnly]` attribute");
 				return false;
 			}
 
+			/// <summary>
+			/// Logs a warning about why a method needs a blittable workaround.
+			/// </summary>
+			/// <param name="why">The reason why a workaround is needed.</param>
 			void WarnWhy (string why)
 			{
 				// TODO: change to LogWarning once the generator can output code which requires no non-blittable wrappers
@@ -656,8 +994,16 @@ namespace Xamarin.Android.Tasks
 			}
 		}
 
+		/// <summary>
+		/// Finds a type definition by name within an assembly. This method searches through
+		/// all modules in the assembly and handles nested types recursively.
+		/// </summary>
+		/// <param name="asm">The assembly to search in.</param>
+		/// <param name="typeName">The full name of the type to find.</param>
+		/// <returns>The type definition if found; otherwise, null.</returns>
 		TypeDefinition FindType (AssemblyDefinition asm, string typeName)
 		{
+			// Search through all modules in the assembly
 			foreach (ModuleDefinition md in asm.Modules) {
 				foreach (TypeDefinition td in md.Types) {
 					TypeDefinition match = GetMatchingType (td);
@@ -669,12 +1015,19 @@ namespace Xamarin.Android.Tasks
 
 			return null;
 
+			/// <summary>
+			/// Recursively searches for a type with the specified name, including nested types.
+			/// </summary>
+			/// <param name="def">The type definition to check.</param>
+			/// <returns>The matching type definition if found; otherwise, null.</returns>
 			TypeDefinition GetMatchingType (TypeDefinition def)
 			{
-				if (String.Compare (def.FullName, typeName, StringComparison.Ordinal) == 0) {
+				// Check if this type matches
+				if (MonoAndroidHelper.StringEquals (def.FullName, typeName)) {
 					return def;
 				}
 
+				// Search nested types if they exist
 				if (!def.HasNestedTypes) {
 					return null;
 				}
@@ -691,22 +1044,35 @@ namespace Xamarin.Android.Tasks
 			}
 		}
 
+		/// <summary>
+		/// Finds a method definition by name within a type, optionally using a signature matcher.
+		/// This method searches the type hierarchy if the method is not found in the specified type.
+		/// </summary>
+		/// <param name="type">The type to search in.</param>
+		/// <param name="methodName">The name of the method to find.</param>
+		/// <param name="signatureMatcher">Optional signature matcher for additional validation.</param>
+		/// <returns>The method definition if found; otherwise, null.</returns>
 		MethodDefinition FindMethod (TypeDefinition type, string methodName, IMethodSignatureMatcher signatureMatcher = null)
 		{
+			// Search through all methods in the type
 			foreach (MethodDefinition method in type.Methods) {
+				// Skip unmanaged methods and constructors
 				if (!method.IsManaged || method.IsConstructor) {
 					continue;
 				}
 
-				if (String.Compare (methodName, method.Name, StringComparison.Ordinal) != 0) {
+				// Check method name match
+				if (!MonoAndroidHelper.StringEquals (methodName, method.Name)) {
 					continue;
 				}
 
+				// Validate signature if matcher is provided
 				if (signatureMatcher == null || signatureMatcher.Matches (method)) {
 					return method;
 				}
 			}
 
+			// Search base type if method not found in current type
 			if (type.BaseType == null) {
 				return null;
 			}
@@ -714,44 +1080,28 @@ namespace Xamarin.Android.Tasks
 			return FindMethod (tdCache.Resolve (type.BaseType), methodName, signatureMatcher);
 		}
 
+		/// <summary>
+		/// Finds a field definition by name within a type, optionally searching inherited fields.
+		/// </summary>
+		/// <param name="type">The type to search in.</param>
+		/// <param name="fieldName">The name of the field to find.</param>
+		/// <param name="lookForInherited">Whether to search base types if the field is not found.</param>
+		/// <returns>The field definition if found; otherwise, null.</returns>
 		FieldDefinition FindField (TypeDefinition type, string fieldName, bool lookForInherited = false)
 		{
+			// Search through all fields in the type
 			foreach (FieldDefinition field in type.Fields) {
-				if (String.Compare (field.Name, fieldName, StringComparison.Ordinal) == 0) {
+				if (MonoAndroidHelper.StringEquals (field.Name, fieldName)) {
 					return field;
 				}
 			}
 
+			// Search base type if requested and available
 			if (!lookForInherited || type.BaseType == null) {
 				return null;
 			}
 
 			return FindField (tdCache.Resolve (type.BaseType), fieldName, lookForInherited);
-		}
-
-		void StoreMethod (MarshalMethodEntry entry)
-		{
-			string key = entry.GetStoreMethodKey (tdCache);
-
-			// Several classes can override the same method, we need to generate the marshal method only once, at the same time
-			// keeping track of overloads
-			if (!marshalMethods.TryGetValue (key, out IList<MarshalMethodEntry> list) || list == null) {
-				list = new List<MarshalMethodEntry> ();
-				marshalMethods.Add (key, list);
-			}
-
-			string registeredName = $"{entry.DeclaringType.FullName}::{entry.ImplementedMethod.Name}";
-			if (list.Count == 0 || !list.Any (me => String.Compare (registeredName, me.ImplementedMethod.FullName, StringComparison.Ordinal) == 0)) {
-				list.Add (entry);
-			}
-		}
-
-		void StoreAssembly (AssemblyDefinition asm)
-		{
-			if (assemblies.Contains (asm)) {
-				return;
-			}
-			assemblies.Add (asm);
 		}
 	}
 }

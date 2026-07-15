@@ -1,23 +1,22 @@
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
 
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using Microsoft.Build.Framework;
-using Mono.Cecil;
-using Microsoft.Build.Utilities;
+#nullable enable
 
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using Java.Interop.Tools.Cecil;
 using Java.Interop.Tools.Diagnostics;
 using Java.Interop.Tools.JavaCallableWrappers;
-using Java.Interop.Tools.TypeNameMappings;
-
-using Xamarin.Android.Tools;
-using Microsoft.Android.Build.Tasks;
 using Java.Interop.Tools.JavaCallableWrappers.Adapters;
-using System.Threading.Tasks;
-using System.Collections.Concurrent;
+using Java.Interop.Tools.TypeNameMappings;
+using Microsoft.Android.Build.Tasks;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+using Mono.Cecil;
+using Xamarin.Android.Tools;
 
 namespace Xamarin.Android.Tasks
 {
@@ -26,78 +25,52 @@ namespace Xamarin.Android.Tasks
 	public class GenerateJavaStubs : AndroidTask
 	{
 		public const string NativeCodeGenStateRegisterTaskKey = ".:!MarshalMethods!:.";
+		public const string NativeCodeGenStateObjectRegisterTaskKey = ".:!MarshalMethodsObject!:.";
 
 		public override string TaskPrefix => "GJS";
 
 		[Required]
-		public ITaskItem[] ResolvedAssemblies { get; set; }
+		public ITaskItem[] ResolvedAssemblies { get; set; } = [];
 
 		[Required]
-		public ITaskItem[] ResolvedUserAssemblies { get; set; }
+		public ITaskItem[] ResolvedUserAssemblies { get; set; } = [];
 
 		[Required]
-		public string AcwMapFile { get; set; }
+		public ITaskItem [] FrameworkDirectories { get; set; } = [];
 
 		[Required]
-		public ITaskItem [] FrameworkDirectories { get; set; }
+		public string [] SupportedAbis { get; set; } = [];
 
-		[Required]
-		public string [] SupportedAbis { get; set; }
-
-		[Required]
-		public string TypemapOutputDirectory { get; set; }
-
-		[Required]
-		public bool GenerateNativeAssembly { get; set; }
-
-		public string IntermediateOutputDirectory { get; set; }
-		public bool LinkingEnabled { get; set; }
-		public bool HaveMultipleRIDs { get; set; }
+		public string? IntermediateOutputDirectory { get; set; }
 		public bool EnableMarshalMethods { get; set; }
-		public string ManifestTemplate { get; set; }
-		public string[] MergedManifestDocuments { get; set; }
 
 		public bool Debug { get; set; }
-		public bool MultiDex { get; set; }
-		public string ApplicationLabel { get; set; }
-		public string PackageName { get; set; }
-		public string VersionName { get; set; }
-		public string VersionCode { get; set; }
-		public string [] ManifestPlaceholders { get; set; }
 
-		public string AndroidSdkDir { get; set; }
-
-		public string AndroidSdkPlatform { get; set; }
-		public string OutputDirectory { get; set; }
-		public string MergedAndroidManifestOutput { get; set; }
-
-		public bool EmbedAssemblies { get; set; }
-		public bool NeedsInternet   { get; set; }
+		[Required]
+		public string OutputDirectory { get; set; } = "";
 
 		public bool ErrorOnCustomJavaObject { get; set; }
 
-		public string BundledWearApplicationName { get; set; }
+		public string? PackageNamingPolicy { get; set; }
 
-		public string PackageNamingPolicy { get; set; }
+		[Required]
+		public string ApplicationJavaClass { get; set; } = "";
 
-		public string ApplicationJavaClass { get; set; }
+		public string CodeGenerationTarget { get; set; } = "";
 
-		public bool SkipJniAddNativeMethodRegistrationAttributeScan { get; set; }
+		public bool EnableNativeRuntimeLinking { get; set; }
 
-		public string CheckedBuild { get; set; }
+		JavaPeerStyle codeGenerationTarget;
 
-		public string SupportedOSPlatformVersion { get; set; }
-
-		public ITaskItem[] Environments { get; set; }
-
-		[Output]
-		public ITaskItem[] GeneratedBinaryTypeMaps { get; set; }
+		//[Output]
+		//public ITaskItem [] GeneratedJavaFilesOutput { get; set; }
 
 		internal const string AndroidSkipJavaStubGeneration = "AndroidSkipJavaStubGeneration";
 
 		public override bool RunTask ()
 		{
 			try {
+				codeGenerationTarget = MonoAndroidHelper.ParseCodeGenerationTarget (CodeGenerationTarget);
 				bool useMarshalMethods = !Debug && EnableMarshalMethods;
 				Run (useMarshalMethods);
 			} catch (XamarinAndroidException e) {
@@ -106,40 +79,7 @@ namespace Xamarin.Android.Tasks
 					Log.LogMessage (e.ToString ());
 			}
 
-			if (Log.HasLoggedErrors) {
-				// Ensure that on a rebuild, we don't *skip* the `_GenerateJavaStubs` target,
-				// by ensuring that the target outputs have been deleted.
-				Files.DeleteFile (MergedAndroidManifestOutput, Log);
-				Files.DeleteFile (AcwMapFile, Log);
-			}
-
 			return !Log.HasLoggedErrors;
-		}
-
-		XAAssemblyResolver MakeResolver (bool useMarshalMethods, AndroidTargetArch targetArch, Dictionary<string, ITaskItem> assemblies)
-		{
-			var readerParams = new ReaderParameters ();
-			if (useMarshalMethods) {
-				readerParams.ReadWrite = true;
-				readerParams.InMemory = true;
-			}
-
-			var res = new XAAssemblyResolver (targetArch, Log, loadDebugSymbols: true, loadReaderParameters: readerParams);
-			var uniqueDirs = new HashSet<string> (StringComparer.OrdinalIgnoreCase);
-
-			Log.LogDebugMessage ($"Adding search directories to new architecture {targetArch} resolver:");
-			foreach (var kvp in assemblies) {
-				string assemblyDir = Path.GetDirectoryName (kvp.Value.ItemSpec);
-				if (uniqueDirs.Contains (assemblyDir)) {
-					continue;
-				}
-
-				uniqueDirs.Add (assemblyDir);
-				res.SearchDirectories.Add (assemblyDir);
-				Log.LogDebugMessage ($"  {assemblyDir}");
-			}
-
-			return res;
 		}
 
 		void Run (bool useMarshalMethods)
@@ -186,213 +126,92 @@ namespace Xamarin.Android.Tasks
 			// Now that "never" never happened, we can proceed knowing that at least the assembly sets are the same for each architecture
 			var nativeCodeGenStates = new ConcurrentDictionary<AndroidTargetArch, NativeCodeGenState> ();
 			NativeCodeGenState? templateCodeGenState = null;
+			PinvokeScanner? pinvokeScanner = EnableNativeRuntimeLinking ? new PinvokeScanner (Log) : null;
 
 			var firstArch = allAssembliesPerArch.First ().Key;
-			var generateSucceeded = true;
 
-			// Generate Java sources in parallel
+			// Process each architecture in parallel
 			Parallel.ForEach (allAssembliesPerArch, (kvp) => {
 				AndroidTargetArch arch = kvp.Key;
 				Dictionary<string, ITaskItem> archAssemblies = kvp.Value;
 
-				// We only need to generate Java code for one ABI, as the Java code is ABI-agnostic
-				// Pick the "first" one as the one to generate Java code for
-				var generateJavaCode = arch == firstArch;
-
-				(bool success, NativeCodeGenState? state) = GenerateJavaSourcesAndMaybeClassifyMarshalMethods (arch, archAssemblies, MaybeGetArchAssemblies (userAssembliesPerArch, arch), useMarshalMethods, generateJavaCode);
-
-				if (!success) {
-					generateSucceeded = false;
-				}
+				NativeCodeGenState? state = ScanTypesAndMaybeClassifyMarshalMethods (arch, archAssemblies, MaybeGetArchAssemblies (userAssembliesPerArch, arch), useMarshalMethods);
 
 				// If this is the first architecture, we need to store the state for later use
-				if (generateJavaCode) {
+				if (arch == firstArch) {
 					templateCodeGenState = state;
 				}
 
-				nativeCodeGenStates.TryAdd (arch, state);
-			});
+				if (state != null) {
+					nativeCodeGenStates.TryAdd (arch, state);
 
-			// If we hit an error generating the Java code, we should bail out now
-			if (!generateSucceeded)
-				return;
+					if (pinvokeScanner != null && state != null) {
+						(bool success, List<PinvokeScanner.PinvokeEntryInfo>? pinfos) = ScanForUsedPinvokes (pinvokeScanner, arch, state.Resolver);
+						if (!success) {
+							return;
+						}
+						state.PinvokeInfos = pinfos;
+						Log.LogDebugMessage ($"Number of unique p/invokes for architecture '{arch}': {pinfos?.Count}");
+					}
+				}
+			});
 
 			if (templateCodeGenState == null) {
 				throw new InvalidOperationException ($"Internal error: no native code generator state defined");
 			}
 			JCWGenerator.EnsureAllArchitecturesAreIdentical (Log, nativeCodeGenStates);
 
-			if (useMarshalMethods) {
-				// We need to parse the environment files supplied by the user to see if they want to use broken exception transitions. This information is needed
-				// in order to properly generate wrapper methods in the marshal methods assembly rewriter.
-				// We don't care about those generated by us, since they won't contain the `XA_BROKEN_EXCEPTION_TRANSITIONS` variable we look for.
-				var environmentParser = new EnvironmentFilesParser ();
-				bool brokenExceptionTransitionsEnabled = environmentParser.AreBrokenExceptionTransitionsEnabled (Environments);
-
-				foreach (var kvp in nativeCodeGenStates) {
-					NativeCodeGenState state = kvp.Value;
-					RewriteMarshalMethods (state, brokenExceptionTransitionsEnabled);
-					state.Classifier.AddSpecialCaseMethods ();
-
-					Log.LogDebugMessage ($"[{state.TargetArch}] Number of generated marshal methods: {state.Classifier.MarshalMethods.Count}");
-					if (state.Classifier.RejectedMethodCount > 0) {
-						Log.LogWarning ($"[{state.TargetArch}] Number of methods in the project that will be registered dynamically: {state.Classifier.RejectedMethodCount}");
-					}
-
-					if (state.Classifier.WrappedMethodCount > 0) {
-						// TODO: change to LogWarning once the generator can output code which requires no non-blittable wrappers
-						Log.LogDebugMessage ($"[{state.TargetArch}] Number of methods in the project that need marshal method wrappers: {state.Classifier.WrappedMethodCount}");
-					}
-				}
-			}
-
-			bool typemapsAreAbiAgnostic = Debug && !GenerateNativeAssembly;
-			bool first = true;
-			foreach (var kvp in nativeCodeGenStates) {
-				if (!first && typemapsAreAbiAgnostic) {
-					Log.LogDebugMessage ("Typemaps: it's a debug build and type maps are ABI-agnostic, not processing more ABIs");
-					break;
-				}
-
-				NativeCodeGenState state = kvp.Value;
-				first = false;
-				WriteTypeMappings (state);
-			}
-
-			// Set for use by <GeneratePackageManagerJava/> task later
-			NativeCodeGenState.TemplateJniAddNativeMethodRegistrationAttributePresent = templateCodeGenState.JniAddNativeMethodRegistrationAttributePresent;
-
-			var acwMapGen = new ACWMapGenerator (Log);
-			if (!acwMapGen.Generate (templateCodeGenState, AcwMapFile)) {
-				Log.LogDebugMessage ("ACW map generation failed");
-			}
-
-			IList<string> additionalProviders = MergeManifest (templateCodeGenState, MaybeGetArchAssemblies (userAssembliesPerArch, templateCodeGenState.TargetArch));
-			GenerateAdditionalProviderSources (templateCodeGenState, additionalProviders);
-
-			if (useMarshalMethods) {
-				// Save NativeCodeGenState for <GeneratePackageManagerJava/> task later
-				Log.LogDebugMessage ($"Saving {nameof (NativeCodeGenState)} to {nameof (NativeCodeGenStateRegisterTaskKey)}");
-				BuildEngine4.RegisterTaskObjectAssemblyLocal (ProjectSpecificTaskObjectKey (NativeCodeGenStateRegisterTaskKey), nativeCodeGenStates, RegisteredTaskObjectLifetime.Build);
-			} else {
-				// Otherwise, dispose all XAAssemblyResolvers
-				Log.LogDebugMessage ($"Disposing all {nameof (NativeCodeGenState)}.{nameof (NativeCodeGenState.Resolver)}");
-				foreach (var state in nativeCodeGenStates.Values) {
-					state.Resolver.Dispose ();
-				}
-			}
-
-			Dictionary<string, ITaskItem> MaybeGetArchAssemblies (Dictionary<AndroidTargetArch, Dictionary<string, ITaskItem>> dict, AndroidTargetArch arch)
-			{
-				if (!dict.TryGetValue (arch, out Dictionary<string, ITaskItem> archDict)) {
-					return new Dictionary<string, ITaskItem> (StringComparer.OrdinalIgnoreCase);
-				}
-
-				return archDict;
-			}
+			// Save NativeCodeGenState for later tasks
+			Log.LogDebugMessage ($"Saving {nameof (NativeCodeGenState)} to {nameof (NativeCodeGenStateRegisterTaskKey)}");
+			BuildEngine4.RegisterTaskObjectAssemblyLocal (MonoAndroidHelper.GetProjectBuildSpecificTaskObjectKey (NativeCodeGenStateRegisterTaskKey, WorkingDirectory, IntermediateOutputDirectory), nativeCodeGenStates, RegisteredTaskObjectLifetime.Build);
 		}
 
-		void GenerateAdditionalProviderSources (NativeCodeGenState codeGenState, IList<string> additionalProviders)
+		(bool success, List<PinvokeScanner.PinvokeEntryInfo>? pinfos) ScanForUsedPinvokes (PinvokeScanner scanner, AndroidTargetArch arch, XAAssemblyResolver resolver)
 		{
-			// Create additional runtime provider java sources.
-			string providerTemplateFile = "MonoRuntimeProvider.Bundled.java";
-			string providerTemplate = GetResource (providerTemplateFile);
-
-			foreach (var provider in additionalProviders) {
-				var contents = providerTemplate.Replace ("MonoRuntimeProvider", provider);
-				var real_provider = Path.Combine (OutputDirectory, "src", "mono", provider + ".java");
-				Files.CopyIfStringChanged (contents, real_provider);
+			if (!EnableNativeRuntimeLinking) {
+				return (true, null);
 			}
 
-			// Create additional application java sources.
-			StringWriter regCallsWriter = new StringWriter ();
-			regCallsWriter.WriteLine ("\t\t// Application and Instrumentation ACWs must be registered first.");
-			foreach (TypeDefinition type in codeGenState.JavaTypesForJCW) {
-				if (JavaNativeTypeManager.IsApplication (type, codeGenState.TypeCache) || JavaNativeTypeManager.IsInstrumentation (type, codeGenState.TypeCache)) {
-					if (codeGenState.Classifier != null && !codeGenState.Classifier.FoundDynamicallyRegisteredMethods (type)) {
-						continue;
-					}
+			var frameworkAssemblies = new List<ITaskItem> ();
 
-					string javaKey = JavaNativeTypeManager.ToJniName (type, codeGenState.TypeCache).Replace ('/', '.');
-					regCallsWriter.WriteLine (
-						"\t\tmono.android.Runtime.register (\"{0}\", {1}.class, {1}.__md_methods);",
-						type.GetAssemblyQualifiedName (codeGenState.TypeCache),
-						javaKey
-					);
+			foreach (ITaskItem asm in ResolvedAssemblies) {
+				string? metadata = asm.GetMetadata ("FrameworkAssembly");
+				if (String.IsNullOrEmpty (metadata)) {
+					continue;
 				}
-			}
-			regCallsWriter.Close ();
 
-			var real_app_dir = Path.Combine (OutputDirectory, "src", "mono", "android", "app");
-			string applicationTemplateFile = "ApplicationRegistration.java";
-			SaveResource (
-				applicationTemplateFile,
-				applicationTemplateFile,
-				real_app_dir,
-				template => template.Replace ("// REGISTER_APPLICATION_AND_INSTRUMENTATION_CLASSES_HERE", regCallsWriter.ToString ())
-			);
+				if (!Boolean.TryParse (metadata, out bool isFrameworkAssembly) || !isFrameworkAssembly) {
+					continue;
+				}
+
+				frameworkAssemblies.Add (asm);
+			}
+
+			var pinfos = scanner.Scan (arch, resolver, frameworkAssemblies);
+			return (true, pinfos);
 		}
 
-		IList<string> MergeManifest (NativeCodeGenState codeGenState, Dictionary<string, ITaskItem> userAssemblies)
+		internal static Dictionary<string, ITaskItem> MaybeGetArchAssemblies (Dictionary<AndroidTargetArch, Dictionary<string, ITaskItem>> dict, AndroidTargetArch arch)
 		{
-			var manifest = new ManifestDocument (ManifestTemplate) {
-				PackageName = PackageName,
-				VersionName = VersionName,
-				ApplicationLabel = ApplicationLabel ?? PackageName,
-				Placeholders = ManifestPlaceholders,
-				Resolver = codeGenState.Resolver,
-				SdkDir = AndroidSdkDir,
-				TargetSdkVersion = AndroidSdkPlatform,
-				MinSdkVersion = MonoAndroidHelper.ConvertSupportedOSPlatformVersionToApiLevel (SupportedOSPlatformVersion).ToString (),
-				Debug = Debug,
-				MultiDex = MultiDex,
-				NeedsInternet = NeedsInternet,
-			};
-			// Only set manifest.VersionCode if there is no existing value in AndroidManifest.xml.
-			if (manifest.HasVersionCode) {
-				Log.LogDebugMessage ($"Using existing versionCode in: {ManifestTemplate}");
-			} else if (!string.IsNullOrEmpty (VersionCode)) {
-				manifest.VersionCode = VersionCode;
-			}
-			manifest.Assemblies.AddRange (userAssemblies.Values.Select (item => item.ItemSpec));
-
-			if (!String.IsNullOrWhiteSpace (CheckedBuild)) {
-				// We don't validate CheckedBuild value here, this will be done in BuildApk. We just know that if it's
-				// on then we need android:debuggable=true and android:extractNativeLibs=true
-				manifest.ForceDebuggable = true;
-				manifest.ForceExtractNativeLibs = true;
+			if (!dict.TryGetValue (arch, out Dictionary<string, ITaskItem> archDict)) {
+				return new Dictionary<string, ITaskItem> (StringComparer.OrdinalIgnoreCase);
 			}
 
-			IList<string> additionalProviders = manifest.Merge (Log, codeGenState.TypeCache, codeGenState.AllJavaTypes, ApplicationJavaClass, EmbedAssemblies, BundledWearApplicationName, MergedManifestDocuments);
-
-			// Only write the new manifest if it actually changed
-			if (manifest.SaveIfChanged (Log, MergedAndroidManifestOutput)) {
-				Log.LogDebugMessage ($"Saving: {MergedAndroidManifestOutput}");
-			}
-
-			return additionalProviders;
+			return archDict;
 		}
 
-		(bool success, NativeCodeGenState? stubsState) GenerateJavaSourcesAndMaybeClassifyMarshalMethods (AndroidTargetArch arch, Dictionary<string, ITaskItem> assemblies, Dictionary<string, ITaskItem> userAssemblies, bool useMarshalMethods, bool generateJavaCode)
+		NativeCodeGenState? ScanTypesAndMaybeClassifyMarshalMethods (AndroidTargetArch arch, Dictionary<string, ITaskItem> assemblies, Dictionary<string, ITaskItem> userAssemblies, bool useMarshalMethods)
 		{
-			XAAssemblyResolver resolver = MakeResolver (useMarshalMethods, arch, assemblies);
+			XAAssemblyResolver resolver = MonoAndroidHelper.MakeResolver (Log, useMarshalMethods, arch, assemblies);
 			var tdCache = new TypeDefinitionCache ();
 			(List<TypeDefinition> allJavaTypes, List<TypeDefinition> javaTypesForJCW) = ScanForJavaTypes (resolver, tdCache, assemblies, userAssemblies, useMarshalMethods);
-			var jcwContext = new JCWGeneratorContext (arch, resolver, assemblies.Values, javaTypesForJCW, tdCache, useMarshalMethods);
-			var jcwGenerator = new JCWGenerator (Log, jcwContext);
-			bool success;
 
-			if (generateJavaCode) {
-				success = jcwGenerator.GenerateAndClassify (AndroidSdkPlatform, outputPath: Path.Combine (OutputDirectory, "src"), ApplicationJavaClass);
-			} else {
-				success = jcwGenerator.Classify (AndroidSdkPlatform);
-			}
+			MarshalMethodsCollection? marshalMethodsCollection = null;
 
-			if (!success) {
-				return (false, null);
-			}
+			if (useMarshalMethods)
+				marshalMethodsCollection = MarshalMethodsCollection.FromAssemblies (arch, assemblies.Values.ToList (), resolver, Log);
 
-			return (true, new NativeCodeGenState (arch, tdCache, resolver, allJavaTypes, javaTypesForJCW, jcwGenerator.Classifier));
+			return new NativeCodeGenState (arch, tdCache, resolver, allJavaTypes, javaTypesForJCW, marshalMethodsCollection);
 		}
 
 		(List<TypeDefinition> allJavaTypes, List<TypeDefinition> javaTypesForJCW) ScanForJavaTypes (XAAssemblyResolver res, TypeDefinitionCache cache, Dictionary<string, ITaskItem> assemblies, Dictionary<string, ITaskItem> userAssemblies, bool useMarshalMethods)
@@ -401,65 +220,23 @@ namespace Xamarin.Android.Tasks
 				ErrorOnCustomJavaObject     = ErrorOnCustomJavaObject,
 			};
 			List<TypeDefinition> allJavaTypes = scanner.GetJavaTypes (assemblies.Values, res);
+
 			var javaTypesForJCW = new List<TypeDefinition> ();
 
+			// When marshal methods or non-JavaPeerStyle.XAJavaInterop1 are in use we do not want to skip non-user assemblies (such as Mono.Android) - we need to generate JCWs for them during
+			// application build, unlike in Debug configuration or when marshal methods are disabled, in which case we use JCWs generated during Xamarin.Android
+			// build and stored in a jar file.
+			bool shouldSkipNonUserAssemblies = !useMarshalMethods && codeGenerationTarget == JavaPeerStyle.XAJavaInterop1;
+			Log.LogDebugMessage ($"Should skip non-user assemblies: {shouldSkipNonUserAssemblies} (useMarshalMethods: {useMarshalMethods})");
+
 			foreach (TypeDefinition type in allJavaTypes) {
-				// When marshal methods are in use we do not want to skip non-user assemblies (such as Mono.Android) - we need to generate JCWs for them during
-				// application build, unlike in Debug configuration or when marshal methods are disabled, in which case we use JCWs generated during Xamarin.Android
-				// build and stored in a jar file.
-				if ((!useMarshalMethods && !userAssemblies.ContainsKey (type.Module.Assembly.Name.Name)) || JavaTypeScanner.ShouldSkipJavaCallableWrapperGeneration (type, cache)) {
+				if ((shouldSkipNonUserAssemblies && !userAssemblies.ContainsKey (type.Module.Assembly.Name.Name)) || JavaTypeScanner.ShouldSkipJavaCallableWrapperGeneration (type, cache)) {
 					continue;
 				}
 				javaTypesForJCW.Add (type);
 			}
 
 			return (allJavaTypes, javaTypesForJCW);
-		}
-
-		void RewriteMarshalMethods (NativeCodeGenState state, bool brokenExceptionTransitionsEnabled)
-		{
-			if (state.Classifier == null) {
-				return;
-			}
-
-			var rewriter = new MarshalMethodsAssemblyRewriter (Log, state.TargetArch, state.Classifier, state.Resolver);
-			rewriter.Rewrite (brokenExceptionTransitionsEnabled);
-		}
-
-		string GetResource (string resource)
-		{
-			using (var stream = GetType ().Assembly.GetManifestResourceStream (resource))
-			using (var reader = new StreamReader (stream))
-				return reader.ReadToEnd ();
-		}
-
-		void SaveResource (string resource, string filename, string destDir, Func<string, string> applyTemplate)
-		{
-			string template = GetResource (resource);
-			template = applyTemplate (template);
-			Files.CopyIfStringChanged (template, Path.Combine (destDir, filename));
-		}
-
-		void WriteTypeMappings (NativeCodeGenState state)
-		{
-			Log.LogDebugMessage ($"Generating type maps for architecture '{state.TargetArch}'");
-			var tmg = new TypeMapGenerator (Log, state);
-			if (!tmg.Generate (Debug, SkipJniAddNativeMethodRegistrationAttributeScan, TypemapOutputDirectory, GenerateNativeAssembly)) {
-				throw new XamarinAndroidException (4308, Properties.Resources.XA4308);
-			}
-
-			string abi = MonoAndroidHelper.ArchToAbi (state.TargetArch);
-			var items = new List<ITaskItem> ();
-			foreach (string file in tmg.GeneratedBinaryTypeMaps) {
-				var item = new TaskItem (file);
-				string fileName = Path.GetFileName (file);
-				item.SetMetadata ("DestinationSubPath", $"{abi}/{fileName}");
-				item.SetMetadata ("DestinationSubDirectory", $"{abi}/");
-				item.SetMetadata ("Abi", abi);
-				items.Add (item);
-			}
-
-			GeneratedBinaryTypeMaps = items.ToArray ();
 		}
 	}
 }

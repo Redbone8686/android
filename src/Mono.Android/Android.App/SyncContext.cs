@@ -18,8 +18,6 @@ namespace Android.App {
 		{
 			if (looper == null) {
 				var message = $"No Android message loop is available. Skipping invocation of `{d.Method.DeclaringType?.FullName}.{d.Method.Name}`!";
-				if (JNIEnvInit.IsRunningOnDesktop)
-					message += " Using `await` when running on the Android Designer is not currently supported. Please use the `View.IsInEditMode` property.";
 				Logger.Log (LogLevel.Error, "monodroid-synccontext", message);
 				return false;
 			}
@@ -27,7 +25,7 @@ namespace Android.App {
 			return true;
 		}
 
-		public override void Post (SendOrPostCallback d, object state)
+		public override void Post (SendOrPostCallback d, object? state)
 		{
 			var looper = Application.Context?.MainLooper;
 			if (!EnsureLooper (looper, d))
@@ -37,7 +35,7 @@ namespace Android.App {
 			}
 		}
 
-		public override void Send (SendOrPostCallback d, object state)
+		public override void Send (SendOrPostCallback d, object? state)
 		{
 			var looper = Looper.MainLooper;
 			if (!EnsureLooper (looper, d))

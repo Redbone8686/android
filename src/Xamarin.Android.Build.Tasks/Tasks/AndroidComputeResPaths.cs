@@ -24,6 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#nullable enable
+
 using System;
 using System.Text;
 using Microsoft.Build.Utilities;
@@ -40,36 +42,46 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "CRP";
 
 		[Required]
-		public ITaskItem[] ResourceFiles { get; set; }
+		public ITaskItem[] ResourceFiles { get; set; } = [];
 
 		[Required]
-		public string IntermediateDir { get; set; }
+		public string IntermediateDir { get; set; } = "";
 
-		public string AssetPackIntermediateDir { get; set; }
+		public string? AssetPackIntermediateDir { get; set; }
 
-		public string Prefixes { get; set; }
+		public string? Prefixes { get; set; }
+
+		[Required]
+		public string PrefixProperty { get; set; } = "";
 
 		public bool LowercaseFilenames { get; set; }
 
-		public string ProjectDir { get; set; }
+		public string? ProjectDir { get; set; }
 
-		public string AndroidLibraryFlatFilesDirectory { get; set; }
-
-		[Output]
-		public ITaskItem[] IntermediateFiles { get; set; }
+		public string? AndroidLibraryFlatFilesDirectory { get; set; }
 
 		[Output]
-		public ITaskItem [] ResolvedResourceFiles { get; set; }
+		public ITaskItem[]? IntermediateFiles { get; set; }
+
+		[Output]
+		public ITaskItem []? ResolvedResourceFiles { get; set; }
+
+		[Output]
+		public string? FilesHash { get; set; }
 
 		public override bool RunTask ()
 		{
 			var intermediateFiles = new List<ITaskItem> (ResourceFiles.Length);
 			var resolvedFiles = new List<ITaskItem> (ResourceFiles.Length);
 
-			string[] prefixes = Prefixes != null ? Prefixes.Split (';') : null;
+			string[]? prefixes = Prefixes != null ? Prefixes.Split (';') : null;
 			if (prefixes != null) {
 				for (int i = 0; i < prefixes.Length; i++) {
 					string p = prefixes [i];
+					if (Path.IsPathRooted (p)) {
+						Log.LogCodedError ("XA1041", message: Properties.Resources.XA1041, PrefixProperty, p);
+						continue;
+					}
 					char c = p [p.Length - 1];
 					if (c != '\\' && c != '/')
 						prefixes [i] = p + Path.DirectorySeparatorChar;
@@ -77,6 +89,7 @@ namespace Xamarin.Android.Tasks
 			}
 
 			var nameCaseMap = new Dictionary<string, string> (ResourceFiles.Length, StringComparer.Ordinal);
+			var sb = new StringBuilder ();
 
 			for (int i = 0; i < ResourceFiles.Length; i++) {
 				var item = ResourceFiles [i];
@@ -89,13 +102,13 @@ namespace Xamarin.Android.Tasks
 				var logicalName = item.GetMetadata ("LogicalName").Replace ('\\', Path.DirectorySeparatorChar);
 				if (item.GetMetadata ("IsWearApplicationResource") == "True") {
 					rel = item.ItemSpec.Substring (IntermediateDir.Length);
-				} else if (!string.IsNullOrEmpty (logicalName)) {
+				} else if (!logicalName.IsNullOrEmpty ()) {
 					rel = logicalName;
 				} else {
 					rel = item.GetMetadata ("Link").Replace ('\\', Path.DirectorySeparatorChar);
-					if (string.IsNullOrEmpty (rel)) {
+					if (rel.IsNullOrEmpty ()) {
 						rel = item.GetMetadata ("Identity");
-						if (!string.IsNullOrEmpty (ProjectDir)) {
+						if (!ProjectDir.IsNullOrEmpty ()) {
 							var fullRelPath = Path.GetFullPath (rel).Normalize (NormalizationForm.FormC);
 							var fullProjectPath = Path.GetFullPath (ProjectDir).Normalize (NormalizationForm.FormC);
 							if (fullRelPath.StartsWith (fullProjectPath, StringComparison.OrdinalIgnoreCase)) {
@@ -129,15 +142,15 @@ namespace Xamarin.Android.Tasks
 				}
 				string dest = Path.GetFullPath (Path.Combine (IntermediateDir, baseFileName));
 				string intermediateDirFullPath = Path.GetFullPath (IntermediateDir);
-				if (!string.IsNullOrEmpty (assetPack) &&
+				if (!assetPack.IsNullOrEmpty () &&
 						(string.Compare (assetPack, "base", StringComparison.OrdinalIgnoreCase) != 0) &&
-						!string.IsNullOrEmpty (AssetPackIntermediateDir)) {
+						!AssetPackIntermediateDir.IsNullOrEmpty ()) {
 					dest = Path.GetFullPath (Path.Combine (AssetPackIntermediateDir, assetPack, "assets", baseFileName));
 					intermediateDirFullPath = Path.GetFullPath (AssetPackIntermediateDir);
 				}
 				
 				// if the path ends up "outside" of our target intermediate directory, just use the filename
-				if (String.Compare (intermediateDirFullPath, 0, dest, 0, intermediateDirFullPath.Length, StringComparison.OrdinalIgnoreCase) != 0) {
+				if (!dest.StartsWith (intermediateDirFullPath, StringComparison.OrdinalIgnoreCase)) {
 					dest = Path.GetFullPath (Path.Combine (IntermediateDir, Path.GetFileName (baseFileName)));
 				}
 				if (!File.Exists (item.ItemSpec)) {
@@ -151,10 +164,13 @@ namespace Xamarin.Android.Tasks
 				item.CopyMetadataTo (newItem);
 				intermediateFiles.Add (newItem);
 				resolvedFiles.Add (item);
+				// write both files so we handle changes in destination also
+				sb.AppendLine ($"{item.ItemSpec};{newItem.ItemSpec}");
 			}
 
 			IntermediateFiles = intermediateFiles.ToArray ();
 			ResolvedResourceFiles = resolvedFiles.ToArray ();
+			FilesHash = Files.HashString (sb.ToString ());
 			MonoAndroidHelper.SaveResourceCaseMap (BuildEngine4, nameCaseMap, ProjectSpecificTaskObjectKey);
 			return !Log.HasLoggedErrors;
 		}

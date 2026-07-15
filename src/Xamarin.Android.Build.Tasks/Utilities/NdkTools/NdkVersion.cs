@@ -12,7 +12,7 @@ namespace Xamarin.Android.Tasks
 		public NdkVersion (string? version)
 		{
 			string? ver = version?.Trim ();
-			if (String.IsNullOrEmpty (ver)) {
+			if (ver.IsNullOrEmpty ()) {
 				throw new ArgumentException ("must be a non-empty string", nameof (version));
 			}
 

@@ -6,6 +6,7 @@ using System.Linq;
 using Microsoft.Build.Framework;
 using System.Text;
 using System.Xml.Linq;
+using System.Collections.Generic;
 
 namespace Xamarin.Android.Build.Tests
 {
@@ -134,6 +135,26 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
+		public void InvalidAssetDirectoryWithNonASCIIChars ()
+		{
+			var proj = new XamarinAndroidApplicationProject () {
+				ProjectName = "App1",
+				IsRelease = true,
+				OtherBuildItems = {
+					new AndroidItem.AndroidAsset ("Assets\\asset1.txt") {
+						TextContent = () => "Asset1",
+						Encoding = Encoding.ASCII,
+					},
+				},
+			};
+			using (var b = CreateApkBuilder (Path.Combine ("temp", "InvalidAssetDirectoryWithNonASCIIChars_Ümläüt", proj.ProjectName))) {
+				b.ThrowOnBuildFailure = false;
+				Assert.AreEqual (!IsWindows, b.Build (proj), $"{proj.ProjectName} should {(IsWindows ? "not " : "")}have built successfully.");
+				Assert.AreEqual (IsWindows, b.LastBuildOutput.ContainsText ("APT2265"), $"APT2265 should {(IsWindows ? "" : "not ")}have been raised.");
+			}
+		}
+
+		[Test]
 		public void FullPath ()
 		{
 			var assetPath = Path.GetFullPath (Path.Combine (Root, "temp", TestName, "Assets", "foo.txt"));
@@ -156,6 +177,40 @@ namespace Xamarin.Android.Build.Tests
 				}
 				FileAssert.DoesNotExist (libraryProjectImports);
 			}
+		}
+
+		[Test]
+		[Category ("SmokeTests")]
+		[TestCase("MonoAndroidAssetsPrefix")]
+		[TestCase("MonoAndroidResourcePrefix")]
+		public void FullPrefixRaisesError(string prefix)
+		{
+			var proj = new XamarinAndroidLibraryProject {
+				OtherBuildItems = {
+					new AndroidItem.AndroidAsset ("Assets\\asset1.txt") {
+						TextContent = () => "bar",
+					},
+				},
+			};
+			var app = new XamarinAndroidApplicationProject {
+				OtherBuildItems = {
+					new AndroidItem.AndroidAsset ("Assets\\asset2.txt") {
+						TextContent = () => "foo",
+					},
+				},
+			};
+			using var b = CreateDllBuilder (Path.Combine ("temp", TestName, "Library"));
+			using var appb = CreateApkBuilder (Path.Combine ("temp", TestName, "App"));
+			appb.ThrowOnBuildFailure = false;
+			b.ThrowOnBuildFailure = false;
+			Directory.CreateDirectory (Path.Combine (Root, "temp", TestName, "App"));
+			var envar = new Dictionary<string, string> {
+				{ prefix, Path.Combine (Root, "temp", TestName, "App") },
+			};
+			Assert.IsFalse (b.Build (proj, environmentVariables: envar), "Build should have failed.");
+			Assert.IsTrue (b.LastBuildOutput.ContainsText ("error XA1041"), "XA1041 should have been raised.");
+			Assert.IsFalse (appb.Build (app, environmentVariables: envar), "Build should have failed.");
+			Assert.IsTrue (appb.LastBuildOutput.ContainsText ("error XA1041"), "XA1041 should have been raised.");
 		}
 	}
 }

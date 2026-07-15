@@ -1,0 +1,100 @@
+name: "Copilot Setup Steps"
+
+on: workflow_dispatch
+
+
+permissions:
+  contents: read
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      AndroidToolchainCacheDirectory: /mnt/android-archives
+      AndroidToolchainDirectory: /mnt/android-toolchain
+      NUGET_PACKAGES: /mnt/nuget/packages
+      NUGET_HTTP_CACHE_PATH: /mnt/nuget/v3-cache
+      NUGET_PLUGINS_CACHE_PATH: /mnt/nuget/plugins-cache
+      NUGET_SCRATCH: /mnt/nuget/scratch
+    
+    steps:
+    - name: Free up disk space
+      run: |
+        # Remove pre-installed Android SDK/NDK (~10GB) since we download our own specific versions
+        sudo rm -rf /usr/local/lib/android
+
+    - name: Checkout repository
+      uses: actions/checkout@v6
+      with:
+        submodules: recursive
+        fetch-depth: 1
+
+    - name: Install gh-aw extension
+      uses: github/gh-aw-actions/setup-cli@5c2fe865bb4dc46e1450f6ee0d0541d759aea73a # v0.79.6
+      with:
+        version: v0.68.3
+
+    - name: Log disk space (after checkout)
+      uses: ./.github/workflows/log-disk-space
+
+    - name: Setup build directories on secondary disk
+      run: |
+        echo "Setting up Android toolchain on /mnt (secondary disk with 66G+ free)"
+        
+        # Create directories with sudo and set ownership
+        sudo mkdir -p /mnt/android-archives
+        sudo mkdir -p /mnt/android-toolchain
+        sudo mkdir -p /mnt/bin
+        sudo mkdir -p /mnt/gradle
+        sudo mkdir -p /mnt/nuget/packages
+        sudo mkdir -p /mnt/nuget/v3-cache
+        sudo mkdir -p /mnt/nuget/plugins-cache
+        sudo mkdir -p /mnt/nuget/scratch
+        sudo chown -R $USER:$USER /mnt/android-archives /mnt/android-toolchain /mnt/bin /mnt/gradle /mnt/nuget
+        
+        # Remove bin directory if it exists and create symlink to use the secondary disk
+        rm -rf ./bin
+        ln -s /mnt/bin ./bin
+        
+        # Move Gradle cache to secondary disk to prevent "No space left on device" during Gradle operations
+        mkdir -p /mnt/gradle
+        ln -s /mnt/gradle $HOME/.gradle
+        
+        echo "Build cache directories configured on /mnt (secondary disk):"
+        echo "  - Android toolchain: /mnt/android-toolchain"
+        echo "  - Build output: /mnt/bin"
+        echo "  - Gradle cache: /mnt/gradle"
+        echo "  - NuGet packages: /mnt/nuget/packages"
+        echo "  - NuGet HTTP cache: /mnt/nuget/v3-cache"
+        echo "  - NuGet plugins cache: /mnt/nuget/plugins-cache"
+        echo "  - NuGet scratch: /mnt/nuget/scratch"
+        ls -la /mnt
+        df -h /mnt
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.x'
+
+    - name: Run android build
+      id: android-build
+      continue-on-error: true
+      run: |
+        make jenkins CONFIGURATION=Debug
+      timeout-minutes: 60
+
+    - name: Log disk space (after android build)
+      uses: ./.github/workflows/log-disk-space
+      with:
+        detailed: 'true'
+
+    - name: Upload logs
+      uses: actions/upload-artifact@v4
+      if: steps.android-build.outcome == 'failure'
+      with:
+        name: copilot-artifacts
+        path: |
+          bin/**/*.log
+          bin/**/*.binlog
+        retention-days: 30

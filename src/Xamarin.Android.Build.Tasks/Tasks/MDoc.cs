@@ -1,3 +1,4 @@
+#nullable enable
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -13,13 +14,13 @@ namespace Xamarin.Android.Tasks
 	{
 		public override string TaskPrefix => "MDC";
 
-		public string [] References { get; set; }
+		public string []? References { get; set; }
 		
 		[Required]
-		public string TargetAssembly { get; set; }
+		public string TargetAssembly { get; set; } = "";
 
 		[Required]
-		public string OutputDocDirectory { get; set; }
+		public string OutputDocDirectory { get; set; } = "";
 
 		public bool RunExport { get; set; }
 

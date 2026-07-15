@@ -1,0 +1,77 @@
+#pragma once
+
+#include <array>
+#include <string_view>
+
+#include <jni.h>
+#include <host_runtime_contract.h>
+
+#include "host-common.hh"
+#include <runtime-base/jni-wrappers.hh>
+#include <runtime-base/timing.hh>
+#include "../shared/log_types.hh"
+#include "managed-interface.hh"
+
+namespace xamarin::android {
+	class Host : public HostCommon
+	{
+	public:
+		static void Java_mono_android_Runtime_initInternal (JNIEnv *env, jclass klass, jstring lang, jobjectArray runtimeApksJava,
+			jstring runtimeNativeLibDir, jobjectArray appDirs, jint localDateTimeOffset, jobject loader,
+			jobjectArray assembliesJava, jboolean isEmulator, jboolean haveSplitApks) noexcept;
+		static void Java_mono_android_Runtime_register (JNIEnv *env, jstring managedType, jclass nativeClass, jstring methods) noexcept;
+		static void Java_mono_android_Runtime_registerNatives (JNIEnv *env, jclass nativeClass) noexcept;
+		static void propagate_uncaught_exception (JNIEnv *env, jobject javaThread, jthrowable javaException) noexcept;
+
+		static auto get_timing () -> std::shared_ptr<Timing>
+		{
+			return _timing;
+		}
+
+		static auto get_java_class_TimeZone () noexcept -> jclass
+		{
+			return java_TimeZone;
+		}
+
+	private:
+		// Must match `DlopenAssemblyStoreGenerator.PayloadStartSymbol` in the build tasks.
+		static constexpr std::string_view DLOPEN_ASSEMBLY_STORE_SYMBOL { "_assembly_store" };
+
+		static void gather_assemblies_and_libraries (jstring_array_wrapper& runtimeApks, bool have_split_apks);
+		static void map_assembly_store_via_dlopen (const char *store_path) noexcept;
+		static void scan_filesystem_for_assemblies_and_libraries () noexcept;
+
+		static size_t clr_get_runtime_property (const char *key, char *value_buffer, size_t value_buffer_size, void *contract_context) noexcept;
+		static bool clr_external_assembly_probe (const char *path, void **data_start, int64_t *size) noexcept;
+		static const void* clr_pinvoke_override (const char *library_name, const char *entry_point_name) noexcept;
+		static void clr_error_writer (const char *message) noexcept;
+
+		static auto create_delegate (
+			std::string_view const& assembly_name, std::string_view const& type_name,
+			std::string_view const& method_name) noexcept -> void*;
+
+		static void preload_jni_libraries () noexcept;
+
+	private:
+		static inline void *clr_host = nullptr;
+		static inline unsigned int domain_id = 0;
+		static inline std::shared_ptr<Timing> _timing{};
+		static inline bool found_assembly_store = false;
+		static inline jnienv_register_jni_natives_fn jnienv_register_jni_natives = nullptr;
+		static inline jnienv_propagate_uncaught_exception_fn jnienv_propagate_uncaught_exception = nullptr;
+
+		static inline jclass java_TimeZone = nullptr;
+
+		static inline host_runtime_contract runtime_contract{
+			.size = sizeof(host_runtime_contract),
+			.context = nullptr,
+			.get_runtime_property = clr_get_runtime_property,
+			.bundle_probe = nullptr,
+			.pinvoke_override = clr_pinvoke_override,
+			.external_assembly_probe = clr_external_assembly_probe,
+		};
+
+		// Enough to fit 0xffffffffffffffff + terminating NUL
+		static inline std::array<char, 19> host_contract_ptr_buffer{};
+	};
+}

@@ -1,6 +1,6 @@
 // Copyright (C) 2011, Xamarin Inc.
 // Copyright (C) 2010, Novell Inc.
-
+#nullable enable
 using System;
 using System.IO;
 using System.Linq;
@@ -8,6 +8,7 @@ using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 using Mono.Cecil;
 using Microsoft.Android.Build.Tasks;
+using Java.Interop.Tools.Cecil;
 
 namespace Xamarin.Android.Tasks
 {
@@ -18,14 +19,22 @@ namespace Xamarin.Android.Tasks
 		const string RegisterAttribute = "Android.Runtime.RegisterAttribute";
 
 		[Required]
-		public ITaskItem[] ShrunkFrameworkAssemblies { get; set; }
+		public ITaskItem[] ShrunkFrameworkAssemblies { get; set; } = [];
 
 		public override bool RunTask ()
 		{
 			// Find Mono.Android.dll
 			var mono_android = ShrunkFrameworkAssemblies.First (f => Path.GetFileNameWithoutExtension (f.ItemSpec) == "Mono.Android").ItemSpec;
+			var path = Path.GetFullPath (Path.GetDirectoryName (mono_android));
+			using var resolver = new DirectoryAssemblyResolver (this.CreateTaskLogger (), loadDebugSymbols: false, loadReaderParameters: new ReaderParameters { ReadWrite = true });
+			resolver.SearchDirectories.Add (path);
+			
+			using (var assembly = resolver.Load (mono_android)) {
+				if (assembly is null) {
+					Log.LogCodedError ("XA2024", Properties.Resources.XA2024, mono_android);
+					return false;
+				}
 
-			using (var assembly = AssemblyDefinition.ReadAssembly (mono_android, new ReaderParameters { ReadWrite = true })) {
 				// Strip out [Register] attributes
 				foreach (TypeDefinition type in assembly.MainModule.Types)
 					ProcessType (type);

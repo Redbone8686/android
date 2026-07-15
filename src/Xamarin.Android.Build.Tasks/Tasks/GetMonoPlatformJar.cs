@@ -1,5 +1,5 @@
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
-
+#nullable enable
 using System;
 using System.IO;
 using Microsoft.Build.Framework;
@@ -13,13 +13,13 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "GMJ";
 
 		[Required]
-		public string TargetFrameworkDirectory { get; set; }
+		public string TargetFrameworkDirectory { get; set; } = "";
 
 		[Output]
-		public string MonoPlatformJarPath { get; set; }
+		public string? MonoPlatformJarPath { get; set; }
 
 		[Output]
-		public string MonoPlatformDexPath { get; set; }
+		public string? MonoPlatformDexPath { get; set; }
 
 		public override bool RunTask ()
 		{
@@ -35,7 +35,7 @@ namespace Xamarin.Android.Tasks
 					return true;
 				}
 
-			Log.LogCodedError ("XA0002", "Could not find mono.android.jar");
+			Log.LogCodedError ("XA0002", Properties.Resources.XA0002);
 
 			return false;
 		}

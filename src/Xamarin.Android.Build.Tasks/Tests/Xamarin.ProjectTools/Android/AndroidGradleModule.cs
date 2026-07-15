@@ -15,9 +15,9 @@ namespace Xamarin.ProjectTools
 
 		public string ModuleDirectory { get; private set; } = string.Empty;
 
-		public int CompileSdk { get; set; } = XABuildConfig.AndroidDefaultTargetDotnetApiLevel;
+		public int CompileSdk { get; set; } = XABuildConfig.AndroidDefaultTargetDotnetApiLevel.Major;
 
-		public int MinSdk { get; set; } = XABuildConfig.AndroidMinimumDotNetApiLevel;
+		public int MinSdk { get; set; } = XABuildConfig.AndroidMinimumDotNetApiLevel.Major;
 
 		public bool IsApplication { get; set; } = false;
 
@@ -67,6 +67,9 @@ android {{
     defaultConfig {{
         minSdk = {MinSdk}
     }}
+    lint {{
+        checkReleaseBuilds = false
+    }}
 }}
 dependencies {{
     implementation(""androidx.appcompat:appcompat:1.6.1"")
@@ -112,7 +115,7 @@ public class MainActivity extends AppCompatActivity {{
 			});
 			AndroidManifestContent = $@"
   <application android:label=""App"">
-    <activity android:name="".TestActivity"">
+    <activity android:name="".TestActivity"" android:exported=""true"">
       <intent-filter>
         <action android:name=""android.intent.action.MAIN"" />
         <category android:name=""android.intent.category.LAUNCHER"" />

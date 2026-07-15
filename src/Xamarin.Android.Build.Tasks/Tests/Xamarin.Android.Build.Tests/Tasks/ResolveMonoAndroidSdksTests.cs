@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
+using Xamarin.Android.Tasks;
 using Xamarin.ProjectTools;
 
 namespace Xamarin.Android.Build.Tests
@@ -40,16 +41,24 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void NormalInputs ()
+		public void NormalInputs ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-			var proj = new XamarinAndroidApplicationProject ();
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty ("MonoAndroidToolsDirectory", "xat");
 			proj.SetProperty ("_JavaSdkDirectory", "jdk");
 			proj.SetProperty ("_AndroidSdkDirectory", "sdk");
 			proj.SetProperty ("_AndroidNdkDirectory", "ndk");
 			proj.SetProperty ("_AndroidApiLevel", "29");
 
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName))) {
+			using (var b = CreateApkBuilder ()) {
 				b.Target = "_ResolveMonoAndroidSdks";
 				Assert.IsTrue (b.Build (proj, parameters: parameters), "Build should have succeeded.");
 
@@ -63,16 +72,24 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void MissingAndroidNDK ()
+		public void MissingAndroidNDK ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-			var proj = new XamarinAndroidApplicationProject ();
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty ("MonoAndroidToolsDirectory", "xat");
 			proj.SetProperty ("_JavaSdkDirectory", "jdk");
 			proj.SetProperty ("_AndroidSdkDirectory", "sdk");
 			proj.SetProperty ("_AndroidNdkDirectory", "");
 			proj.SetProperty ("_AndroidApiLevel", "29");
 
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName))) {
+			using (var b = CreateApkBuilder ()) {
 				b.Target = "_ResolveMonoAndroidSdks";
 				Assert.IsTrue (b.Build (proj, parameters: parameters), "Build should have succeeded.");
 
@@ -86,16 +103,23 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void HasTrailingSlash ()
+		public void HasTrailingSlash ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-			var proj = new XamarinAndroidApplicationProject ();
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+			};
 			proj.SetProperty ("MonoAndroidToolsDirectory", $"xat{Path.DirectorySeparatorChar}");
 			proj.SetProperty ("_JavaSdkDirectory", $"jdk{Path.DirectorySeparatorChar}");
 			proj.SetProperty ("_AndroidSdkDirectory", $"sdk{Path.DirectorySeparatorChar}");
 			proj.SetProperty ("_AndroidNdkDirectory", $"ndk{Path.DirectorySeparatorChar}");
 			proj.SetProperty ("_AndroidApiLevel", "29");
 
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName))) {
+			using (var b = CreateApkBuilder ()) {
 				b.Target = "_ResolveMonoAndroidSdks";
 				Assert.IsTrue (b.Build (proj, parameters: parameters), "Build should have succeeded.");
 

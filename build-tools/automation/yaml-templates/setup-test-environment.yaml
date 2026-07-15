@@ -1,97 +1,43 @@
 parameters:
   configuration: $(XA.Build.Configuration)
   xaSourcePath: $(System.DefaultWorkingDirectory)
-  jdkTestFolder: $(JAVA_HOME_17_X64)
+  jdkMajorVersion: $(DefaultJavaSdkMajorVersion)
+  useAgentJdkPath: true
   remove_dotnet: false
   dotnetVersion: $(DotNetSdkVersion)
   dotnetQuality: $(DotNetSdkQuality)
   installTestSlicer: false
   installApkDiff: true
-  updateMono: false
   androidSdkPlatforms: $(DefaultTestSdkPlatforms)
   repositoryAlias: 'self'
   commit: ''
-  xaprepareScenario: AndroidTestDependencies        # Use 'EmulatorTestDependencies' for agents that need the emulator installed
+  use1ESTemplate: true
 
 steps:
-- template: sdk-unified/steps/checkout/v1.yml@yaml-templates
-  parameters:
-    resource: ${{ parameters.repositoryAlias }}
-    commit: ${{ parameters.commit }}
+- ${{ if eq(parameters.use1ESTemplate, true) }}:
+  - template: sdk-unified/steps/checkout/v1.yml@yaml-templates
+    parameters:
+      resource: ${{ parameters.repositoryAlias }}
+      commit: ${{ parameters.commit }}
+      clean: true
+      submodules: recursive
+- ${{ if ne(parameters.use1ESTemplate, true) }}:
+  - checkout: ${{ parameters.repositoryAlias }}
+    ${{ if ne(parameters.commit, '') }}:
+      ref: ${{ parameters.commit }}
     clean: true
     submodules: recursive
 
-- script: |
-    echo "##vso[task.setvariable variable=JI_JAVA_HOME]${{ parameters.jdkTestFolder }}"
-    echo "##vso[task.setvariable variable=DOTNET_TOOL_PATH]${{ parameters.xaSourcePath }}/bin/${{ parameters.configuration }}/dotnet/dotnet"
-  displayName: set JI_JAVA_HOME to ${{ parameters.jdkTestFolder }}
-  condition: and(succeeded(), ne(variables['agent.os'], 'Windows_NT'))
-
-- script: |
-    echo ##vso[task.setvariable variable=JI_JAVA_HOME]${{ parameters.jdkTestFolder }}
-    echo ##vso[task.setvariable variable=DOTNET_TOOL_PATH]${{ parameters.xaSourcePath }}\bin\${{ parameters.configuration }}\dotnet\dotnet.exe
-  displayName: set JI_JAVA_HOME to ${{ parameters.jdkTestFolder }}
-  condition: and(succeeded(), eq(variables['agent.os'], 'Windows_NT'))
-
-# Install latest .NET
-- template: /build-tools/automation/yaml-templates/use-dot-net.yaml
+- template: /build-tools/automation/yaml-templates/setup-test-environment-steps.yaml
   parameters:
-    version: ${{ parameters.dotnetVersion }}
-    quality: ${{ parameters.dotnetQuality }}
-    remove_dotnet: ${{ parameters.remove_dotnet }}
-
-- task: DotNetCoreCLI@2
-  displayName: shut down existing build daemons
-  inputs:
-    command: custom
-    custom: build-server
-    arguments: shutdown
-
-- ${{ if eq(parameters.updateMono, true) }}:
-  - template: /build-tools/automation/yaml-templates/run-xaprepare.yaml
-    parameters:
-      displayName: run xaprepare-UpdateMono
-      arguments: --s=UpdateMono --auto-provision=yes --auto-provision-uses-sudo=yes
-      condition: and(succeeded(), eq(variables['agent.os'], 'Darwin'))
-      xaSourcePath: ${{ parameters.xaSourcePath }}
-
-- template: /build-tools/automation/yaml-templates/run-xaprepare.yaml
-  parameters:
-    arguments: --s=${{ parameters.xaprepareScenario }}  --android-sdk-platforms="${{ parameters.androidSdkPlatforms }}"
+    configuration: ${{ parameters.configuration }}
     xaSourcePath: ${{ parameters.xaSourcePath }}
-
-- task: DotNetCoreCLI@2
-  displayName: build Xamarin.Android.Tools.BootstrapTasks.csproj
-  inputs:
-    projects: ${{ parameters.xaSourcePath }}/build-tools/Xamarin.Android.Tools.BootstrapTasks/Xamarin.Android.Tools.BootstrapTasks.csproj
-    arguments: -c ${{ parameters.configuration }} -bl:${{ parameters.xaSourcePath }}/bin/Test${{ parameters.configuration }}/BootstrapTasks.binlog
-
-# Download and install .NET nupkgs
-- task: DownloadPipelineArtifact@2
-  inputs:
-    artifactName: $(NuGetArtifactName)
-    downloadPath: ${{ parameters.xaSourcePath }}/bin/Build${{ parameters.configuration }}/nuget-unsigned
-
-- task: DownloadPipelineArtifact@2
-  inputs:
-    artifactName: $(LinuxNuGetArtifactName)
-    downloadPath: ${{ parameters.xaSourcePath }}/bin/Build${{ parameters.configuration }}/nuget-unsigned
-  condition: and(succeeded(), eq(variables['agent.os'], 'Linux'))
-
-- task: DotNetCoreCLI@2
-  displayName: extract workload packs
-  inputs:
-    projects: ${{ parameters.xaSourcePath }}/build-tools/create-packs/Microsoft.Android.Sdk.proj
-    arguments: -t:ExtractWorkloadPacks -c ${{ parameters.configuration }} -v:n -bl:${{ parameters.xaSourcePath }}/bin/Test${{ parameters.configuration }}/extract-workloads.binlog
-
-- ${{ if eq(parameters.installApkDiff, true) }}:
-  - template: /build-tools/automation/yaml-templates/install-dotnet-tool.yaml
-    parameters:
-      toolName: apkdiff
-      version: $(ApkDiffToolVersion)
-
-- ${{ if eq(parameters.installTestSlicer, true) }}:
-  - template: /build-tools/automation/yaml-templates/install-dotnet-tool.yaml
-    parameters:
-      toolName: dotnet-test-slicer
-      version: $(TestSlicerToolVersion)
+    jdkMajorVersion: ${{ parameters.jdkMajorVersion }}
+    useAgentJdkPath: ${{ parameters.useAgentJdkPath }}
+    remove_dotnet: ${{ parameters.remove_dotnet }}
+    dotnetVersion: ${{ parameters.dotnetVersion }}
+    dotnetQuality: ${{ parameters.dotnetQuality }}
+    installTestSlicer: ${{ parameters.installTestSlicer }}
+    installApkDiff: ${{ parameters.installApkDiff }}
+    androidSdkPlatforms: ${{ parameters.androidSdkPlatforms }}
+    use1ESTemplate: ${{ parameters.use1ESTemplate }}

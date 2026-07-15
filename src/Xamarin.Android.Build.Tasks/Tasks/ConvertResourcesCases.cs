@@ -1,5 +1,6 @@
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
 
+#nullable enable
 using System;
 using System.Diagnostics;
 using System.Collections.Generic;
@@ -17,21 +18,21 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "CRC";
 
 		[Required]
-		public ITaskItem[] ResourceDirectories { get; set; }
+		public ITaskItem[] ResourceDirectories { get; set; } = [];
 
 		[Required]
-		public string CustomViewMapFile { get; set; }
+		public string CustomViewMapFile { get; set; } = "";
 
-		public string AndroidConversionFlagFile { get; set; }
+		public string? AndroidConversionFlagFile { get; set; }
 
-		Dictionary<string,string> _resource_name_case_map;
-		Dictionary<string, HashSet<string>> customViewMap;
+		Dictionary<string,string>? _resource_name_case_map;
+		Dictionary<string, HashSet<string>>? customViewMap;
 
 		Dictionary<string, string> resource_name_case_map => _resource_name_case_map ??= MonoAndroidHelper.LoadResourceCaseMap (BuildEngine4, ProjectSpecificTaskObjectKey);
 
 		public override bool RunTask ()
 		{
-			if (CustomViewMapFile != null)
+			if (!CustomViewMapFile.IsNullOrEmpty ())
 				customViewMap = Xamarin.Android.Tasks.MonoAndroidHelper.LoadCustomViewMapFile (BuildEngine4, CustomViewMapFile);
 
 			// Look in the resource xml's for capitalized stuff and fix them
@@ -69,7 +70,7 @@ namespace Xamarin.Android.Tasks
 			}
 
 			var lastUpdate = DateTime.MinValue;
-			if (!string.IsNullOrEmpty (AndroidConversionFlagFile) && File.Exists (AndroidConversionFlagFile)) {
+			if (!AndroidConversionFlagFile.IsNullOrEmpty () && File.Exists (AndroidConversionFlagFile)) {
 				lastUpdate = File.GetLastWriteTimeUtc (AndroidConversionFlagFile);
 			}
 			Log.LogDebugMessage ("  AndroidConversionFlagFile modified: {0}", lastUpdate);

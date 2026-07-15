@@ -1,8 +1,8 @@
+*.lscache
 *.userprefs
 *.user
 bin
 Configuration.Override.props
-Configuration.OperatingSystem.props
 obj
 packages
 .DS_Store
@@ -21,7 +21,6 @@ apk-sizes-*.txt
 *.binlog
 *.ProjectImports.zip
 *~
-external/android-platform-support/
 external/monodroid/
 external/mono/
 tests/api-compatibility/reference/*/*.dll
@@ -30,3 +29,8 @@ Novell
 *.patch
 *.keystore
 /omnisharp.json
+src/native/CMakePresets.json
+src/native/mono/pinvoke-override/generate-pinvoke-tables
+src/native/mono/pinvoke-override/pinvoke-tables.include.generated
+dotnet-install.ps1
+*.gdn.sarif

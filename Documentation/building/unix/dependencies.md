@@ -3,7 +3,6 @@
 Building .NET for Android requires:
 
   * [Homebrew](#homebrew)
-  * [Latest Mono](#mono-sdk)
   * [The Java Development Kit (JDK)](#jdk)
   * [Autotools (`autoconf`, `automake`, etc.)](#autotools)
   * [The Android SDK and NDK](#ndk)
@@ -16,25 +15,23 @@ Building .NET for Android requires:
 [dotnetsdk]: https://docs.microsoft.com/de-de/dotnet/core/install/sdk
 
 The `make prepare` build step (or `/t:Prepare` on Windows) will
-check that all required dependencies are present.
-If you would like `make prepare` to automatically install
-required dependencies, set the `$(AutoProvision)` MSBuild property to True
-and (if necessary) set the `$(AutoProvisionUsesSudo)` property to True.
-(This is not supported on all operating systems;
-see [configuration.md](../configuration.md) for details.)
-
-If `$(AutoProvision)` is False (the default) and a dependency is missing,
-then the build will fail and an error message will be displayed attempting
-to provide install instructions to obtain the missing dependency, e.g.:
+check that all required dependencies are present. If a dependency is
+missing, the build will fail and an error message will be displayed
+attempting to provide install instructions to obtain the missing
+dependency, e.g.:
 
     error : Could not find required program '7za'. Please run: brew install 'p7zip'.
+
+Install any missing dependencies using your platform's package manager
+(e.g. `brew install p7zip` on macOS, `sudo apt-get install p7zip-full`
+on Debian/Ubuntu).
 
 <a name="homebrew" />
 
 ## Homebrew
 
 [Homebrew](https://brew.sh) must be installed and available via `$PATH` in
-order to provision xamarin-android.
+order to provision dotnet/android.
 
 When building on Apple Silicon (arm64) machines, use the **arch**(1) command to
 allow Homebrew to be installed:
@@ -46,15 +43,9 @@ allow Homebrew to be installed:
 
 ## Mono MDK
 
-Latest Mono is required to build on [macOS][osx-mono] and Linux.
-The build will tell you if your version is outdated.
-
-[osx-mono]: http://www.mono-project.com/download/#download-mac
-[xmlpeek]: https://msdn.microsoft.com/en-us/library/ff598684.aspx
-
-The minimum Mono version which is checked for can be overridden by the
-`$(MonoRequiredMinimumVersion)` MSBuild property, but things may not build.
-(This is your warning.)
+Mono may be needed by the [API documentation pipeline](../../../build-tools/automation/azure-pipelines-apidocs.yaml)
+for running `mdoc`, but it is provisioned independently by that pipeline via `boots`.
+It is no longer required for local builds.
 
 
 <a name="jdk" />
@@ -68,7 +59,8 @@ Alternatively, the Java Development Kit may be downloaded from the
 [openjdk]: https://openjdk.java.net
 [download-jdk]: http://www.oracle.com/technetwork/java/javase/downloads/
 
-At this time, we only support building with JDK 1.8.
+For the JDK version that is currently used, see the `$(MicrosoftOpenJDKVersion)` property in
+[`/Configuration.props`](../../../Configuration.props).
 
 
 <a name="autotools" />
@@ -88,7 +80,7 @@ On macOS, autotools are should be used from `brew`, and may be installed via:
 
 ## Android NDK, SDK
 
-*Note*: A xamarin-android checkout maintains *its own* Android NDK + SDK
+*Note*: A dotnet/android checkout maintains *its own* Android NDK + SDK
 to ensure consistent builds and build behavior, permitting reproducible
 builds and providing greater flexibility around when we need to perform
 Android SDK + NDK updates. The Android SDK and NDK are maintained by default
@@ -101,7 +93,7 @@ via two directories in your home directory:
 
 Developers may use these directories for their own use, but *please* **DO NOT**
 update or alter the contents of the `$(AndroidToolchainDirectory)`, as that may
-prevent the xamarin-android build from working as expected.
+prevent the dotnet/android build from working as expected.
 
 The files that will be downloaded and installed are controlled by
 [build-tools/android-toolchain/android-toolchain.projitems][android-toolchain.projitems]

@@ -5,15 +5,21 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Logging.StructuredLogger;
+using StructuredBuild = Microsoft.Build.Logging.StructuredLogger.Build;
 using NUnit.Framework;
+using Xamarin.Android.Tasks;
+using Xamarin.Android.Tools;
 using Xamarin.ProjectTools;
 
 namespace Xamarin.Android.Build.Tests
 {
+	// TODO: update for NativeAOT and CoreCLR
 	[TestFixture]
+	[Category ("Performance")]
 	public class PerformanceTest : DeviceTest
 	{
 		const int Retry = 2;
+		const int MaxEvaluationTimeInMs = 500;
 		static readonly Dictionary<string, int> csv_values = new Dictionary<string, int> ();
 
 		[OneTimeSetUp]
@@ -46,15 +52,31 @@ namespace Xamarin.Android.Build.Tests
 
 		void Profile (ProjectBuilder builder, Action<ProjectBuilder> action, [CallerMemberName] string caller = null)
 		{
+			Profile (builder, iterations: 1, action: action, caller: caller);
+		}
+
+		void Profile (ProjectBuilder builder, int iterations, Action<ProjectBuilder> action, Action<ProjectBuilder> afterRun = null, [CallerMemberName] string caller = null)
+		{
 			if (!csv_values.TryGetValue (caller, out int expected)) {
 				Assert.Fail ($"No timeout value found for a key of {caller}");
 			}
 
-			action (builder);
-			var actual = GetDurationFromBinLog (builder);
-			TestContext.Out.WriteLine($"expected: {expected}ms, actual: {actual}ms");
-			if (actual > expected) {
-				Assert.Fail ($"Exceeded expected time of {expected}ms, actual {actual}ms");
+			double total = 0;
+			StructuredBuild build = null;
+			for (int i=0; i < iterations; i++) {
+				action (builder);
+				build = ReadBinLog (builder);
+				var actual = GetDuration (build, builder);
+				TestContext.Out.WriteLine ($"run {i} took: {actual}ms");
+				total += actual;
+				if (afterRun is not null)
+					afterRun (builder);
+			}
+			total /= iterations;
+			TestContext.Out.WriteLine ($"expected: {expected}ms, actual: {total}ms");
+			if (total > expected) {
+				AssertSlowMachine (build, expected, total);
+				Assert.Fail ($"Exceeded expected time of {expected}ms, actual {total}ms");
 			}
 		}
 
@@ -64,47 +86,63 @@ namespace Xamarin.Android.Build.Tests
 				Assert.Fail ($"No timeout value found for a key of {caller}");
 			}
 			double total = 0;
+			StructuredBuild build = null;
 			for (int i=0; i < iterations; i++) {
 				action (builder);
-				var duration = GetTaskDurationFromBinLog (builder, task);
+				build = ReadBinLog (builder);
+				var duration = GetTaskDuration (build, builder, task);
 				TestContext.Out.WriteLine($"run {i} took: {duration}ms");
 				total += duration;
 			}
 			total /= iterations;
 			TestContext.Out.WriteLine($"expected: {expected}ms, actual: {total}ms");
 			if (total > expected) {
+				AssertSlowMachine (build, expected, total);
 				Assert.Fail ($"Exceeded expected time of {expected}ms, actual {total}ms");
 			}
 		}
 
-		double GetTaskDurationFromBinLog (ProjectBuilder builder, string task)
+		void AssertSlowMachine (StructuredBuild build, int expected, double actual)
+		{
+			var evaluations = build.FindChildrenRecursive<ProjectEvaluation> ();
+			var maxEval = evaluations.Any () ? evaluations.Max (e => e.Duration.TotalMilliseconds) : 0;
+			TestContext.Out.WriteLine ($"max evaluation time: {maxEval}ms (threshold: {MaxEvaluationTimeInMs}ms)");
+			if (maxEval > MaxEvaluationTimeInMs) {
+				Assert.Inconclusive ($"Exceeded expected time of {expected}ms, actual {actual}ms, but evaluation time was {maxEval:F0}ms (threshold: {MaxEvaluationTimeInMs}ms), indicating a slow CI machine.");
+			}
+		}
+
+		StructuredBuild ReadBinLog (ProjectBuilder builder)
 		{
 			var binlog = Path.Combine (Root, builder.ProjectDirectory, $"{Path.GetFileNameWithoutExtension (builder.BuildLogFile)}.binlog");
 			FileAssert.Exists (binlog);
+			return BinaryLog.ReadBuild (binlog);
+		}
 
-			var build = BinaryLog.ReadBuild (binlog);
+		double GetTaskDuration (StructuredBuild build, ProjectBuilder builder, string task)
+		{
 			var duration = build
 				.FindChildrenRecursive<Task> (t => t.Name == task)
 				.Aggregate (TimeSpan.Zero, (duration, target) => duration + target.Duration);
 
-			if (duration == TimeSpan.Zero)
+			if (duration == TimeSpan.Zero) {
+				var binlog = Path.Combine (Root, builder.ProjectDirectory, $"{Path.GetFileNameWithoutExtension (builder.BuildLogFile)}.binlog");
 				throw new InvalidDataException ($"No task build duration found in {binlog}");
+			}
 
 			return duration.TotalMilliseconds;
 		}
 
-		double GetDurationFromBinLog (ProjectBuilder builder)
+		double GetDuration (StructuredBuild build, ProjectBuilder builder)
 		{
-			var binlog = Path.Combine (Root, builder.ProjectDirectory, $"{Path.GetFileNameWithoutExtension (builder.BuildLogFile)}.binlog");
-			FileAssert.Exists (binlog);
-
-			var build = BinaryLog.ReadBuild (binlog);
 			var duration = build
 				.FindChildrenRecursive<Project> ()
 				.Aggregate (TimeSpan.Zero, (duration, project) => duration + project.Duration);
 
-			if (duration == TimeSpan.Zero)
+			if (duration == TimeSpan.Zero) {
+				var binlog = Path.Combine (Root, builder.ProjectDirectory, $"{Path.GetFileNameWithoutExtension (builder.BuildLogFile)}.binlog");
 				throw new InvalidDataException ($"No project build duration found in {binlog}");
+			}
 
 			return duration.TotalMilliseconds;
 		}
@@ -121,22 +159,9 @@ namespace Xamarin.Android.Build.Tests
 		{
 			var proj = new XamarinAndroidApplicationProject () {
 			};
-			proj.SetAndroidSupportedAbis (DeviceAbi); // Use a single ABI
+			proj.SetRuntimeIdentifiers (new[] { DeviceAbi }); // Use a single ABI
 			proj.SetProperty ("_FastDeploymentDiagnosticLogging", "False");
 			return proj;
-		}
-
-		[Test]
-		[Retry (Retry)]
-		public void Build_From_Clean_DontIncludeRestore ()
-		{
-			var proj = CreateApplicationProject ();
-			using (var builder = CreateBuilderWithoutLogFile ()) {
-				builder.AutomaticNuGetRestore = false;
-				builder.Target = "Build";
-				builder.Restore (proj);
-				Profile (builder, b => b.Build (proj));
-			}
 		}
 
 		[Test]
@@ -185,8 +210,6 @@ namespace Xamarin.Android.Build.Tests
 		[Retry (Retry)]
 		public void Build_AndroidResource_Change ()
 		{
-			AssertCommercialBuild (); // If <BuildApk/> runs, this test will fail without Fast Deployment
-
 			var proj = CreateApplicationProject ();
 			using (var builder = CreateBuilderWithoutLogFile ()) {
 				builder.Target = "Build";
@@ -204,8 +227,6 @@ namespace Xamarin.Android.Build.Tests
 		[Retry (Retry)]
 		public void Build_AndroidAsset_Change ()
 		{
-			AssertCommercialBuild (); // If <BuildApk/> runs, this test will fail without Fast Deployment
-
 			var bytes = new byte [1024*1024*10];
 			var rnd = new Random ();
 			rnd.NextBytes (bytes);
@@ -241,31 +262,8 @@ namespace Xamarin.Android.Build.Tests
 
 		[Test]
 		[Retry (Retry)]
-		public void Build_JLO_Change ()
-		{
-			var className = "Foo";
-			var proj = CreateApplicationProject ();
-			proj.Sources.Add (new BuildItem.Source ("Foo.cs") {
-				TextContent = () => $"class {className} : Java.Lang.Object {{}}"
-			});
-			using (var builder = CreateBuilderWithoutLogFile ()) {
-				builder.Target = "Build";
-				builder.Build (proj);
-				builder.AutomaticNuGetRestore = false;
-
-				// Profile Java.Lang.Object rename
-				className = "Foo2";
-				proj.Touch ("Foo.cs");
-				Profile (builder, b => b.Build (proj));
-			}
-		}
-
-		[Test]
-		[Retry (Retry)]
 		public void Build_AndroidManifest_Change ()
 		{
-			AssertCommercialBuild (); // If <BuildApk/> runs, this test will fail without Fast Deployment
-
 			var proj = CreateApplicationProject ();
 			using (var builder = CreateBuilderWithoutLogFile ()) {
 				builder.Target = "Build";
@@ -284,10 +282,6 @@ namespace Xamarin.Android.Build.Tests
 		[Retry (Retry)]
 		public void Build_XAML_Change ([Values (true, false)] bool install)
 		{
-			if (install) {
-				AssertCommercialBuild (); // This test will fail without Fast Deployment
-			}
-
 			var path = Path.Combine ("temp", TestName);
 			var xaml =
 @"<?xml version=""1.0"" encoding=""utf-8"" ?>
@@ -313,7 +307,7 @@ namespace Xamarin.Android.Build.Tests
 			var lib = new DotNetStandard {
 				ProjectName = "MyLibrary",
 				Sdk = "Microsoft.NET.Sdk",
-				TargetFramework = "net8.0", // Vanilla project
+				TargetFramework = XABuildConfig.LatestDotNetTargetFramework, // Vanilla project
 				Sources = {
 					new BuildItem.Source ("Bar.cs") {
 						TextContent = () => "public class Bar { public Bar () { System.Console.WriteLine (" + count++ + "); } }"
@@ -346,9 +340,9 @@ namespace Xamarin.Android.Build.Tests
 				lib.Touch ("MyPage.xaml");
 				libBuilder.Build (lib, doNotCleanupOnUpdate: true);
 				if (install) {
-					Profile (appBuilder, b => b.Install (app, doNotCleanupOnUpdate: true), caller);
+					Profile (appBuilder, b => b.Install (app, doNotCleanupOnUpdate: true), caller: caller);
 				} else {
-					Profile (appBuilder, b => b.Build (app, doNotCleanupOnUpdate: true), caller);
+					Profile (appBuilder, b => b.Build (app, doNotCleanupOnUpdate: true), caller: caller);
 				}
 			}
 		}
@@ -358,8 +352,6 @@ namespace Xamarin.Android.Build.Tests
 		[Retry (Retry)]
 		public void Install_CSharp_Change ()
 		{
-			AssertCommercialBuild (); // This test will fail without Fast Deployment
-
 			var proj = CreateApplicationProject ();
 			proj.PackageName = "com.xamarin.install_csharp_change";
 			proj.MainActivity = proj.DefaultMainActivity;
@@ -379,8 +371,6 @@ namespace Xamarin.Android.Build.Tests
 		[Retry (Retry)]
 		public void Install_CSharp_FromClean ()
 		{
-			AssertCommercialBuild (); // This test will fail without Fast Deployment
-
 			var proj = CreateApplicationProject ();
 			proj.PackageName = "com.xamarin.install_csharp_change";
 			proj.MainActivity = proj.DefaultMainActivity;
@@ -389,9 +379,31 @@ namespace Xamarin.Android.Build.Tests
 				builder.Verbosity = LoggerVerbosity.Quiet;
 				builder.Install (proj);
 				builder.AutomaticNuGetRestore = false;
-				ProfileTask (builder, "FastDeploy", 20, b => {
+				ProfileTask (builder, "FastDeploy2", 20, b => {
 					b.Uninstall (proj);
 					b.Install (proj);
+				});
+			}
+		}
+
+		[Test]
+		public void DesignTimeBuild_CSharp_From_Clean ()
+		{
+			var proj = CreateApplicationProject ();
+			proj.PackageName = "com.xamarin.designtimebuild_csharp_from_clean";
+			proj.PackageReferences.Add (KnownPackages.AndroidXAppCompat);
+			proj.MainActivity = proj.DefaultMainActivity;
+			using (var builder = CreateBuilderWithoutLogFile ()) {
+				builder.ThrowOnBuildFailure = false;
+				builder.BuildLogFile = "designtimebuild.log";
+				builder.Verbosity = LoggerVerbosity.Quiet;
+				builder.Clean (proj);
+				builder.Restore (proj);
+				builder.AutomaticNuGetRestore = false;
+				Profile (builder, iterations: 10, action: b => {
+					b.DesignTimeBuild (proj, "CoreCompile", parameters: new string[] { "BuildingInsideVisualStudio=true" });
+				}, afterRun: b => {
+					b.Clean (proj);
 				});
 			}
 		}

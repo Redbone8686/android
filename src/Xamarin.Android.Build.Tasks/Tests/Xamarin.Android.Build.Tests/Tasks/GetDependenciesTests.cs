@@ -27,11 +27,11 @@ namespace Xamarin.Android.Build.Tests {
 				BuildEngine = engine
 			};
 
+			task.AndroidApiLevel = "26";
 			task.PlatformToolsVersion = "26.0.3";
 			task.NdkVersion = "12.1";
 			task.NdkRequired = ndkRequred;
 			task.BuildToolsVersion = "26.0.1";
-			task.TargetFrameworkVersion = "v8.0";
 			task.ManifestFile = new TaskItem (Path.Combine (path, "AndroidManifest.xml"));
 			Assert.IsTrue (task.Execute ());
 			Assert.IsNotNull (task.Dependencies);
@@ -65,11 +65,11 @@ namespace Xamarin.Android.Build.Tests {
 				BuildEngine = engine
 			};
 
+			task.AndroidApiLevel = "26";
 			task.PlatformToolsVersion = "26.0.3";
 			task.NdkVersion = "12.1";
 			task.NdkRequired = true;
 			task.BuildToolsVersion = "26.0.1";
-			task.TargetFrameworkVersion = "v8.0";
 			task.ManifestFile = new TaskItem (Path.Combine (path, "AndroidManifest.xml"));
 			Assert.IsTrue (task.Execute ());
 			Assert.IsNotNull (task.Dependencies);
@@ -102,15 +102,15 @@ namespace Xamarin.Android.Build.Tests {
 			Directory.CreateDirectory (path);
 			var manifestFile = Path.Combine (path, "AndroidManifest.xml");
 			File.WriteAllText (manifestFile, @"<?xml version='1.0' ?>
-<manifest xmlns:android='http://schemas.android.com/apk/res/android' android:versionCode='1' android:versionName='1.0' package='Mono.Android_Tests'>
+<manifest xmlns:android='http://schemas.android.com/apk/res/android' android:versionCode='1' android:versionName='1.0' package='Mono.Android.NET_Tests'>
 	<uses-sdk android:minSdkVersion='21' />
 </manifest>");
 
+			task.AndroidApiLevel = "26";
 			task.PlatformToolsVersion = "26.0.3";
 			task.NdkVersion = "12.1";
 			task.NdkRequired = true;
 			task.BuildToolsVersion = "26.0.1";
-			task.TargetFrameworkVersion = "v8.0";
 			task.ManifestFile = new TaskItem (manifestFile);
 			Assert.IsTrue(task.Execute ());
 			Assert.IsNotNull (task.Dependencies);
@@ -125,6 +125,30 @@ namespace Xamarin.Android.Build.Tests {
 				"Dependencies should contains a ndk-bundle version 12.1");
 
 			Directory.Delete (path, recursive: true);
+		}
+
+		[Test]
+		public void MinorApiLevelEmitsPlatformDirectory ()
+		{
+			var path = Path.Combine ("temp", TestName);
+			var referencePath = CreateFauxReferencesDirectory (Path.Combine (path, "references"), new ApiInfo [] {
+				new ApiInfo () { Id = "36.1", Level = 36, Name = "Baklava", FrameworkVersion = "v16.1", Stable = true },
+			});
+			MonoAndroidHelper.RefreshSupportedVersions (new string [] { referencePath });
+			IBuildEngine engine = new MockBuildEngine (TestContext.Out);
+			var task = new CalculateProjectDependencies {
+				BuildEngine = engine
+			};
+
+			task.AndroidApiLevel = "36.1";
+			task.PlatformToolsVersion = "36.0.0";
+			task.BuildToolsVersion = "36.0.0";
+			task.ManifestFile = new TaskItem (Path.Combine (path, "AndroidManifest.xml"));
+			Assert.IsTrue (task.Execute ());
+			Assert.IsNotNull (task.Dependencies);
+			Assert.IsNotNull (task.Dependencies.FirstOrDefault (x => x.ItemSpec == "platforms/android-36.1"),
+				"Dependencies should contain platform android-36.1 when AndroidApiLevel has a minor version");
+			Directory.Delete (Path.Combine (Root, path), recursive: true);
 		}
 	}
 }

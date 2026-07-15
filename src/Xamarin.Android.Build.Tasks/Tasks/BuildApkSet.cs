@@ -1,4 +1,6 @@
-﻿using Microsoft.Build.Framework;
+#nullable enable
+
+using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 using System;
 using System.IO;
@@ -16,31 +18,31 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "BAS";
 
 		[Required]
-		public string AppBundle { get; set; }
+		public string AppBundle { get; set; } = "";
 
 		[Required]
-		public string Output { get; set; }
+		public string Output { get; set; } = "";
 
 		[Required]
-		public string Aapt2ToolPath { get; set; }
+		public string Aapt2ToolPath { get; set; } = "";
 
-		public string Aapt2ToolExe { get; set; }
+		public string? Aapt2ToolExe { get; set; }
 
 		public string Aapt2ToolName => OS.IsWindows ? "aapt2.exe" : "aapt2";
 
 		[Required]
-		public string KeyStore { get; set; }
+		public string KeyStore { get; set; } = "";
 
 		[Required]
-		public string KeyAlias { get; set; }
+		public string KeyAlias { get; set; } = "";
 
 		[Required]
-		public string KeyPass { get; set; }
+		public string KeyPass { get; set; } = "";
 
 		[Required]
-		public string StorePass { get; set; }
+		public string StorePass { get; set; } = "";
 
-		public string ExtraArgs { get; set; }
+		public string? ExtraArgs { get; set; }
 
 		public bool GenerateUniversalApkSet { get; set; } = false;
 
@@ -71,7 +73,7 @@ namespace Xamarin.Android.Tasks
 
 		internal override CommandLineBuilder GetCommandLineBuilder ()
 		{
-			var aapt2 = string.IsNullOrEmpty (Aapt2ToolExe) ? Aapt2ToolName : Aapt2ToolExe;
+			var aapt2 = Aapt2ToolExe.IsNullOrEmpty () ? Aapt2ToolName : Aapt2ToolExe;
 			var cmd   = base.GetCommandLineBuilder ();
 			cmd.AppendSwitch ("build-apks");
 			if (GenerateUniversalApkSet) {
@@ -88,7 +90,7 @@ namespace Xamarin.Android.Tasks
 			cmd.AppendSwitchIfNotNull ("--ks-key-alias ", KeyAlias);
 			AddStorePass (cmd, "--key-pass", KeyPass);
 			AddStorePass (cmd, "--ks-pass", StorePass);
-			if (!string.IsNullOrEmpty (ExtraArgs))
+			if (!ExtraArgs.IsNullOrEmpty ())
 				cmd.AppendSwitch (ExtraArgs);
 			return cmd;
 		}

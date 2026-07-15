@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -18,22 +19,22 @@ namespace Xamarin.Android.Tasks
 
 		sealed class Config
 		{
-			public string AssemblerPath;
-			public string AssemblerOptions;
-			public string InputSource;
+			public string? AssemblerPath;
+			public string? AssemblerOptions;
+			public string? InputSource;
 		}
 
 		[Required]
-		public ITaskItem[] Sources { get; set; }
+		public ITaskItem[] Sources { get; set; } = [];
 
 		[Required]
 		public bool DebugBuild { get; set; }
 
 		[Required]
-		public new string WorkingDirectory { get; set; }
+		public new string WorkingDirectory { get; set; } = "";
 
 		[Required]
-		public string AndroidBinUtilsDirectory { get; set; }
+		public string AndroidBinUtilsDirectory { get; set; } = "";
 
 		public override System.Threading.Tasks.Task RunTaskAsync ()
 		{

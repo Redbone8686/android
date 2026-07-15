@@ -15,7 +15,7 @@ namespace Xamarin.Android.BuildTools.PrepTasks
 	public sealed class GitBranch : Git
 	{
 		[Output]
-		public                  string      Branch              { get; set; }
+		public                  string      Branch              { get; set; } = string.Empty;
 
 		protected   override    bool        LogTaskMessages     {
 			get { return false; }
@@ -32,7 +32,7 @@ namespace Xamarin.Android.BuildTools.PrepTasks
 			if (!string.IsNullOrEmpty (build_sourcebranchname) && build_sourcebranchname.IndexOf ("merge", StringComparison.OrdinalIgnoreCase) == -1) {
 				Branch = build_sourcebranchname.Replace ("refs/heads/", string.Empty);
 				Log.LogMessage ($"Using BUILD_SOURCEBRANCH value: {Branch}");
-				return true;
+				goto done;
 			}
 
 			string gitHeadFile = Path.Combine (WorkingDirectory.ItemSpec, ".git", "HEAD");
@@ -48,8 +48,8 @@ namespace Xamarin.Android.BuildTools.PrepTasks
 				base.Execute ();
 			}
 
+done:
 			Log.LogMessage (MessageImportance.Low, $"  [Output] {nameof (Branch)}: {Branch}");
-
 			return !Log.HasLoggedErrors;
 		}
 

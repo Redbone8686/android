@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -14,38 +16,36 @@ namespace Xamarin.Android.Tasks
 
 		const int DefaultMinSDKVersion = 11;
 
-		public string CommandLineToolsVersion { get; set; }
-
-		public string AndroidApiLevel { get; set; }
+		public string? CommandLineToolsVersion { get; set; }
 
 		[Required]
-		public string TargetFrameworkVersion { get; set; }
+		public string AndroidApiLevel { get; set; } = "";
 
 		[Required]
-		public ITaskItem ManifestFile { get; set; }
+		public ITaskItem ManifestFile { get; set; } = null!;
 
 		[Required]
-		public string BuildToolsVersion { get; set; }
+		public string BuildToolsVersion { get; set; } = "";
 
-		public string PlatformToolsVersion { get; set; }
+		public string? PlatformToolsVersion { get; set; }
 
-		public string NdkVersion { get; set; }
+		public string? NdkVersion { get; set; }
 
 		public bool NdkRequired { get; set; }
 
-		public string JdkVersion { get; set; }
+		public string? JdkVersion { get; set; }
 
 		public bool GetJavaDependencies { get; set; } = false;
 
 		[Output]
-		public ITaskItem [] Dependencies { get; set; }
+		public ITaskItem []? Dependencies { get; set; }
 
 		[Output]
-		public ITaskItem[] JavaDependencies { get; set; }
+		public ITaskItem[]? JavaDependencies { get; set; }
 
 		ITaskItem CreateAndroidDependency (string include, string version)
 		{
-			if (string.IsNullOrEmpty (version))
+			if (version.IsNullOrEmpty ())
 				return new TaskItem (include);
 
 			return new TaskItem (include, new Dictionary<string, string> {
@@ -57,27 +57,34 @@ namespace Xamarin.Android.Tasks
 		{
 			var dependencies = new List<ITaskItem> ();
 			var javaDependencies = new List<ITaskItem> ();
-			var targetApiLevel = string.IsNullOrEmpty (AndroidApiLevel) ?
-				MonoAndroidHelper.SupportedVersions.GetApiLevelFromFrameworkVersion (TargetFrameworkVersion) :
-				MonoAndroidHelper.SupportedVersions.GetApiLevelFromId (AndroidApiLevel);
+			if (!MonoAndroidHelper.TryParseApiLevel (AndroidApiLevel, out var targetVersion)) {
+				Log.LogDebugMessage ($"Failed to parse AndroidApiLevel '{AndroidApiLevel}', defaulting to {DefaultMinSDKVersion}");
+				targetVersion = new Version (DefaultMinSDKVersion, 0);
+			}
+			var targetApiLevel = targetVersion.Major;
 			var manifestApiLevel = DefaultMinSDKVersion;
 			if (File.Exists (ManifestFile.ItemSpec)) {
 				var manifest = AndroidAppManifest.Load (ManifestFile.ItemSpec, MonoAndroidHelper.SupportedVersions);
 				manifestApiLevel = manifest.TargetSdkVersion ?? manifest.MinSdkVersion ?? DefaultMinSDKVersion;
 			}
-			var sdkVersion = Math.Max (targetApiLevel.Value, manifestApiLevel);
-			dependencies.Add (CreateAndroidDependency ($"platforms/android-{sdkVersion}", $""));
+			var sdkVersion = Math.Max (targetApiLevel, manifestApiLevel);
+			// Use the platform Id (e.g. "36.1") for the directory name when the target has a minor version,
+			// since Google ships platforms/android-36.1 as a separate SDK platform from platforms/android-36.
+			var platformId = sdkVersion == targetVersion.Major
+				? (MonoAndroidHelper.SupportedVersions.GetIdFromVersionCodeFull (targetVersion) ?? sdkVersion.ToString ())
+				: sdkVersion.ToString ();
+			dependencies.Add (CreateAndroidDependency ($"platforms/android-{platformId}", ""));
 			dependencies.Add (CreateAndroidDependency ($"build-tools/{BuildToolsVersion}", BuildToolsVersion));
-			if (!string.IsNullOrEmpty (PlatformToolsVersion)) {
+			if (!PlatformToolsVersion.IsNullOrEmpty ()) {
 				dependencies.Add (CreateAndroidDependency ("platform-tools", PlatformToolsVersion));
 			}
-			if (!string.IsNullOrEmpty (CommandLineToolsVersion)) {
+			if (!CommandLineToolsVersion.IsNullOrEmpty ()) {
 				dependencies.Add (CreateAndroidDependency ($"cmdline-tools/{CommandLineToolsVersion}", CommandLineToolsVersion));
 			}
-			if (!string.IsNullOrEmpty (NdkVersion) && NdkRequired) {
+			if (!NdkVersion.IsNullOrEmpty () && NdkRequired) {
 				dependencies.Add (CreateAndroidDependency ("ndk-bundle", NdkVersion));
 			}
-			if (!string.IsNullOrEmpty (JdkVersion) && GetJavaDependencies) {
+			if (!JdkVersion.IsNullOrEmpty () && GetJavaDependencies) {
 				javaDependencies.Add (CreateAndroidDependency ("jdk", JdkVersion));
 			}
 			Dependencies = dependencies.ToArray ();

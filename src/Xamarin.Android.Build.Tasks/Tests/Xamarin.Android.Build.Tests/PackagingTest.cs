@@ -1,15 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using NUnit.Framework;
-using Xamarin.ProjectTools;
 using System.Linq;
 using System.Text;
-using System.Collections.Generic;
 using System.Xml.Linq;
-using Xamarin.Tools.Zip;
+using Microsoft.Build.Framework;
+using NUnit.Framework;
 using Xamarin.Android.Tasks;
 using Xamarin.Android.Tools;
-using Microsoft.Build.Framework;
+using Xamarin.ProjectTools;
+using Xamarin.Tools.Zip;
 
 namespace Xamarin.Android.Build.Tests
 {
@@ -17,11 +17,17 @@ namespace Xamarin.Android.Build.Tests
 	public class PackagingTest : BaseTest
 	{
 		[Test]
-		public void CheckProguardMappingFileExists ()
+		public void CheckProguardMappingFileExists ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var proj = new XamarinAndroidApplicationProject {
-				IsRelease = true,
+				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty (proj.ReleaseProperties, KnownProperties.AndroidLinkTool, "r8");
 			// Projects must set $(AndroidCreateProguardMappingFile) to true to opt in
 			proj.SetProperty (proj.ReleaseProperties, "AndroidCreateProguardMappingFile", true);
@@ -34,11 +40,16 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void CheckR8InfoMessagesToNotBreakTheBuild ()
+		public void CheckR8InfoMessagesToNotBreakTheBuild ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinAndroidApplicationProject {
-				IsRelease = true,
+				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty (proj.ReleaseProperties, KnownProperties.AndroidLinkTool, "r8");
 			proj.SetProperty (proj.ReleaseProperties, "AndroidCreateProguardMappingFile", true);
 			var packages = proj.PackageReferences;
@@ -57,14 +68,15 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void CheckDebugModeWithTrimming ()
+		public void CheckDebugModeWithTrimming ([Values (AndroidRuntime.CoreCLR)] AndroidRuntime runtime)
 		{
-			bool usesAssemblyStores = false;
+			bool usesAssemblyStores = runtime == AndroidRuntime.CoreCLR;
 			var proj = new XamarinAndroidApplicationProject {
 				ProjectName = "MyApp",
 				IsRelease = false,
 				EmbedAssembliesIntoApk = true,
 			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty ("PublishTrimmed", "true");
 			proj.SetProperty ("AndroidUseAssemblyStore", usesAssemblyStores.ToString ());
 
@@ -83,16 +95,25 @@ namespace Xamarin.Android.Build.Tests
 
 		[Test]
 		[NonParallelizable] // Commonly fails NuGet restore
-		public void CheckIncludedAssemblies ([Values (false, true)] bool usesAssemblyStores)
+		public void CheckIncludedAssemblies ([Values (false, true)] bool usesAssemblyStores, [Values (AndroidRuntime.CoreCLR)] AndroidRuntime runtime)
 		{
+			if (!usesAssemblyStores && runtime == AndroidRuntime.CoreCLR) {
+				Assert.Ignore ("CoreCLR only supports builds with assembly stores.");
+				return;
+			}
+
 			var proj = new XamarinAndroidApplicationProject {
 				IsRelease = true
 			};
 
 			AndroidTargetArch[] supportedArches = new[] {
-				AndroidTargetArch.Arm,
+				runtime switch {
+					AndroidRuntime.MonoVM => AndroidTargetArch.Arm,
+					AndroidRuntime.CoreCLR => AndroidTargetArch.Arm64,
+					_ => throw new NotSupportedException ($"Unsupported runtime '{runtime}'")
+				}
 			};
-
+			proj.SetRuntime (runtime);
 			proj.SetProperty ("AndroidUseAssemblyStore", usesAssemblyStores.ToString ());
 			proj.SetRuntimeIdentifiers (supportedArches);
 			proj.PackageReferences.Add (new Package {
@@ -127,10 +148,12 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 				"Humanizer.dll",
 				"es/Humanizer.resources.dll",
 				"System.Collections.dll",
-				"System.Collections.Concurrent.dll",
 				"System.Text.RegularExpressions.dll",
-				"libarc.bin.so",
 			};
+
+			if (runtime == AndroidRuntime.MonoVM) {
+				expectedFiles.Add ("libarc.bin.so");
+			}
 
 			using (var b = CreateApkBuilder ()) {
 				Assert.IsTrue (b.Build (proj), "build should have succeeded.");
@@ -149,12 +172,63 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 			}
 		}
 
-		[Test]
-		public void CheckClassesDexIsIncluded ()
+		static IEnumerable<object[]> Get_CheckProjectWithSpaceInNameWorks_Data ()
 		{
+			var ret = new List<object[]> ();
+
+			foreach (AndroidRuntime runtime in new[] { AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT }) {
+				AddTestData ("Test Me", runtime);
+
+				// testing characters as per https://www.compart.com/en/unicode/category/Zs
+				AddTestData ("TestUnicodeSpace0020\u0020Me", runtime);
+				AddTestData ("TestUnicodeSpace2000\u2000Me", runtime);
+				AddTestData ("TestUnicodeSpace2009\u2009Me", runtime);
+				AddTestData ("TestUnicodeSpace2002\u2002Me", runtime);
+				AddTestData ("TestUnicodeSpace2007\u2007Me", runtime);
+			}
+
+			return ret;
+
+			void AddTestData (string projectName, AndroidRuntime runtime)
+			{
+				ret.Add (new object[] {
+					projectName,
+					runtime,
+				});
+			}
+		}
+
+		[Test]
+		[Category ("SmokeTests")]
+		[TestCaseSource (nameof (Get_CheckProjectWithSpaceInNameWorks_Data))]
+		public void CheckProjectWithSpaceInNameWorks (string projectName, AndroidRuntime runtime)
+		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
+				IsRelease = isRelease,
+				ProjectName = projectName,
+				RootNamespace = "Test.Me",
 			};
+			proj.SetRuntime (runtime);
+			using (var b = CreateApkBuilder ()) {
+				Assert.IsTrue (b.Build (proj), "build failed");
+			}
+		}
+
+		[Test]
+		public void CheckClassesDexIsIncluded ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
+		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+			var proj = new XamarinAndroidApplicationProject () {
+				IsRelease = isRelease,
+			};
+			proj.SetRuntime (runtime);
 			using (var b = CreateApkBuilder ()) {
 				Assert.IsTrue (b.Build (proj), "build failed");
 				var apk = Path.Combine (Root, b.ProjectDirectory,
@@ -167,13 +241,18 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 
 		[Test]
 		[Parallelizable (ParallelScope.Self)]
-		public void CheckIncludedNativeLibraries ([Values (true, false)] bool compressNativeLibraries)
+		public void CheckIncludedNativeLibraries ([Values] bool compressNativeLibraries, [Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
+				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.PackageReferences.Add(KnownPackages.SQLitePCLRaw_Core);
-			proj.SetAndroidSupportedAbis ("x86");
+			proj.SetRuntimeIdentifiers (new[] { "x86_64" });
 			proj.SetProperty (proj.ReleaseProperties, "AndroidStoreUncompressedFileExtensions", compressNativeLibraries ? "" : "so");
 			using (var b = CreateApkBuilder ()) {
 				b.ThrowOnBuildFailure = false;
@@ -183,7 +262,7 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 				CompressionMethod method = compressNativeLibraries ? CompressionMethod.Deflate : CompressionMethod.Store;
 				using (var zip = ZipHelper.OpenZip (apk)) {
 					var libFiles = zip.Where (x => x.FullName.StartsWith("lib/", StringComparison.Ordinal) && !x.FullName.Equals("lib/", StringComparison.InvariantCultureIgnoreCase));
-					var abiPaths = new string[] { "lib/x86/" };
+					var abiPaths = new string[] { "lib/x86_64/" };
 					foreach (var file in libFiles) {
 						Assert.IsTrue (abiPaths.Any (x => file.FullName.Contains (x)), $"Apk contains an unnesscary lib file: {file.FullName}");
 						Assert.IsTrue (file.CompressionMethod == method, $"{file.FullName} should have been CompressionMethod.{method} in the apk, but was CompressionMethod.{file.CompressionMethod}");
@@ -193,9 +272,17 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 		}
 
 		[Test]
-		public void EmbeddedDSOs ()
+		public void EmbeddedDSOs ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-			var proj = new XamarinAndroidApplicationProject ();
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+			};
+			proj.SetRuntime (runtime);
 			proj.AndroidManifest = $@"<?xml version=""1.0"" encoding=""utf-8""?>
 <manifest xmlns:android=""http://schemas.android.com/apk/res/android"" android:versionCode=""1"" android:versionName=""1.0"" package=""{proj.PackageName}"">
 	<uses-sdk />
@@ -203,7 +290,7 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 	</application>
 </manifest>";
 
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName))) {
+			using (var b = CreateApkBuilder ()) {
 				Assert.IsTrue (b.Build (proj), "first build should have succeeded");
 
 				var manifest = Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath, "android", "AndroidManifest.xml");
@@ -249,9 +336,16 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 		}
 
 		[Test]
-		public void IncrementalCompression ()
+		public void IncrementalCompression ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-			var proj = new XamarinAndroidApplicationProject ();
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+			};
+			proj.SetRuntime (runtime);
 			proj.OtherBuildItems.Add (new AndroidItem.AndroidAsset ("foo.bar") {
 				BinaryContent = () => new byte [1024],
 			});
@@ -293,9 +387,22 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 		}
 
 		[Test]
-		public void ExplicitPackageNamingPolicy ()
+		public void ExplicitPackageNamingPolicy ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-			var proj = new XamarinAndroidApplicationProject ();
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			// TODO: NativeAOT doesn't create obj/Release/android/src/foo/Bar.java, instead it creates obj/Release/android/src/crc64dca3aed1e0ff8a1a/Bar.java
+			if (runtime == AndroidRuntime.NativeAOT) {
+				Assert.Ignore ("NativeAOT doesn't follow the explicit package naming policy");
+			}
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+			};
+			proj.SetRuntime (runtime);
 			proj.Sources.Add (new BuildItem.Source ("Bar.cs") {
 				TextContent = () => "namespace Foo { class Bar : Java.Lang.Object { } }"
 			});
@@ -308,8 +415,13 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 		}
 
 		[Test]
-		public void CheckMetadataSkipItemsAreProcessedCorrectly ()
+		public void CheckMetadataSkipItemsAreProcessedCorrectly ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var packages = new List<Package> () {
 				KnownPackages.Xamarin_Jetbrains_Annotations,
 			};
@@ -320,6 +432,7 @@ Console.WriteLine ($""{DateTime.UtcNow.AddHours(-30).Humanize(culture:c)}"");
 	<AndroidSkipResourceExtraction>True</AndroidSkipResourceExtraction>
 </AndroidCustomMetaDataForReferences>";
 			var proj = new XamarinAndroidApplicationProject () {
+				IsRelease = isRelease,
 				Imports = {
 					new Import (() => "CustomMetaData.target") {
 						TextContent = () => @"<Project xmlns=""http://schemas.microsoft.com/developer/msbuild/2003"">
@@ -330,6 +443,7 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 					},
 				}
 			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty (proj.DebugProperties, "AndroidPackageNamingPolicy", "Lowercase");
 			foreach (var package in packages)
 				proj.PackageReferences.Add (package);
@@ -355,14 +469,61 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 		}
 
 		[Test]
-		public void CheckSignApk ([Values(true, false)] bool useApkSigner, [Values(true, false)] bool perAbiApk)
+		[NonParallelizable]
+		public void MonoAndroidExportIsNotPackagedWithTrimmableTypeMap ()
 		{
+			const AndroidRuntime runtime = AndroidRuntime.CoreCLR;
+			const bool isRelease = false;
+
+			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
+				References = {
+					new BuildItem.Reference ("Mono.Android.Export"),
+				},
+			};
+			proj.SetRuntime (runtime);
+			proj.SetProperty ("_AndroidTypeMapImplementation", "trimmable");
+			proj.Sources.Add (new BuildItem.Source ("ContainsExportedMethods.cs") {
+				TextContent = () => @"using System;
+using Java.Interop;
+
+namespace UnnamedProject {
+	class ContainsExportedMethods : Java.Lang.Object {
+		[Export]
+		public void Exported ()
+		{
+			Console.WriteLine (""# ExportedCallbackInvoked"");
+		}
+	}
+}"
+			});
+
+			using (var b = CreateApkBuilder ()) {
+				Assert.IsTrue (b.Build (proj), "build failed");
+
+				var apk = Path.Combine (Root, b.ProjectDirectory, proj.OutputPath, $"{proj.PackageName}-Signed.apk");
+				var helper = new ArchiveAssemblyHelper (apk, useAssemblyStores: true);
+				var contents = helper.ListArchiveContents ();
+
+				Assert.IsFalse (
+					contents.Any (e => Path.GetFileName (e).Equals ("Mono.Android.Export.dll", StringComparison.Ordinal)),
+					$"APK file `{apk}` should not contain Mono.Android.Export.dll when the trimmable type map is enabled.");
+			}
+		}
+
+		[Test]
+		public void CheckSignApk ([Values] bool useApkSigner, [Values] bool perAbiApk, [Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
+		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			string ext = Environment.OSVersion.Platform != PlatformID.Unix ? ".bat" : "";
 			var foundApkSigner = Directory.EnumerateDirectories (Path.Combine (AndroidSdkPath, "build-tools")).Any (dir => Directory.EnumerateFiles (dir, "apksigner"+ ext).Any ());
 			if (useApkSigner && !foundApkSigner) {
 				Assert.Ignore ("Skipping test. Required build-tools verison which contains apksigner is not installed.");
 			}
-			string keyfile = Path.Combine (Root, "temp", TestName, "release.keystore");
+			string keyfile = Path.Combine (Root, "temp", TestName, "keystore", "release.keystore");
 			if (File.Exists (keyfile))
 				File.Delete (keyfile);
 			string keyToolPath = Path.Combine (AndroidSdkResolver.GetJavaSdkPath (), "bin");
@@ -383,8 +544,9 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 			};
 			Assert.IsTrue (task.Execute (), "Task should have succeeded.");
 			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
+				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty (proj.ReleaseProperties, "AndroidUseApkSigner", useApkSigner);
 			proj.SetProperty (proj.ReleaseProperties, "AndroidKeyStore", "True");
 			proj.SetProperty (proj.ReleaseProperties, "AndroidSigningKeyStore", keyfile);
@@ -393,29 +555,44 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 			proj.SetProperty (proj.ReleaseProperties, "AndroidSigningStorePass", Uri.EscapeDataString (pass));
 			proj.SetProperty (proj.ReleaseProperties, KnownProperties.AndroidCreatePackagePerAbi, perAbiApk);
 			if (perAbiApk) {
-				proj.SetAndroidSupportedAbis ("armeabi-v7a", "x86", "arm64-v8a", "x86_64");
+				if (runtime == AndroidRuntime.MonoVM) {
+					proj.SetRuntimeIdentifiers (new[] { "armeabi-v7a", "x86", "arm64-v8a", "x86_64" });
+				} else {
+					proj.SetRuntimeIdentifiers (AndroidTargetArch.Arm64, AndroidTargetArch.X86_64);
+				}
 			} else {
-				proj.SetAndroidSupportedAbis ("armeabi-v7a", "x86");
+				proj.SetRuntimeIdentifiers (AndroidTargetArch.Arm64, AndroidTargetArch.X86_64);
 			}
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestContext.CurrentContext.Test.Name))) {
+			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName, "App"))) {
 				var bin = Path.Combine (Root, b.ProjectDirectory, proj.OutputPath);
 				Assert.IsTrue (b.Build (proj), "First build failed");
-				b.AssertHasNoWarnings ();
+				if (runtime != AndroidRuntime.NativeAOT) {
+					b.AssertHasNoWarnings ();
+				} else {
+					b.AssertHasAtMostWarnings (2);
+				}
 
 				//Make sure the APKs are signed
 				foreach (var apk in Directory.GetFiles (bin, "*-Signed.apk")) {
-					using (var zip = ZipHelper.OpenZip (apk)) {
-						Assert.IsTrue (zip.Any (e => e.FullName == "META-INF/MANIFEST.MF"), $"APK file `{apk}` is not signed! It is missing `META-INF/MANIFEST.MF`.");
-					}
+					AssertApkIsSigned (apk);
 				}
 
 				// Make sure the APKs have unique version codes
 				if (perAbiApk) {
-					int armManifestCode = GetVersionCodeFromIntermediateManifest (Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath, "android", "armeabi-v7a", "AndroidManifest.xml"));
-					int x86ManifestCode = GetVersionCodeFromIntermediateManifest (Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath, "android", "x86", "AndroidManifest.xml"));
+					var versionList = new List<int> ();
+					int armManifestCode = Int32.MinValue;
+					int x86ManifestCode = Int32.MinValue;
+					if (runtime == AndroidRuntime.MonoVM) {
+						armManifestCode = GetVersionCodeFromIntermediateManifest (Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath, "android", "armeabi-v7a", "AndroidManifest.xml"));
+						x86ManifestCode = GetVersionCodeFromIntermediateManifest (Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath, "android", "x86", "AndroidManifest.xml"));
+						versionList.Add (armManifestCode);
+						versionList.Add (x86ManifestCode);
+					}
+
 					int arm64ManifestCode = GetVersionCodeFromIntermediateManifest (Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath, "android", "arm64-v8a", "AndroidManifest.xml"));
 					int x86_64ManifestCode = GetVersionCodeFromIntermediateManifest (Path.Combine (Root, b.ProjectDirectory, proj.IntermediateOutputPath, "android", "x86_64", "AndroidManifest.xml"));
-					var versionList = new List<int> { armManifestCode, x86ManifestCode, arm64ManifestCode, x86_64ManifestCode };
+					versionList.Add (arm64ManifestCode);
+					versionList.Add (x86_64ManifestCode);
 					Assert.True (versionList.Distinct ().Count () == versionList.Count,
 						$"APK version codes were not unique - armeabi-v7a: {armManifestCode}, x86: {x86ManifestCode}, arm64-v8a: {arm64ManifestCode}, x86_64: {x86_64ManifestCode}");
 				}
@@ -424,13 +601,12 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 				item.TextContent = () => proj.StringsXml.Replace ("${PROJECT_NAME}", "Foo");
 				item.Timestamp = null;
 				Assert.IsTrue (b.Build (proj), "Second build failed");
+				// Resource-only change does not trigger IlcCompile, so no IL3053 warnings on second build
 				b.AssertHasNoWarnings ();
 
 				//Make sure the APKs are signed
 				foreach (var apk in Directory.GetFiles (bin, "*-Signed.apk")) {
-					using (var zip = ZipHelper.OpenZip (apk)) {
-						Assert.IsTrue (zip.Any (e => e.FullName == "META-INF/MANIFEST.MF"), $"APK file `{apk}` is not signed! It is missing `META-INF/MANIFEST.MF`.");
-					}
+					AssertApkIsSigned (apk);
 				}
 			}
 
@@ -448,16 +624,20 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 		}
 
 		[Test]
-		public void CheckAppBundle ([Values (true, false)] bool isRelease)
+		public void CheckAppBundle ([Values] bool isRelease, [Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinAndroidApplicationProject () {
 				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty ("AndroidPackageFormat", "aab");
 			// Disable the fast deployment because it is not currently compatible with aabs and so gives an XA0119 build error.
 			proj.EmbedAssembliesIntoApk = true;
 
-			using (var b = CreateApkBuilder (Path.Combine ("temp", TestName))) {
+			using (var b = CreateApkBuilder ()) {
 				var bin = Path.Combine (Root, b.ProjectDirectory, proj.OutputPath);
 				Assert.IsTrue (b.Build (proj), "first build should have succeeded.");
 
@@ -476,10 +656,19 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 		}
 
 		[Test]
-		public void MissingSatelliteAssemblyInLibrary ()
+		public void MissingSatelliteAssemblyInLibrary ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+			if (runtime == AndroidRuntime.NativeAOT) {
+				Assert.Ignore ("NativeAOT builds don't package satellite assemblies");
+			}
+
 			var path = Path.Combine ("temp", TestName);
 			var lib = new XamarinAndroidLibraryProject {
+				IsRelease = isRelease,
 				ProjectName = "Localization",
 				OtherBuildItems = {
 					new BuildItem ("EmbeddedResource", "Foo.resx") {
@@ -487,6 +676,7 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 					},
 				}
 			};
+			lib.SetRuntime (runtime);
 
 			var languages = new string[] {"es", "de", "fr", "he", "it", "pl", "pt", "ru", "sl" };
 			foreach (string lang in languages) {
@@ -500,6 +690,7 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 			var app = new XamarinAndroidApplicationProject {
 				IsRelease = true,
 			};
+			app.SetRuntime (runtime);
 			app.References.Add (new BuildItem.ProjectReference ($"..\\{lib.ProjectName}\\{lib.ProjectName}.csproj", lib.ProjectName, lib.ProjectGuid));
 
 			using (var libBuilder = CreateDllBuilder (Path.Combine (path, lib.ProjectName)))
@@ -523,10 +714,21 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 		}
 
 		[Test]
-		public void MissingSatelliteAssemblyInApp ()
+		public void MissingSatelliteAssemblyInApp ([Values] bool publishAot, [Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
+			// PublishAot is NativeAOT but it doesn't support assemblies, so when `publishAot` is `true`, we run only
+			// the Mono test.
+			if (publishAot && runtime != AndroidRuntime.MonoVM) {
+				Assert.Ignore ("NativeAOT and CoreCLR don't support PublishAot with satellite assemblies");
+			}
+
 			var proj = new XamarinAndroidApplicationProject {
-				IsRelease = true,
+				IsRelease = isRelease,
 				OtherBuildItems = {
 					new BuildItem ("EmbeddedResource", "Foo.resx") {
 						TextContent = () => InlineData.ResxWithContents ("<data name=\"CancelButton\"><value>Cancel</value></data>")
@@ -536,25 +738,38 @@ string.Join ("\n", packages.Select (x => metaDataTemplate.Replace ("%", x.Id))) 
 					}
 				}
 			};
+			proj.SetPublishAot (publishAot);
 
 			using (var b = CreateApkBuilder ()) {
+				b.Verbosity = LoggerVerbosity.Diagnostic; // Needed for --satellite switch to appear in the log
 				b.Target = "Build";
 				Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
 				b.Target = "SignAndroidPackage";
 				Assert.IsTrue (b.Build (proj), "SignAndroidPackage should have succeeded.");
 
-				var apk = Path.Combine (Root, b.ProjectDirectory,
-					proj.OutputPath, $"{proj.PackageName}-Signed.apk");
-				var helper = new ArchiveAssemblyHelper (apk);
-				foreach (string abi in proj.GetRuntimeIdentifiersAsAbis ()) {
-					Assert.IsTrue (helper.Exists ($"assemblies/{abi}/es/{proj.ProjectName}.resources.dll"), "Apk should contain satellite assemblies!");
+				if (publishAot) {
+					// Best idea thus far is to assert ILC's --satellite switch
+					var regex = $"--satellite:.+{proj.ProjectName}.resources.dll";
+					StringAssertEx.ContainsRegex (regex, b.LastBuildOutput, $"Build log should contain the pattern: {regex}");
+				} else {
+					var apk = Path.Combine (Root, b.ProjectDirectory,
+						proj.OutputPath, $"{proj.PackageName}-Signed.apk");
+					var helper = new ArchiveAssemblyHelper (apk);
+					foreach (string abi in proj.GetRuntimeIdentifiersAsAbis ()) {
+						Assert.IsTrue (helper.Exists ($"assemblies/{abi}/es/{proj.ProjectName}.resources.dll"), "Apk should contain satellite assemblies!");
+					}
 				}
 			}
 		}
 
 		[Test]
-		public void IgnoreManifestFromJar ()
+		public void IgnoreManifestFromJar ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			string java = @"
 package com.xamarin.testing;
 
@@ -569,6 +784,7 @@ public class Test
 			Directory.CreateDirectory (javaDir);
 			File.WriteAllText (Path.Combine (javaDir, "..", "..", "..", "AndroidManifest.xml"), @"<?xml version='1.0' ?><maniest />");
 			var lib = new XamarinAndroidBindingProject () {
+				IsRelease = isRelease,
 				AndroidClassParser = "class-parse",
 				ProjectName = "Binding1",
 			};
@@ -582,9 +798,12 @@ public class Test
 					AdditionalFileExtensions = "*.xml",
 				}.Build
 			});
+			lib.SetRuntime (runtime);
+
 			var app = new XamarinAndroidApplicationProject {
-				IsRelease = true,
+				IsRelease = isRelease,
 			};
+			app.SetRuntime (runtime);
 			app.References.Add (new BuildItem.ProjectReference ($"..\\{lib.ProjectName}\\{lib.ProjectName}.csproj", lib.ProjectName, lib.ProjectGuid));
 
 			using (var builder = CreateDllBuilder (Path.Combine (path, lib.ProjectName))) {
@@ -595,20 +814,23 @@ public class Test
 				using (var b = CreateApkBuilder (Path.Combine (path, app.ProjectName))) {
 					b.Verbosity = LoggerVerbosity.Detailed;
 					Assert.IsTrue (b.Build (app), "Build of jar should have succeeded.");
-					var jar = "2965D0C9A2D5DB1E.jar";
-					string expected = $"Ignoring jar entry AndroidManifest.xml from {jar}: the same file already exists in the apk";
-					Assert.IsTrue (b.LastBuildOutput.ContainsText (expected), $"AndroidManifest.xml for {jar} should have been ignored.");
+					string expected = "Ignoring jar entry AndroidManifest.xml from ";
+					Assert.IsTrue (b.LastBuildOutput.ContainsText (expected), "AndroidManifest.xml from a jar should have been ignored.");
 				}
 			}
 		}
 
 		[Test]
-		public void CheckExcludedFilesAreMissing ()
+		public void CheckExcludedFilesAreMissing ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
+				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.PackageReferences.Add (KnownPackages.Xamarin_Kotlin_StdLib_Common);
 			using (var b = CreateApkBuilder ()) {
 				b.Verbosity = LoggerVerbosity.Detailed;
@@ -624,12 +846,16 @@ public class Test
 		}
 
 		[Test]
-		public void CheckExcludedFilesCanBeModified ()
+		public void CheckExcludedFilesCanBeModified ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
-
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
+				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.PackageReferences.Add (KnownPackages.Xamarin_Kotlin_StdLib_Common);
 			using (var b = CreateApkBuilder ()) {
 				b.Verbosity = LoggerVerbosity.Detailed;
@@ -653,11 +879,16 @@ public class Test
 		}
 
 		[Test]
-		public void CheckIncludedFilesArePresent ()
+		public void CheckIncludedFilesArePresent ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			const bool isRelease = true;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinAndroidApplicationProject () {
-				IsRelease = true,
+				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.PackageReferences.Add (KnownPackages.Xamarin_Kotlin_Reflect);
 			using (var b = CreateApkBuilder ()) {
 				Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
@@ -669,23 +900,48 @@ public class Test
 			}
 		}
 
-		[Test]
-		[TestCase (1, -1)]
-		[TestCase (5, -1)]
-		[TestCase (50, -1)]
-		[TestCase (100, -1)]
-		[TestCase (512, -1)]
-		[TestCase (1024, -1)]
-		[TestCase (-1, 1)]
-		[TestCase (-1, 5)]
-		[TestCase (-1, 10)]
-		[TestCase (-1, 100)]
-		[TestCase (-1, 200)]
-		public void BuildApkWithZipFlushLimits (int filesLimit, int sizeLimit)
+		static IEnumerable<object[]> Get_BuildApkWithZipFlushLimits_Data ()
 		{
+			var ret = new List<object[]> ();
+
+			foreach (AndroidRuntime runtime in new[] { AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT }) {
+				AddTestData (1, -1, runtime);
+				AddTestData (5, -1, runtime);
+				AddTestData (50, -1, runtime);
+				AddTestData (100, -1, runtime);
+				AddTestData (512, -1, runtime);
+				AddTestData (1024, -1, runtime);
+				AddTestData (-1, 1, runtime);
+				AddTestData (-1, 5, runtime);
+				AddTestData (-1, 10, runtime);
+				AddTestData (-1, 100, runtime);
+				AddTestData (-1, 200, runtime);
+			}
+
+			return ret;
+
+			void AddTestData (int filesLimit, int sizeLimit, AndroidRuntime runtime)
+			{
+				ret.Add (new object[] {
+					filesLimit,
+					sizeLimit,
+					runtime,
+				});
+			}
+		}
+
+		[Test]
+		[TestCaseSource (nameof (Get_BuildApkWithZipFlushLimits_Data))]
+		public void BuildApkWithZipFlushLimits (int filesLimit, int sizeLimit, AndroidRuntime runtime)
+		{
+			const bool isRelease = false;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var proj = new XamarinFormsAndroidApplicationProject {
-				IsRelease = false,
+				IsRelease = isRelease,
 			};
+			proj.SetRuntime (runtime);
 			proj.SetProperty ("EmbedAssembliesIntoApk", "true");
 			if (filesLimit > 0)
 				proj.SetProperty ("_ZipFlushFilesLimit", filesLimit.ToString ());
@@ -698,13 +954,21 @@ public class Test
 		}
 
 		[Test]
-		public void ExtractNativeLibsTrue ()
+		public void ExtractNativeLibsTrue ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var proj = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
 				// This combination produces android:extractNativeLibs="false" by default
-				SupportedOSPlatformVersion = "23",
+				SupportedOSPlatformVersion = "24",
 				ManifestMerger = "manifestmerger.jar",
 			};
+			proj.SetRuntime (runtime);
+
 			using (var b = CreateApkBuilder ()) {
 				Assert.IsTrue (b.Build (proj), "Build should have succeeded.");
 
@@ -726,8 +990,13 @@ public class Test
 		}
 
 		[Test]
-		public void DefaultItems ()
+		public void DefaultItems ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			void CreateEmptyFile (string path)
 			{
 				Directory.CreateDirectory (Path.GetDirectoryName (path));
@@ -735,8 +1004,10 @@ public class Test
 			}
 
 			var proj = new XamarinAndroidApplicationProject () {
+				IsRelease = isRelease,
 				EnableDefaultItems = true,
 			};
+			proj.SetRuntime (runtime);
 
 			var builder = CreateApkBuilder ();
 			builder.Save (proj);

@@ -33,6 +33,7 @@ This file is used by all project types, including binding projects.
   </PropertyGroup>
 
   <Target Name="_ResolveLibraryProjectImports"
+      Condition="'$(DesignTimeBuild)' != 'true' or ('$(DesignTimeBuild)' == 'true' and '$(AndroidUseManagedDesignTimeResourceGenerator)' == 'true') "
       DependsOnTargets="$(CoreResolveReferencesDependsOn)"
       Inputs="$(ProjectAssetsFile);$(MSBuildProjectFullPath);@(_MonoAndroidReferencePath);@(_MonoAndroidReferenceDependencyPaths);@(AndroidAarLibrary);$(_AndroidBuildPropertiesCache)"
       Outputs="$(_AndroidStampDirectory)_ResolveLibraryProjectImports.stamp">
@@ -64,6 +65,7 @@ This file is used by all project types, including binding projects.
       <Output TaskParameter="ResolvedEnvironmentFiles" ItemName="LibraryEnvironments" />
       <Output TaskParameter="ResolvedResourceDirectoryStamps" ItemName="_LibraryResourceDirectoryStamps" />
       <Output TaskParameter="ProguardConfigFiles" ItemName="ProguardConfiguration" />
+      <Output TaskParameter="ExtractedDirectories" ItemName="_ExtractedDirectories" />
     </ReadLibraryProjectImportsCache>
     <ItemGroup>
       <FileWrites Include="@(ResolvedResourceDirectories->'%(ResourceDirectoryArchive)')"
@@ -75,7 +77,7 @@ This file is used by all project types, including binding projects.
       Inputs="$(_AndroidLibraryProjectImportsCache)"
       Outputs="$(_AndroidStampDirectory)_BuildLibraryImportsCache.stamp">
     <GetImportedLibraries
-        TargetDirectory="$(_AndroidLibrayProjectIntermediatePath)"
+        ExtractedDirectories="@(_ExtractedDirectories)"
         CacheFile="$(_AndroidLibraryImportsCache)"
     />
     <Touch Files="$(_AndroidStampDirectory)_BuildLibraryImportsCache.stamp" AlwaysCreate="true" />
@@ -85,11 +87,7 @@ This file is used by all project types, including binding projects.
   </Target>
 
   <PropertyGroup>
-    <_GetLibraryImportsDependsOnTargets Condition=" '$(_AndroidIsBindingProject)' == 'true' ">
-      _ExtractLibraryProjectImports;
-      _BuildLibraryImportsCache;
-    </_GetLibraryImportsDependsOnTargets>
-    <_GetLibraryImportsDependsOnTargets Condition=" '$(_AndroidIsBindingProject)' != 'true' ">
+    <_GetLibraryImportsDependsOnTargets>
       _ExtractLibraryProjectImports;
       _AddMultiDexDependencyJars;
       _BuildLibraryImportsCache;

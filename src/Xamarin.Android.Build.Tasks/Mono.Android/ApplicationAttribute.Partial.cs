@@ -1,3 +1,5 @@
+#nullable disable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,6 +21,7 @@ namespace Android.App {
 	partial class ApplicationAttribute {
 
 		string? _BackupAgent;
+		string? _ManageSpaceActivity;
 		ICustomAttributeProvider? provider;
 
 		ICollection<string>? specified;
@@ -43,8 +46,8 @@ namespace Android.App {
 			mapping.Add (
 				member: "ManageSpaceActivity",
 				attributeName: "manageSpaceActivity",
-				getter: self => self.ManageSpaceActivity,
-				setter: (self, value) => self.ManageSpaceActivity = (Type?) value,
+				getter: self => self._ManageSpaceActivity,
+				setter: (self, value) => self._ManageSpaceActivity = (string) value,
 				typeof (Type)
 			);
 			mapping.Add (

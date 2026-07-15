@@ -1,6 +1,6 @@
 // Author: Jonathan Pobst <jpobst@xamarin.com>
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
-
+#nullable enable
 using System;
 using System.IO;
 using Microsoft.Build.Framework;
@@ -14,7 +14,7 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "GAS";
 
 		[Output]
-		public string AppSettingsDirectory { get; set; }
+		public string? AppSettingsDirectory { get; set; }
 
 		public override bool RunTask ()
 		{

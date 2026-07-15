@@ -1,3 +1,5 @@
+#nullable disable
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -9,6 +11,9 @@ using System.Text;
 using System.Threading;
 using Xamarin.Android.Tools;
 using Xamarin.Tools.Zip;
+using Java.Interop.Tools.JavaCallableWrappers;
+using Mono.Cecil;
+
 
 #if MSBUILD
 using Microsoft.Android.Build.Tasks;
@@ -26,6 +31,32 @@ namespace Xamarin.Android.Tasks
 		// Requires that ResolveSdks.Execute() run before anything else
 		public static AndroidVersions   SupportedVersions;
 		public static AndroidSdkInfo    AndroidSdk;
+
+		internal static XAAssemblyResolver MakeResolver (TaskLoggingHelper log, bool useMarshalMethods, AndroidTargetArch targetArch, Dictionary<string, ITaskItem> assemblies, bool loadDebugSymbols = true)
+		{
+			var readerParams = new ReaderParameters ();
+			if (useMarshalMethods) {
+				readerParams.ReadWrite = true;
+				readerParams.InMemory = true;
+			}
+
+			var res = new XAAssemblyResolver (targetArch, log, loadDebugSymbols: loadDebugSymbols, loadReaderParameters: readerParams);
+			var uniqueDirs = new HashSet<string> (StringComparer.OrdinalIgnoreCase);
+
+			log.LogDebugMessage ($"Adding search directories to new architecture {targetArch} resolver:");
+			foreach (var kvp in assemblies) {
+				string assemblyDir = Path.GetDirectoryName (kvp.Value.ItemSpec);
+				if (uniqueDirs.Contains (assemblyDir)) {
+					continue;
+				}
+
+				uniqueDirs.Add (assemblyDir);
+				res.SearchDirectories.Add (assemblyDir);
+				log.LogDebugMessage ($"  {assemblyDir}");
+			}
+
+			return res;
+		}
 
 		public static StringBuilder MergeStdoutAndStderrMessages (List<string> stdout, List<string> stderr)
 		{
@@ -51,7 +82,13 @@ namespace Xamarin.Android.Tasks
 			}
 		}
 
-		public static int RunProcess (string command, string arguments, TaskLoggingHelper log, DataReceivedEventHandler? onOutput = null, DataReceivedEventHandler? onError = null)
+		public static int RunProcess (string command, string arguments, TaskLoggingHelper log, DataReceivedEventHandler? onOutput = null, DataReceivedEventHandler? onError = null, CancellationToken? cancellationToken = null, Action? cancelTask = null, bool logWarningOnFailure = true)
+		{
+			return RunProcess ("Running process", command, arguments, log, onOutput, onError, cancellationToken, cancelTask, logWarningOnFailure);
+		}
+
+		public static int RunProcess (string logLabel, string command, string arguments, TaskLoggingHelper log, DataReceivedEventHandler? onOutput = null, DataReceivedEventHandler? onError = null,
+			CancellationToken? cancellationToken = null, Action? cancelTask = null, bool logWarningOnFailure = true)
 		{
 			var stdout_completed = new ManualResetEvent (false);
 			var stderr_completed = new ManualResetEvent (false);
@@ -68,7 +105,7 @@ namespace Xamarin.Android.Tasks
 			var stdoutLines = new List<string> ();
 			var stderrLines = new List<string> ();
 
-			log.LogDebugMessage ($"Running process: {psi.FileName} {psi.Arguments}");
+			log.LogDebugMessage ($"{logLabel}: {psi.FileName} {psi.Arguments}");
 			using var proc = new Process ();
 			proc.OutputDataReceived += (s, e) => {
 				if (e.Data != null) {
@@ -90,6 +127,7 @@ namespace Xamarin.Android.Tasks
 			proc.Start ();
 			proc.BeginOutputReadLine ();
 			proc.BeginErrorReadLine ();
+			cancellationToken?.Register (() => { try { proc.Kill (); } catch (Exception) { } });
 			proc.WaitForExit ();
 
 			if (psi.RedirectStandardError) {
@@ -100,9 +138,13 @@ namespace Xamarin.Android.Tasks
 				stdout_completed.WaitOne (TimeSpan.FromSeconds (30));
 			}
 
+			log.LogDebugMessage ($"{logLabel}: exit code == {proc.ExitCode}");
 			if (proc.ExitCode != 0) {
-				var sb = MergeStdoutAndStderrMessages (stdoutLines, stderrLines);
-				log.LogCodedError ("XA0142", Properties.Resources.XA0142, $"{psi.FileName} {psi.Arguments}", sb.ToString ());
+				if (logWarningOnFailure) {
+					var sb = MergeStdoutAndStderrMessages (stdoutLines, stderrLines);
+					log.LogCodedError ("XA0142", Properties.Resources.XA0142, $"{psi.FileName} {psi.Arguments}", sb.ToString ());
+				}
+				cancelTask?.Invoke ();
 			}
 
 			try {
@@ -178,54 +220,6 @@ namespace Xamarin.Android.Tasks
 			return Path.Combine (toolsDir, "lib", $"host-{uname.Value}");
 		}
 
-#if MSBUILD
-		public static void RefreshAndroidSdk (string sdkPath, string ndkPath, string javaPath, TaskLoggingHelper logHelper = null)
-		{
-			Action<TraceLevel, string> logger = (level, value) => {
-				var log = logHelper;
-				switch (level) {
-				case TraceLevel.Error:
-					if (log == null)
-						Console.Error.Write (value);
-					else
-						log.LogCodedError ("XA5300", "{0}", value);
-					break;
-				case TraceLevel.Warning:
-					if (log == null)
-						Console.WriteLine (value);
-					else
-						log.LogCodedWarning ("XA5300", "{0}", value);
-					break;
-				default:
-					if (log == null)
-						Console.WriteLine (value);
-					else
-						log.LogDebugMessage ("{0}", value);
-					break;
-				}
-			};
-			AndroidSdk  = new AndroidSdkInfo (logger, sdkPath, ndkPath, javaPath);
-		}
-
-		public static void RefreshSupportedVersions (string[] referenceAssemblyPaths)
-		{
-			SupportedVersions   = new AndroidVersions (referenceAssemblyPaths);
-		}
-#endif  // MSBUILD
-
-		public static JdkInfo GetJdkInfo (Action<TraceLevel, string> logger, string javaSdkPath, Version minSupportedVersion, Version maxSupportedVersion)
-		{
-			JdkInfo info = null;
-			try {
-				info = new JdkInfo (javaSdkPath, logger:logger);
-			} catch {
-				info = JdkInfo.GetKnownSystemJdkInfos (logger)
-					.Where (jdk => jdk.Version >= minSupportedVersion && jdk.Version <= maxSupportedVersion)
-					.FirstOrDefault ();
-			}
-			return info;
-		}
-
 		class SizeAndContentFileComparer : IEqualityComparer<FileInfo>
 #if MSBUILD
 			, IEqualityComparer<ITaskItem>
@@ -272,7 +266,7 @@ namespace Xamarin.Android.Tasks
 #if MSBUILD
 		public static IEnumerable<string> ExpandFiles (ITaskItem[] libraryProjectJars)
 		{
-			libraryProjectJars  = libraryProjectJars ?? Array.Empty<ITaskItem> ();
+			libraryProjectJars  = libraryProjectJars ?? [];
 			return (from path in libraryProjectJars
 					let     dir     = Path.GetDirectoryName (path.ItemSpec)
 					let     pattern = Path.GetFileName (path.ItemSpec)
@@ -297,7 +291,7 @@ namespace Xamarin.Android.Tasks
 			var files = fullPaths.Select (full => Path.GetFileName (full)).Where (f => excluded == null || !excluded.Contains (f, StringComparer.OrdinalIgnoreCase)).ToArray ();
 			for (int i = 0; i < files.Length; i++)
 				for (int j = i + 1; j < files.Length; j++)
-					if (String.Compare (files [i], files [j], StringComparison.OrdinalIgnoreCase) == 0)
+					if (MonoAndroidHelper.StringEquals (files [i], files [j]))
 						yield return files [i];
 		}
 
@@ -325,6 +319,18 @@ namespace Xamarin.Android.Tasks
 		}
 
 #if MSBUILD
+		public static bool IsAndroidAssembly (ITaskItem source)
+		{
+			string name = Path.GetFileNameWithoutExtension (source.ItemSpec);
+
+			// Check for assemblies which may not be built against the Android profile (`netXX-android`)
+			// but could still contain Android binding code (like Mono.Android).
+			if (KnownAssemblyNames.Contains (name))
+				return true;
+
+			return IsMonoAndroidAssembly (source);
+		}
+
 		public static bool IsMonoAndroidAssembly (ITaskItem assembly)
 		{
 			// NOTE: look for both MonoAndroid and Android
@@ -347,6 +353,9 @@ namespace Xamarin.Android.Tasks
 				return true;
 
 			using var pe = new PEReader (File.OpenRead (assembly.ItemSpec));
+			if (!pe.HasMetadata) {
+				return false; // not a .NET assembly (no CLI metadata)
+			}
 			var reader = pe.GetMetadataReader ();
 			return HasMonoAndroidReference (reader);
 		}
@@ -368,6 +377,10 @@ namespace Xamarin.Android.Tasks
 		{
 			using (var stream = File.OpenRead (assembly))
 			using (var pe = new PEReader (stream)) {
+				if (!pe.HasMetadata) {
+					log.LogDebugMessage ($"Skipping non-.NET assembly: {assembly}");
+					return false;
+				}
 				var reader = pe.GetMetadataReader ();
 				var assemblyDefinition = reader.GetAssemblyDefinition ();
 				foreach (var handle in assemblyDefinition.GetCustomAttributes ()) {
@@ -378,6 +391,16 @@ namespace Xamarin.Android.Tasks
 				}
 				return false;
 			}
+		}
+
+		public static bool LogIfReferenceAssembly (ITaskItem assembly, TaskLoggingHelper log)
+		{
+			if (IsReferenceAssembly (assembly.ItemSpec, log)) {
+				log.LogCodedWarning ("XA0107", assembly.ItemSpec, 0, Properties.Resources.XA0107, assembly.ItemSpec);
+				return true;
+			}
+
+			return false;
 		}
 
 		public static bool IsForceRetainedAssembly (string assembly)
@@ -415,15 +438,30 @@ namespace Xamarin.Android.Tasks
 		}
 
 #if MSBUILD
-		internal static IEnumerable<ITaskItem> GetFrameworkAssembliesToTreatAsUserAssemblies (ITaskItem[] resolvedAssemblies)
+		public static bool IsFrameworkAssembly (ITaskItem assembly)
 		{
-			var ret = new List<ITaskItem> ();
-			foreach (ITaskItem item in resolvedAssemblies) {
-				if (FrameworkAssembliesToTreatAsUserAssemblies.Contains (Path.GetFileName (item.ItemSpec)))
-					ret.Add (item);
+			// Known assembly names: Mono.Android, Java.Interop, etc.
+			if (IsFrameworkAssembly (assembly.ItemSpec))
+				return true;
+
+			// Known %(FrameworkReferenceName)
+			var frameworkReferenceName = assembly.GetMetadata ("FrameworkReferenceName") ?? "";
+			if (frameworkReferenceName == "Microsoft.Android") {
+				return true; // Microsoft.Android assemblies
+			}
+			if (frameworkReferenceName.StartsWith ("Microsoft.NETCore.", StringComparison.OrdinalIgnoreCase)) {
+				return true; // BCL assemblies
 			}
 
-			return ret;
+			// Known %(NuGetPackageId) runtime pack names
+			return IsFromAKnownRuntimePack (assembly);
+		}
+
+		public static bool IsFromAKnownRuntimePack (ITaskItem assembly)
+		{
+			string packageId = assembly.GetMetadata ("NuGetPackageId") ?? "";
+			return packageId.StartsWith ("Microsoft.NETCore.App.Runtime.", StringComparison.OrdinalIgnoreCase) ||
+				packageId.StartsWith ("Microsoft.Android.Runtime.", StringComparison.OrdinalIgnoreCase);
 		}
 
 		public static bool SaveMapFile (IBuildEngine4 engine, string mapFile, Dictionary<string, string> map)
@@ -485,29 +523,6 @@ namespace Xamarin.Android.Tasks
 				// On the other hand, xbuild has a bug and fails to parse '=' in the value, so we skip JAVA_TOOL_OPTIONS on Mono runtime.
 				new string [] { proguardHomeVariable, "JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF8" };
 		}
-
-		public static string GetExecutablePath (string dir, string exe)
-		{
-			if (string.IsNullOrEmpty (dir))
-				return exe;
-			foreach (var e in Executables (exe))
-				if (File.Exists (Path.Combine (dir, e)))
-					return e;
-			return exe;
-		}
-
-		public static IEnumerable<string> Executables (string executable)
-		{
-			var pathExt = Environment.GetEnvironmentVariable ("PATHEXT");
-			var pathExts = pathExt?.Split (new char [] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries);
-
-			if (pathExts != null) {
-				foreach (var ext in pathExts)
-					yield return Path.ChangeExtension (executable, ext);
-			}
-			yield return executable;
-		}
-
 
 #if MSBUILD
 		public static string TryGetAndroidJarPath (TaskLoggingHelper log, string platform, bool designTimeBuild = false, bool buildingInsideVisualStudio = false, string targetFramework = "", string androidSdkDirectory = "")
@@ -587,6 +602,20 @@ namespace Xamarin.Android.Tasks
 			return apiLevel;
 		}
 
+		public static bool TryParseApiLevel (string apiLevel, out Version version)
+		{
+			if (Version.TryParse (apiLevel, out var v)) {
+				version = v;
+				return true;
+			}
+			if (int.TryParse (apiLevel, out var major)) {
+				version = new Version (major, 0);
+				return true;
+			}
+			version = null;
+			return false;
+		}
+
 #if MSBUILD
 		public static string GetAssemblyAbi (ITaskItem asmItem)
 		{
@@ -598,7 +627,29 @@ namespace Xamarin.Android.Tasks
 			return abi;
 		}
 
+		public static string GetAssemblyRid (ITaskItem asmItem)
+		{
+			string? abi = asmItem.GetMetadata ("RuntimeIdentifier");
+			if (String.IsNullOrEmpty (abi)) {
+				throw new InvalidOperationException ($"Internal error: assembly '{asmItem}' lacks RuntimeIdentifier metadata");
+			}
+
+			return abi;
+		}
+
 		public static AndroidTargetArch GetTargetArch (ITaskItem asmItem) => AbiToTargetArch (GetAssemblyAbi (asmItem));
+
+
+		public static AndroidTargetArch GetRequiredValidArchitecture (ITaskItem item)
+		{
+			AndroidTargetArch ret = GetTargetArch (item);
+
+			if (ret == AndroidTargetArch.None) {
+				throw new InvalidOperationException ($"Internal error: assembly '{item}' doesn't target any architecture.");
+			}
+
+			return ret;
+		}
 #endif // MSBUILD
 
 		static string GetToolsRootDirectoryRelativePath (string androidBinUtilsDirectory)
@@ -614,28 +665,24 @@ namespace Xamarin.Android.Tasks
 			return relPath;
 		}
 
-		public static string GetLibstubsArchDirectoryPath (string androidBinUtilsDirectory, AndroidTargetArch arch)
+#if MSBUILD
+		public static string? GetRuntimePackNativeLibDir (AndroidTargetArch arch, IEnumerable<ITaskItem> runtimePackLibDirs)
 		{
-			return Path.Combine (GetLibstubsRootDirectoryPath (androidBinUtilsDirectory), ArchToRid (arch));
-		}
+			foreach (ITaskItem item in runtimePackLibDirs) {
+				string? rid = item.GetMetadata ("RuntimeIdentifier");
+				if (String.IsNullOrEmpty (rid)) {
+					continue;
+				}
 
-		public static string GetLibstubsRootDirectoryPath (string androidBinUtilsDirectory)
-		{
-			string relPath = GetToolsRootDirectoryRelativePath (androidBinUtilsDirectory);
-			return Path.GetFullPath (Path.Combine (androidBinUtilsDirectory, relPath, "libstubs"));
-		}
+				AndroidTargetArch itemArch = RidToArch (rid);
+				if (itemArch == arch) {
+					return item.ItemSpec;
+				}
+			}
 
-		public static string GetDSOStubsRootDirectoryPath (string androidBinUtilsDirectory)
-		{
-			string relPath = GetToolsRootDirectoryRelativePath (androidBinUtilsDirectory);
-			return Path.GetFullPath (Path.Combine (androidBinUtilsDirectory, relPath, "dsostubs"));
+			return null;
 		}
-
-		public static string GetNativeLibsRootDirectoryPath (string androidBinUtilsDirectory)
-		{
-			string relPath = GetToolsRootDirectoryRelativePath (androidBinUtilsDirectory);
-			return Path.GetFullPath (Path.Combine (androidBinUtilsDirectory, relPath, "lib"));
-		}
+#endif // MSBUILD
 
 		public static string? GetAssemblyCulture (ITaskItem assembly)
 		{
@@ -693,6 +740,16 @@ namespace Xamarin.Android.Tasks
 			);
 		}
 
+		public static string GetAssemblyNameWithCulture (ITaskItem assemblyItem)
+		{
+			string name = Path.GetFileNameWithoutExtension (assemblyItem.ItemSpec);
+			string? culture = assemblyItem.GetMetadata ("Culture");
+			if (!String.IsNullOrEmpty (culture)) {
+				return $"{culture}/{name}";
+			}
+			return name;
+		}
+
 		static Dictionary<AndroidTargetArch, Dictionary<string, ITaskItem>> GetPerArchAssemblies (IEnumerable<ITaskItem> input, HashSet<AndroidTargetArch> supportedTargetArches, bool validate, Func<ITaskItem, bool>? shouldSkip = null)
 		{
 			bool filterByTargetArches = supportedTargetArches.Count > 0;
@@ -712,12 +769,7 @@ namespace Xamarin.Android.Tasks
 					assembliesPerArch.Add (arch, assemblies);
 				}
 
-				string name = Path.GetFileNameWithoutExtension (assembly.ItemSpec);
-				string? culture = assembly.GetMetadata ("Culture");
-				if (!String.IsNullOrEmpty (culture)) {
-					name = $"{culture}/{name}";
-				}
-				assemblies.Add (name, assembly);
+				assemblies.Add (GetAssemblyNameWithCulture (assembly), assembly);
 			}
 
 			// It's possible some assembly collections will be empty (e.g. `ResolvedUserAssemblies` as passed to the `GenerateJavaStubs` task), which
@@ -788,11 +840,79 @@ namespace Xamarin.Android.Tasks
 			};
 		}
 
-		public static string QuoteFileNameArgument (string fileName)
+		public static string QuoteFileNameArgument (string? fileName)
 		{
 			var builder = new CommandLineBuilder ();
 			builder.AppendFileNameIfNotNull (fileName);
 			return builder.ToString ();
+		}
+
+		public static AndroidRuntime ParseAndroidRuntime (string androidRuntime)
+		{
+			if (string.Equals (androidRuntime, "CoreCLR", StringComparison.OrdinalIgnoreCase))
+				return AndroidRuntime.CoreCLR;
+			if (string.Equals (androidRuntime, "NativeAOT", StringComparison.OrdinalIgnoreCase))
+				return AndroidRuntime.NativeAOT;
+
+			// Default runtime is MonoVM
+			return AndroidRuntime.MonoVM;
+		}
+
+		public static JavaPeerStyle ParseCodeGenerationTarget (string codeGenerationTarget)
+		{
+			if (Enum.TryParse (codeGenerationTarget, ignoreCase: true, out JavaPeerStyle style))
+				return style;
+
+			// Default is XAJavaInterop1
+			return JavaPeerStyle.XAJavaInterop1;
+		}
+
+		public static object GetProjectBuildSpecificTaskObjectKey (object key, string workingDirectory, string intermediateOutputPath) => (key, workingDirectory, intermediateOutputPath);
+
+		public static void LogTextStreamContents (TaskLoggingHelper log, string message, Stream stream)
+		{
+			if (stream.CanSeek) {
+				stream.Seek (0, SeekOrigin.Begin);
+			} else {
+				log.LogDebugMessage ("Output stream not seekable in MonoAndroidHelper.LogTextStreamContents");
+			}
+
+			using var reader = new StreamReader (stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: -1, leaveOpen: true);
+			log.LogDebugMessage (message);
+			log.LogDebugMessage (reader.ReadToEnd ());
+		}
+
+		public static int GetMinimumApiLevel (AndroidTargetArch arch, AndroidRuntime runtime)
+		{
+			if (!XABuildConfig.ArchToApiLevel.TryGetValue (arch, out int minValue)) {
+				throw new InvalidOperationException ($"Unable to determine minimum API level for architecture {arch}");
+			}
+
+			return minValue;
+		}
+
+		/// <summary>
+		/// Takes `libItem.ItemSpec` and transforms it to a file name of a native library. It will
+		/// remove any paths from `ItemSpec` and will make sure that the file ends with the `.so`
+		/// extension. Empty string is returned if there's nothing to process. String comparisons
+		/// are ordinal and case-insensitive.
+		/// </summary>
+		public static string GetNormalizedNativeLibraryName (ITaskItem libItem)
+		{
+			if (String.IsNullOrEmpty (libItem.ItemSpec)) {
+				return String.Empty;
+			}
+
+			string ret = Path.GetFileName (libItem.ItemSpec);
+			if (String.IsNullOrEmpty (ret)) {
+				return String.Empty;
+			}
+
+			if (!String.Equals (Path.GetExtension (ret), ".so", StringComparison.OrdinalIgnoreCase)) {
+				return $"{ret}.so";
+			}
+
+			return ret;
 		}
 	}
 }

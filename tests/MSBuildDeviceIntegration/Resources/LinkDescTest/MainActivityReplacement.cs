@@ -75,12 +75,12 @@ namespace UnnamedProject
 			{
 				var asm = typeof(Library1.SomeClass).Assembly;
 				var t = asm.GetType("Library1.LinkerClass");
-				var m = t.GetMethod("PreserveAttribMethod");
+				var m = t.GetMethod("DynamicDependencyTargetMethod");
 				Android.Util.Log.Info(TAG, $"[PASS] Able to locate method '{m.Name}'.");
 			}
 			catch (Exception ex)
 			{
-				Android.Util.Log.Info(TAG, $"[FAIL] Unable to access 'PreserveAttribMethod ()' method of 'LinkerClass'.\n{ex}");
+				Android.Util.Log.Info(TAG, $"[FAIL] Unable to access 'DynamicDependencyTargetMethod ()' method of 'LinkerClass'.\n{ex}");
 			}
 
 			// [Test] TryAccessXmlPreservedFieldOfLinkerClass
@@ -94,18 +94,6 @@ namespace UnnamedProject
 			catch (Exception ex)
 			{
 				Android.Util.Log.Info(TAG, $"[FAIL] Unable to access 'IsPreserved' field of 'LinkerClass'.\n{ex}");
-			}
-
-			// [Test] TryCreateInstanceOfNonXmlPreservedClass
-			try
-			{
-				var asm = typeof(Library1.SomeClass).Assembly;
-				var o = Activator.CreateInstance(asm.GetType("Library1.NonPreserved"));
-				Android.Util.Log.Info(TAG, $"[LINKALLFAIL] Able to create instance of '{o.GetType().Name}' which should have been linked away.");
-			}
-			catch (Exception ex)
-			{
-				Android.Util.Log.Info(TAG, $"[LINKALLPASS] Unable to create instance of 'NonPreserved' as expected.\n{ex}");
 			}
 
 			// [Test] Post

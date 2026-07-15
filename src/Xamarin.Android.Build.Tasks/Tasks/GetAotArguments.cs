@@ -32,6 +32,9 @@ namespace Xamarin.Android.Tasks
 		[Required]
 		public string TargetName { get; set; } = "";
 
+		[Required]
+		public ITaskItem[] RuntimePackLibraryDirectories { get; set; } = [];
+
 		/// <summary>
 		/// Will be blank in .NET 6+
 		/// </summary>
@@ -52,12 +55,12 @@ namespace Xamarin.Android.Tasks
 
 		public string AndroidSequencePointsMode { get; set; } = "";
 
-		public ITaskItem [] Profiles { get; set; } = Array.Empty<ITaskItem> ();
+		public ITaskItem [] Profiles { get; set; } = [];
 
 		public int ZipAlignmentPages { get; set; } = AndroidZipAlign.DefaultZipAlignment64Bit;
 
 		[Required, Output]
-		public ITaskItem [] ResolvedAssemblies { get; set; } = Array.Empty<ITaskItem> ();
+		public ITaskItem [] ResolvedAssemblies { get; set; } = [];
 
 		[Output]
 		public string? Triple { get; set; }
@@ -77,7 +80,7 @@ namespace Xamarin.Android.Tasks
 		protected AotMode AotMode;
 		protected SequencePointsMode SequencePointsMode;
 		protected string SdkBinDirectory = "";
-		protected bool UseAndroidNdk => !string.IsNullOrWhiteSpace (AndroidNdkDirectory);
+		protected bool UseAndroidNdk => !AndroidNdkDirectory.IsNullOrWhiteSpace ();
 
 		public static bool GetAndroidAotMode(string androidAotMode, out AotMode aotMode)
 		{
@@ -108,7 +111,7 @@ namespace Xamarin.Android.Tasks
 			return false;
 		}
 
-		public static bool TryGetSequencePointsMode (string value, out SequencePointsMode mode)
+		public static bool TryGetSequencePointsMode (string? value, out SequencePointsMode mode)
 		{
 			mode = SequencePointsMode.None;
 			switch ((value ?? string.Empty).ToLowerInvariant ().Trim ()) {
@@ -136,7 +139,7 @@ namespace Xamarin.Android.Tasks
 		int GetNdkApiLevel (NdkTools ndk, AndroidTargetArch arch)
 		{
 			AndroidAppManifest? manifest = null;
-			if (!string.IsNullOrEmpty (ManifestFile)) {
+			if (!ManifestFile.IsNullOrEmpty ()) {
 				manifest = AndroidAppManifest.Load (ManifestFile, MonoAndroidHelper.SupportedVersions);
 			}
 
@@ -145,8 +148,8 @@ namespace Xamarin.Android.Tasks
 				level       = manifest.MinSdkVersion.Value;
 			} else if (int.TryParse (MinimumSupportedApiLevel, out level)) {
 				// level already set
-			} else if (int.TryParse (AndroidApiLevel, out level)) {
-				// level already set
+			} else if (MonoAndroidHelper.TryParseApiLevel (AndroidApiLevel, out Version version)) {
+				level = version.Major;
 			} else {
 				// Probably not ideal!
 				level       = MonoAndroidHelper.SupportedVersions.MaxStableVersion?.ApiLevel ?? 21;
@@ -172,7 +175,7 @@ namespace Xamarin.Android.Tasks
 				try {
 					ndk.GetDirectoryPath (NdkToolchainDir.PlatformLib, arch, level);
 					break;
-				} catch (InvalidOperationException ex) {
+				} catch (InvalidOperationException) {
 					// Path not found, continue searching...
 					continue;
 				}
@@ -235,7 +238,7 @@ namespace Xamarin.Android.Tasks
 			string ldName;
 			if (UseAndroidNdk) {
 				ldName = ndk.GetToolPath (NdkToolKind.Linker, arch, level);
-				if (!string.IsNullOrEmpty (ldName)) {
+				if (!ldName.IsNullOrEmpty ()) {
 					ldName = Path.GetFileName (ldName);
 					if (ldName.IndexOf ('-') >= 0) {
 						ldName = ldName.Substring (ldName.LastIndexOf ("-", StringComparison.Ordinal) + 1);
@@ -245,10 +248,10 @@ namespace Xamarin.Android.Tasks
 				ldName = "ld";
 			}
 			string ldFlags = GetLdFlags (ndk, arch, level, toolPrefix);
-			if (!string.IsNullOrEmpty (ldName)) {
+			if (!ldName.IsNullOrEmpty ()) {
 				LdName = ldName;
 			}
-			if (!string.IsNullOrEmpty (ldFlags)) {
+			if (!ldFlags.IsNullOrEmpty ()) {
 				LdFlags = ldFlags;
 			}
 		}
@@ -259,7 +262,7 @@ namespace Xamarin.Android.Tasks
 			var ldFlags = new StringBuilder ();
 			var libs = new List<string> ();
 			if (UseAndroidNdk && EnableLLVM) {
-				string androidLibPath = string.Empty;
+				string androidLibPath = "";
 				try {
 					androidLibPath = ndk.GetDirectoryPath (NdkToolchainDir.PlatformLib, arch, level);
 				} catch (InvalidOperationException ex) {
@@ -295,10 +298,12 @@ namespace Xamarin.Android.Tasks
 				libs.Add (Path.Combine (androidLibPath, "libc.so"));
 				libs.Add (Path.Combine (androidLibPath, "libm.so"));
 			} else if (!UseAndroidNdk && EnableLLVM) {
-				string libstubsPath = MonoAndroidHelper.GetLibstubsArchDirectoryPath (AndroidBinUtilsDirectory, arch);
+				string? libstubsPath = MonoAndroidHelper.GetRuntimePackNativeLibDir (arch, RuntimePackLibraryDirectories);
 
-				libs.Add (Path.Combine (libstubsPath, "libc.so"));
-				libs.Add (Path.Combine (libstubsPath, "libm.so"));
+				if (!String.IsNullOrEmpty (libstubsPath)) {
+					libs.Add (Path.Combine (libstubsPath, "libc.so"));
+					libs.Add (Path.Combine (libstubsPath, "libm.so"));
+				}
 			}
 
 			if (libs.Count > 0) {

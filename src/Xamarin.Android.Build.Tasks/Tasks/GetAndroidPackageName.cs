@@ -23,6 +23,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+#nullable enable
 using System;
 using System.IO;
 using System.Linq;
@@ -37,30 +38,30 @@ namespace Xamarin.Android.Tasks
 	{
 		public override string TaskPrefix => "GAP";
 
-		public string ManifestFile { get; set; }
+		public string? ManifestFile { get; set; }
 
 		[Required]
-		public string AssemblyName { get; set; }
+		public string AssemblyName { get; set; } = "";
 
-		public string [] ManifestPlaceholders { get; set; }
+		public string []? ManifestPlaceholders { get; set; }
 
 		[Output]
-		public string PackageName { get; set; }
+		public string? PackageName { get; set; }
 
 		public override bool RunTask ()
 		{
-			if (!string.IsNullOrEmpty (ManifestFile) && File.Exists (ManifestFile)) {
+			if (!ManifestFile.IsNullOrEmpty () && File.Exists (ManifestFile)) {
 				using var stream = File.OpenRead (ManifestFile);
 				using var reader = XmlReader.Create (stream);
 				if (reader.MoveToContent () == XmlNodeType.Element) {
 					var package = reader.GetAttribute ("package");
-					if (!string.IsNullOrEmpty (package)) {
+					if (!package.IsNullOrEmpty ()) {
 						PackageName = ManifestDocument.ReplacePlaceholders (ManifestPlaceholders, package);
 					}
 				}
 			}
 
-			if (!string.IsNullOrEmpty (PackageName)) {
+			if (!PackageName.IsNullOrEmpty ()) {
 				// PackageName may be passed in via $(ApplicationId) and missing from AndroidManifest.xml
 				PackageName = AndroidAppManifest.CanonicalizePackageName (PackageName);
 			} else {

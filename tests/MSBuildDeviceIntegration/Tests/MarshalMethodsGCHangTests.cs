@@ -7,6 +7,7 @@ using Microsoft.Build.Framework;
 using System.Text;
 using System.Xml.Linq;
 using System.Collections.Generic;
+using Xamarin.Android.Tasks;
 
 namespace Xamarin.Android.Build.Tests;
 
@@ -83,23 +84,35 @@ public class MainActivity : Activity
 ";
 
 	[Test]
-	public void MarshalMethodsAppRuns ()
+	public void MarshalMethodsAppRuns ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 	{
-		var proj = new XamarinAndroidApplicationProject (packageName: "marshal2") {
-			IsRelease = true,
+		const bool isRelease = true;
+		if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+			return;
+		}
+
+		if (runtime == AndroidRuntime.NativeAOT) {
+			Assert.Ignore ("Not supported with NativeAOT");
+		}
+
+		var proj = new XamarinAndroidApplicationProject (packageName: PackageUtils.MakePackageName (runtime, "marshal2")) {
+			IsRelease = isRelease,
 			EnableMarshalMethods = true,
-			TargetFramework = "net9.0-android",
-			SupportedOSPlatformVersion = "23",
+			SupportedOSPlatformVersion = "24", // Minimum 24 to be able to test on Android 16
 			TrimModeRelease = TrimMode.Full,
 			ProjectName = "marshal2",
 		};
-
-		proj.SetAndroidSupportedAbis (DeviceAbi);
+		proj.SetRuntime (runtime);
+		proj.SetRuntimeIdentifiers (new[] { DeviceAbi });
 		proj.AndroidManifest = String.Format (MarshalMethodsAppRuns_PermissionManifest, proj.PackageName);
 		proj.MainActivity = MarshalMethodsAppRuns_MainActivity;
 		proj.SetDefaultTargetDevice ();
+		// TODO: AndroidEnableMarshalMethods and ReadyToRun do not work together
+		if (runtime == AndroidRuntime.CoreCLR) {
+			proj.SetProperty ("PublishReadyToRun", "false");
+		}
 
-		using var apkBuilder = CreateApkBuilder (Path.Combine ("temp", TestName));
+		using var apkBuilder = CreateApkBuilder ();
 		Assert.True (apkBuilder.Install (proj), "Project should have installed.");
 		RunProjectAndAssert (proj, apkBuilder);
 

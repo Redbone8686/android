@@ -15,6 +15,17 @@ namespace Xamarin.Android.Build.Tests {
 	[TestFixture]
 	[Parallelizable (ParallelScope.Children)]
 	public class ManagedResourceParserTests : BaseTest {
+		class ResourceDesignerAttributeLibraryProject : DotNetXamarinProject
+		{
+			public override string ProjectTypeGuid => "";
+
+			public ResourceDesignerAttributeLibraryProject ()
+			{
+				Language = XamarinAndroidProjectLanguage.CSharp;
+				TargetFramework = "net10.0";
+			}
+		}
+
 		const string ValuesXml = @"<?xml version=""1.0"" encoding=""utf-8""?>
 <resources>
 	<bool name=""a_bool"">false</bool>
@@ -299,11 +310,18 @@ int xml myxml 0x7f140000
 			File.WriteAllText (Path.Combine (Root, path, "lp", "__res_name_case_map.txt"), "menu/Options.xml;menu/options.xml");
 		}
 
-		void BuildLibraryWithResources (string path)
+		void BuildLibraryWithResources (string path, AndroidRuntime runtime)
 		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var library = new XamarinAndroidLibraryProject () {
+				IsRelease = isRelease,
 				ProjectName = "Library",
 			};
+			library.SetRuntime (runtime);
 
 			var libraryStrings = library.AndroidResources.FirstOrDefault (r => r.Include () == @"Resources\values\Strings.xml");
 
@@ -319,6 +337,49 @@ int xml myxml 0x7f140000
 			library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "drawable", "ic_menu_preferences.png")) { BinaryContent = () => icon_binary_mdpi });
 			library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "mipmap-hdpi", "icon.png")) { BinaryContent = () => icon_binary_mdpi });
 			library.AndroidResources.Add (new AndroidItem.AndroidResource (Path.Combine ("Resources", "menu", "options.xml")) { TextContent = () => Menu });
+
+			using (ProjectBuilder builder = CreateDllBuilder (Path.Combine (Root, path))) {
+				Assert.IsTrue (builder.Build (library), "Build should have succeeded");
+			}
+		}
+
+		void BuildLibraryWithResourceDesignerAttribute (string path, string resourceDesignerTypeName)
+		{
+			var library = new ResourceDesignerAttributeLibraryProject () {
+				ProjectName = "Library",
+			};
+			library.Sources.Add (new BuildItem.Source ("Resource.cs") {
+				TextContent = () => $$"""
+					[assembly: Android.Runtime.ResourceDesignerAttribute ("{{resourceDesignerTypeName}}", IsApplication=false)]
+
+					namespace Android.Runtime
+					{
+						[System.AttributeUsage (System.AttributeTargets.Assembly)]
+						public class ResourceDesignerAttribute : System.Attribute
+						{
+							public ResourceDesignerAttribute (string fullName)
+							{
+								FullName = fullName;
+							}
+
+							public string FullName { get; set; }
+
+							public bool IsApplication { get; set; }
+						}
+					}
+
+					namespace Library
+					{
+						public partial class Resource
+						{
+							public partial class Animator
+							{
+								public static int slide_in_bottom;
+							}
+						}
+					}
+					"""
+			});
 
 			using (ProjectBuilder builder = CreateDllBuilder (Path.Combine (Root, path))) {
 				Assert.IsTrue (builder.Build (library), "Build should have succeeded");
@@ -377,6 +438,7 @@ int xml myxml 0x7f140000
 			task.UseManagedResourceGenerator = true;
 			task.DesignTimeBuild = true;
 			task.Namespace = "Foo.Foo";
+			task.AssemblyName = "Foo";
 			task.NetResgenOutputFile = Path.Combine (Root, path, "Resource.designer.cs");
 			task.DesignTimeOutputFile = Path.Combine (Root, path, "designtime", "Resource.designer.cs");
 			task.ProjectDir = Path.Combine (Root, path);
@@ -391,8 +453,8 @@ int xml myxml 0x7f140000
 			};
 			task.CaseMapFile = Path.Combine (Root, path, "case_map.txt");
 			task.IsApplication = true;
-			int platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
-			task.JavaPlatformJarPath = Path.Combine (AndroidSdkDirectory, "platforms", $"android-{platform}", "android.jar");
+			var platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
+			task.JavaPlatformJarPath = AndroidSdkResolver.GetAndroidJarPath (platform);
 			return task;
 		}
 
@@ -425,8 +487,15 @@ int xml myxml 0x7f140000
 		}
 
 		[Test]
-		public void GenerateDesignerFileFromRtxt ([Values (false, true)] bool withLibraryReference)
+		public void GenerateDesignerFileFromRtxt ([Values] bool withLibraryReference, [Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			// TODO: fix NativeAOT, it currently fails with:
+			//
+			//  bin/TestDebug/temp/GenerateDesignerFileFromRtxtTrueNativeAOT Some Space/Resource.designer.cs and bin/TestDebug/Expected/GenerateDesignerFileWithLibraryReferenceExpected.cs do not match.
+			if (runtime == AndroidRuntime.NativeAOT) {
+				Assert.Ignore ("NativeAOT currently doesn't work with this test.");
+			}
+
 			var path = Path.Combine ("temp", TestName + " Some Space");
 			CreateResourceDirectory (path);
 			var mapTask = CreateCaseMapTask (path);
@@ -436,13 +505,40 @@ int xml myxml 0x7f140000
 			File.WriteAllText (task.RTxtFile, Rtxt);
 			if (withLibraryReference) {
 				var libraryPath = Path.Combine (path, "Library");
-				BuildLibraryWithResources (libraryPath);
+				BuildLibraryWithResources (libraryPath, runtime);
 				task.References = new TaskItem [] {
 					new TaskItem (Path.Combine (Root, libraryPath, "bin", "Debug", "Library.dll"))
 				};
 			}
 			Assert.IsTrue (task.Execute (), "Task should have executed successfully.");
 			AssertResourceDesigner (task, withLibraryReference ? "GenerateDesignerFileWithLibraryReferenceExpected.cs" : "GenerateDesignerFileExpected.cs");
+			Directory.Delete (Path.Combine (Root, path), recursive: true);
+		}
+
+		[TestCase ("Library.Resource, Library")]
+		[TestCase ("Library.Resource")]
+		public void ResourceDesignerImportGeneratorHandlesResourceDesignerAttributeFormats (string resourceDesignerTypeName)
+		{
+			var path = Path.Combine ("temp", TestName + " Some Space");
+			CreateResourceDirectory (path);
+			var mapTask = CreateCaseMapTask (path);
+			Assert.IsTrue (mapTask.Execute (), "Map Task should have executed successfully.");
+
+			var libraryPath = Path.Combine (path, "Library");
+			BuildLibraryWithResourceDesignerAttribute (libraryPath, resourceDesignerTypeName);
+			var libraryAssemblyPath = Path.Combine (Root, libraryPath, "bin", "Debug", "Library.dll");
+
+			var task = CreateTask (path);
+			task.RTxtFile = Path.Combine (Root, path, "R.txt");
+			File.WriteAllText (task.RTxtFile, Rtxt);
+			task.References = new TaskItem [] {
+				new TaskItem (libraryAssemblyPath)
+			};
+
+			Assert.IsTrue (task.Execute (), "Task should have executed successfully.");
+			var designer = File.ReadAllText (task.NetResgenOutputFile);
+			// The import generator can only emit this assignment if it found "Library.Resource".
+			StringAssert.Contains ("global::Library.Resource.Animator.slide_in_bottom = global::Foo.Foo.Resource.Animator.slide_in_bottom;", designer);
 			Directory.Delete (Path.Combine (Root, path), recursive: true);
 		}
 
@@ -475,6 +571,7 @@ int xml myxml 0x7f140000
 			task.UseManagedResourceGenerator = true;
 			task.DesignTimeBuild = true;
 			task.Namespace = "Foo.Foo";
+			task.AssemblyName = "Foo";
 			task.NetResgenOutputFile = Path.Combine (Root, path, "Resource.designer.cs");
 			task.ProjectDir = Path.Combine (Root, path);
 			task.ResourceDirectory = Path.Combine (Root, path, "res") + Path.DirectorySeparatorChar;
@@ -490,8 +587,8 @@ int xml myxml 0x7f140000
 			task.CaseMapFile = Path.Combine (Root, path, "case_map.txt");
 			File.WriteAllText (task.ResourceFlagFile, string.Empty);
 			task.IsApplication = true;
-			int platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
-			task.JavaPlatformJarPath = Path.Combine (AndroidSdkDirectory, "platforms", $"android-{platform}", "android.jar");
+			var platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
+			task.JavaPlatformJarPath = AndroidSdkResolver.GetAndroidJarPath (platform);
 			Assert.IsTrue (task.Execute (), "Task should have executed successfully.");
 			Assert.IsTrue (File.Exists (task.NetResgenOutputFile), $"{task.NetResgenOutputFile} should have been created.");
 			var expected = Path.Combine (ExpectedOutputDir, "GenerateDesignerFileExpected.cs");
@@ -512,7 +609,7 @@ int xml myxml 0x7f140000
 		public void RtxtGeneratorOutput ()
 		{
 			var path = Path.Combine ("temp", TestName);
-			int platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
+			var platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
 			string resPath = Path.Combine (Root, path, "res");
 			string rTxt = Path.Combine (Root, path, "R.txt");
 			string expectedrTxt = Path.Combine (Root, path, "expectedR.txt");
@@ -526,7 +623,7 @@ int xml myxml 0x7f140000
 				RTxtFile = rTxt,
 				ResourceDirectory = resPath,
 				CaseMapFile = Path.Combine (Root, path, "case_map.txt"),
-				JavaPlatformJarPath = Path.Combine (AndroidSdkDirectory, "platforms", $"android-{platform}", "android.jar"),
+				JavaPlatformJarPath = AndroidSdkResolver.GetAndroidJarPath (platform),
 				ResourceFlagFile = Path.Combine (Root, path, "res.flag"),
 				AdditionalResourceDirectories = new string[] {
 					Path.Combine (Root, path, "lp", "res"),
@@ -566,7 +663,7 @@ int xml myxml 0x7f140000
 			};
 
 			Assert.IsTrue (aapt2Compile.Execute (), $"Aapt2 Compile should have succeeded. {string.Join (" ", errors.Select (x => x.Message))}");
-			int platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
+			var platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
 			string resPath = Path.Combine (Root, path, "res");
 			string rTxt = Path.Combine (Root, path, "R.txt");
 			var aapt2Link = new Aapt2Link {
@@ -578,7 +675,7 @@ int xml myxml 0x7f140000
 				CompiledResourceFlatArchive = new TaskItem (Path.Combine (Root, path, "compiled.flata")),
 				OutputFile = Path.Combine (Root, path, "foo.apk"),
 				AssemblyIdentityMapFile = Path.Combine (Root, path, "foo.map"),
-				JavaPlatformJarPath = Path.Combine (AndroidSdkDirectory, "platforms", $"android-{platform}", "android.jar"),
+				JavaPlatformJarPath = AndroidSdkResolver.GetAndroidJarPath (platform),
 				JavaDesignerOutputDirectory = Path.Combine (Root, path, "java"),
 				ResourceSymbolsTextFile = rTxt,
 
@@ -593,6 +690,7 @@ int xml myxml 0x7f140000
 			task.UseManagedResourceGenerator = true;
 			task.DesignTimeBuild = false;
 			task.Namespace = "MonoAndroidApplication4.MonoAndroidApplication4";
+			task.AssemblyName = "MonoAndroidApplication4";
 			task.NetResgenOutputFile = Path.Combine (Root, path, "Resource.designer.aapt2.cs");
 			task.ProjectDir = Path.Combine (Root, path);
 			task.CaseMapFile = Path.Combine (Root, path, "case_map.txt");
@@ -633,16 +731,15 @@ int xml myxml 0x7f140000
 			IBuildEngine engine = new MockBuildEngine (TestContext.Out);
 			TaskLoggingHelper loggingHelper = new TaskLoggingHelper (engine, nameof (ManagedResourceParser));
 			string resPath = Path.Combine (Root, path, "res");
-			int platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
+			var platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
 			var flagFile = Path.Combine (Root, path, "AndroidResgen.flag");
 			var lp = new string [] { Path.Combine (Root, path, "lp", "res") };
 			Stopwatch sw = new Stopwatch ();
 			long totalMS = 0;
 			int i;
 			for (i = 0; i < 100; i++) {
-				var parser = new ManagedResourceParser () {
-					Log = loggingHelper,
-					JavaPlatformDirectory = Path.Combine (AndroidSdkDirectory, "platforms", $"android-{platform}"),
+				var parser = new ManagedResourceParser (loggingHelper) {
+					JavaPlatformDirectory = Path.Combine (AndroidSdkDirectory, "platforms", AndroidSdkResolver.GetPlatformDirectoryName (platform)),
 					ResourceFlagFile =  flagFile,
 				};
 				sw.Start ();
@@ -713,14 +810,15 @@ int styleable ElevenAttributes_attr10 10";
 			task.UseManagedResourceGenerator = true;
 			task.DesignTimeBuild = true;
 			task.Namespace = "Foo.Foo";
+			task.AssemblyName = "Foo";
 			task.NetResgenOutputFile = Path.Combine (Root, path, "Resource.designer.cs");
 			task.ProjectDir = Path.Combine (Root, path);
 			task.CaseMapFile = Path.Combine (Root, path, "case_map.txt");
 			task.ResourceDirectory = Path.Combine (Root, path, "res");
 			task.Resources = new TaskItem [] {};
 			task.IsApplication = true;
-			int platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
-			task.JavaPlatformJarPath = Path.Combine (AndroidSdkDirectory, "platforms", $"android-{platform}", "android.jar");
+			var platform = AndroidSdkResolver.GetMaxInstalledPlatform ();
+			task.JavaPlatformJarPath = AndroidSdkResolver.GetAndroidJarPath (platform);
 			Assert.IsTrue (task.Execute (), "Task should have executed successfully.");
 			Assert.IsTrue (File.Exists (task.NetResgenOutputFile), $"{task.NetResgenOutputFile} should have been created.");
 			var expected = Path.Combine (ExpectedOutputDir, "GenerateDesignerFileWithElevenStyleableAttributesExpected.cs");

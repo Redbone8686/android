@@ -1,3 +1,4 @@
+#nullable enable
 using Microsoft.Build.Framework;
 using Xamarin.Android.Tools;
 using Microsoft.Android.Build.Tasks;
@@ -9,10 +10,10 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "GAAN";
 
 		[Required]
-		public string ManifestFile { get; set; }
+		public string ManifestFile { get; set; } = "";
 
 		[Output]
-		public string ActivityName { get; set; }
+		public string? ActivityName { get; set; }
 
 		public override bool RunTask ()
 		{

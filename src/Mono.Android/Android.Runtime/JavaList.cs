@@ -10,7 +10,6 @@ namespace Android.Runtime {
 	// java.util.ArrayList allows null values
 	public partial class JavaList : Java.Lang.Object, System.Collections.IList {
 
-		internal const DynamicallyAccessedMemberTypes Constructors = DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors;
 		internal static readonly JniPeerMembers list_members = new XAPeerMembers ("java/util/List", typeof (JavaList), isInterface: true);
 
 		//
@@ -24,26 +23,29 @@ namespace Android.Runtime {
 		//
 		//     https://developer.android.com/reference/java/util/List.html?hl=en#get(int)
 		//
-		internal unsafe object? InternalGet (
+		internal object? InternalGet (
 				int location,
 				[DynamicallyAccessedMembers (Constructors)]
 				Type? targetType = null)
 		{
-			const string id = "get.(I)Ljava/lang/Object;";
-			JniObjectReference obj;
-			try {
-				JniArgumentValue* parameters = stackalloc JniArgumentValue [1] {
-					new JniArgumentValue (location),
-				};
-				obj = list_members.InstanceMethods.InvokeAbstractObjectMethod (id, this, parameters);
-			} catch (Java.Lang.IndexOutOfBoundsException ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
-				throw new ArgumentOutOfRangeException (ex.Message, ex);
-			}
-
+			var obj = InternalGetReference (location);
 			return JavaConvert.FromJniHandle (
 					obj.Handle,
 					JniHandleOwnership.TransferLocalRef,
 					targetType);
+		}
+
+		internal unsafe JniObjectReference InternalGetReference (int location)
+		{
+			const string id = "get.(I)Ljava/lang/Object;";
+			try {
+				JniArgumentValue* parameters = stackalloc JniArgumentValue [1] {
+					new JniArgumentValue (location),
+				};
+				return list_members.InstanceMethods.InvokeAbstractObjectMethod (id, this, parameters);
+			} catch (Java.Lang.IndexOutOfBoundsException ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
+				throw new ArgumentOutOfRangeException (ex.Message, ex);
+			}
 		}
 
 		//
@@ -268,13 +270,8 @@ namespace Android.Runtime {
 			}
 		}
 
-		public void CopyTo (Array array, int array_index)
+		public unsafe void CopyTo (Array array, int array_index)
 		{
-			[UnconditionalSuppressMessage ("Trimming", "IL2073", Justification = "JavaList<T> constructors are preserved by the MarkJavaObjects trimmer step.")]
-			[return: DynamicallyAccessedMembers (Constructors)]
-			static Type GetElementType (Array array) =>
-				array.GetType ().GetElementType ();
-
 			if (array == null)
 				throw new ArgumentNullException ("array");
 			if (array_index < 0)
@@ -282,10 +279,12 @@ namespace Android.Runtime {
 			if (array.Length < array_index + Count)
 				throw new ArgumentException ("array");
 
-			var targetType = GetElementType (array);
+			var converter = new JavaConvert.ArrayElementConverter (array);
 			int c = Count;
-			for (int i = 0; i < c; i++)
-				array.SetValue (InternalGet (i, targetType), array_index + i);
+			for (int i = 0; i < c; i++) {
+				var obj = InternalGetReference (i);
+				array.SetValue (converter.FromJniHandle (obj.Handle, JniHandleOwnership.TransferLocalRef), array_index + i);
+			}
 		}
 
 		public IEnumerator GetEnumerator ()
@@ -393,7 +392,7 @@ namespace Android.Runtime {
 		public void Remove (object? item)
 		{
 			int i = IndexOf (item);
-			if (i < 0 && i >= Count)
+			if (i < 0 || i >= Count)
 				return;
 			RemoveAt (i);
 		}
@@ -499,7 +498,7 @@ namespace Android.Runtime {
 			if (handle == IntPtr.Zero)
 				return null;
 
-			var inst = (IJavaObject?) Java.Lang.Object.PeekObject (handle);
+			var inst = (IJavaObject?) Java.Lang.Object.PeekObject (handle, typeof (IList));
 			if (inst == null)
 				inst = new JavaList (handle, transfer);
 			else
@@ -547,14 +546,13 @@ namespace Android.Runtime {
 		//	
 		public virtual bool Add (Java.Lang.Object? item)
 		{
-			return Add (0, item);
+			Add ((object?) item);
+			return true;
 		}
 
 		public virtual bool Add (int index, Java.Lang.Object? item)
 		{
-			if (Contains (item))
-				return false;
-			Add ((object?) item);
+			Insert (index, (object?) item);
 			return true;
 		}
 
@@ -587,7 +585,7 @@ namespace Android.Runtime {
 			return true;
 		}
 		
-		public virtual bool Equals (Java.Lang.Object obj)
+		public virtual new bool Equals (Java.Lang.Object obj)
 		{
 			var collection = obj as JavaList;
 			if (collection == null || Count != collection.Count)
@@ -629,7 +627,7 @@ namespace Android.Runtime {
 		public virtual bool Remove (Java.Lang.Object? item)
 		{
 			int i = IndexOf (item);
-			if (i < 0 && i >= Count)
+			if (i < 0 || i >= Count)
 				return false;
 			RemoveAt (i);
 			return true;
@@ -739,19 +737,9 @@ namespace Android.Runtime {
 		//
 		//     https://developer.android.com/reference/java/util/List.html?hl=en#get(int)
 		//
-		internal unsafe T? InternalGet (int location)
+		internal T? InternalGet (int location)
 		{
-			const string id = "get.(I)Ljava/lang/Object;";
-			JniObjectReference obj;
-			try {
-				JniArgumentValue* parameters = stackalloc JniArgumentValue [1] {
-					new JniArgumentValue (location),
-				};
-				obj = list_members.InstanceMethods.InvokeAbstractObjectMethod (id, this, parameters);
-			} catch (Java.Lang.IndexOutOfBoundsException ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
-				throw new ArgumentOutOfRangeException (ex.Message, ex);
-			}
-
+			var obj = InternalGetReference (location);
 			return JavaConvert.FromJniHandle<T> (
 					obj.Handle,
 					JniHandleOwnership.TransferLocalRef);
@@ -797,7 +785,7 @@ namespace Android.Runtime {
 
 		// C#'s IList<T> allows nulls but is not annotated as MaybeNull.
 		[MaybeNull]
-		public T this [int index] {
+		public new T this [int index] {
 			[return: MaybeNull]
 #pragma warning disable CS8766 // Nullability of reference types in return type doesn't match implicitly implemented member because of nullability attributes.
 			get {
@@ -891,7 +879,7 @@ namespace Android.Runtime {
 			return GetEnumerator ()!;
 		}
 
-		public IEnumerator<T?> GetEnumerator ()
+		public new IEnumerator<T?> GetEnumerator ()
 		{
 			return System.Linq.Extensions.ToEnumerator_Dispose<T> (Iterator ());
 		}
@@ -966,13 +954,13 @@ namespace Android.Runtime {
 		public bool Remove (T item)
 		{
 			int i = IndexOf (item);
-			if (i < 0 && i >= Count)
+			if (i < 0 || i >= Count)
 				return false;
 			RemoveAt (i);
 			return true;
 		}
 		
-		public static IList<T>? FromJniHandle (IntPtr handle, JniHandleOwnership transfer)
+		public new static IList<T>? FromJniHandle (IntPtr handle, JniHandleOwnership transfer)
 		{
 			if (handle == IntPtr.Zero)
 				return null;

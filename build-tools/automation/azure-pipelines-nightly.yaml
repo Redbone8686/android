@@ -12,17 +12,13 @@ pr:
 resources:
   repositories:
   - repository: yaml-templates
-    type: github
-    name: xamarin/yaml-templates
-    ref: refs/heads/main
-    endpoint: xamarin
-  - repository: android-platform-support
     type: git
-    name: DevDiv/android-platform-support
+    name: DevDiv/Xamarin.yaml-templates
     ref: refs/heads/main
   - repository: maui
     type: github
     name: dotnet/maui
+    ref: net11.0
     endpoint: xamarin
 
 parameters:
@@ -44,7 +40,7 @@ stages:
       name: $(SharedMacPool)
       demands:
       - macOS.Name -equals $(SharedMacName)
-      - Agent.OSArchitecture -equals $(SharedMacArch)
+      - macOS.Architecture -equals $(SharedMacArch)
     timeoutInMinutes: 420
     workspace:
       clean: all
@@ -57,7 +53,7 @@ stages:
     steps:
     - checkout: self
       submodules: recursive
-      path: s/xamarin-android
+      path: s/android
 
     - template: /build-tools/automation/yaml-templates/commercial-build.yaml
       parameters:
@@ -66,7 +62,7 @@ stages:
 
     - template: /build-tools/automation/yaml-templates/upload-results.yaml
       parameters:
-        xaSourcePath: $(System.DefaultWorkingDirectory)/xamarin-android
+        xaSourcePath: $(System.DefaultWorkingDirectory)/android
         artifactName: Build Results - Nightly macOS
         includeBuildResults: true
         use1ESTemplate: false
@@ -116,14 +112,13 @@ stages:
           avdAbi: x86_64
           avdType: google_apis
     pool:
-      vmImage: $(HostedMacImage)
+      vmImage: $(HostedMacImageWithEmulator)
     workspace:
       clean: all
     steps:
     - template: /build-tools/automation/yaml-templates/setup-test-environment.yaml
       parameters:
-        xaprepareScenario: EmulatorTestDependencies
-        jdkTestFolder: $(JAVA_HOME_11_X64)
+        jdkMajorVersion: $(LatestJavaSdkMajorVersion)
 
     - template: /build-tools/automation/yaml-templates/run-dotnet-preview.yaml
       parameters:
@@ -138,12 +133,13 @@ stages:
         avdApiLevel: $(avdApiLevel)
         avdAbi: $(avdAbi)
         avdType: $(avdType)
+        emulatorMSBuildArgs: -p:JavaSdkDirectory=$(JAVA_HOME)
 
     - template: /build-tools/automation/yaml-templates/apk-instrumentation.yaml
       parameters:
         configuration: $(XA.Build.Configuration)
         testName: Mono.Android.NET_Tests-$(XA.Build.Configuration)-$(avdApiLevel)
-        project: tests/Mono.Android-Tests/Runtime-Microsoft.Android.Sdk/Mono.Android.NET-Tests.csproj
+        project: tests/Mono.Android-Tests/Mono.Android-Tests/Mono.Android.NET-Tests.csproj
         testResultsFiles: TestResult-Mono.Android.NET_Tests-$(XA.Build.Configuration)$(avdApiLevel).xml
         extraBuildArgs: -p:TestsFlavor=$(avdApiLevel) -p:TestAvdApiLevel=$(avdApiLevel) -p:TestAvdAbi=$(avdAbi) -p:TestAvdType=$(avdType)
         artifactSource: bin/Test$(XA.Build.Configuration)/$(DotNetTargetFramework)-android/Mono.Android.NET_Tests-Signed.aab
@@ -162,7 +158,6 @@ stages:
       emulatorMSBuildArgs: -p:TestAvdExtraBootArgs=-writable-system
       jobName: SystemApplicationTests
       jobTimeout: 120
-      jdkTestFolder: $HOME/android-toolchain/jdk-17
       use1ESTemplate: false
       testSteps:
       - template: run-nunit-tests.yaml
@@ -195,15 +190,11 @@ stages:
     steps:
     - template: agent-cleanser/v1.yml@yaml-templates
 
-    - script: |
-        echo "##vso[task.setvariable variable=JAVA_HOME]$HOME/android-toolchain/jdk-17"
-      displayName: set JAVA_HOME to $HOME/android-toolchain/jdk-17
-
     - template: /build-tools/automation/yaml-templates/setup-test-environment.yaml
       parameters:
         installTestSlicer: true
-        xaprepareScenario: EmulatorTestDependencies
-        jdkTestFolder: $HOME/android-toolchain/jdk-17
+        useAgentJdkPath: false
+        jdkMajorVersion: $(LatestJavaSdkMajorVersion)
 
     - task: DownloadPipelineArtifact@2
       inputs:
@@ -251,15 +242,11 @@ stages:
     steps:
     - template: agent-cleanser/v1.yml@yaml-templates
 
-    - script: |
-        echo "##vso[task.setvariable variable=JAVA_HOME]$HOME/android-toolchain/jdk-17"
-      displayName: set JAVA_HOME to $HOME/android-toolchain/jdk-17
-
     - template: /build-tools/automation/yaml-templates/setup-test-environment.yaml
       parameters:
         installTestSlicer: true
-        xaprepareScenario: EmulatorTestDependencies
-        jdkTestFolder: $HOME/android-toolchain/jdk-17
+        useAgentJdkPath: false
+        jdkMajorVersion: $(LatestJavaSdkMajorVersion)
 
     - task: DownloadPipelineArtifact@2
       inputs:
@@ -287,7 +274,7 @@ stages:
 - stage: compliance_scan
   displayName: Compliance
   dependsOn: mac_build
-  condition: and(eq(dependencies.mac_build.result, 'Succeeded'), eq(variables['Build.SourceBranch'], '${{ parameters.ApiScanSourceBranch }}'))
+  condition: and(in(dependencies.mac_build.result, 'Succeeded', 'SucceededWithIssues'), eq(variables['Build.SourceBranch'], '${{ parameters.ApiScanSourceBranch }}'))
   jobs:
   - job: api_scan
     displayName: API Scan

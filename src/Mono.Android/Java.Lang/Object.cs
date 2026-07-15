@@ -14,68 +14,27 @@ using System.Diagnostics.CodeAnalysis;
 namespace Java.Lang {
 
 	[Serializable]
-	public partial class Object : IDisposable, IJavaObject, IJavaObjectEx
-#if JAVA_INTEROP
-		, IJavaPeerable
-#endif  // JAVA_INTEROP
+	public partial class Object : global::Java.Interop.JavaObject, IJavaObject, IJavaObjectEx
 	{
-		[NonSerialized] IntPtr key_handle;
-#pragma warning disable CS0649, CS0169, CS0414 // Suppress fields are never used warnings, these fields are used directly by monodroid-glue.cc
-		[NonSerialized] int refs_added;
-#pragma warning restore CS0649, CS0169, CS0414
-		[NonSerialized] JObjectRefType handle_type;
-		[NonSerialized] internal IntPtr handle;
-		[NonSerialized] bool             needsActivation;
-		[NonSerialized] bool             isProxy;
-
-		IntPtr IJavaObjectEx.KeyHandle {
-			get {return key_handle;}
-			set {key_handle = value;}
-		}
-
-		bool IJavaObjectEx.IsProxy {
-			get {return isProxy;}
-			set {isProxy = value;}
-		}
-
-		bool IJavaObjectEx.NeedsActivation {
-			get {return needsActivation;}
-			set {needsActivation = true;}
-		}
+		internal const DynamicallyAccessedMemberTypes Constructors = DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors;
 
 		IntPtr IJavaObjectEx.ToLocalJniHandle ()
 		{
 			lock (this) {
-				if (handle == IntPtr.Zero)
-					return handle;
-				return JNIEnv.NewLocalRef (handle);
+				var peerRef = PeerReference;
+				if (!peerRef.IsValid)
+					return IntPtr.Zero;
+				return peerRef.NewLocalRef ().Handle;
 			}
 		}
 
 		~Object ()
 		{
-			// FIXME: need hash cleanup mechanism.
-			// Finalization occurs after a test of java persistence.  If the
-			// handle still contains a java reference, we can't finalize the
-			// object and should "resurrect" it.
-			refs_added = 0;
-			if (Environment.HasShutdownStarted) {
-				return;
-			}
-			JniEnvironment.Runtime.ValueManager.FinalizePeer (this);
 		}
 
-		public Object (IntPtr handle, JniHandleOwnership transfer)
+		public unsafe Object (IntPtr handle, JniHandleOwnership transfer)
+			: base (ref *InvalidJniObjectReference, JniObjectReferenceOptions.None)
 		{
-			// Check if handle was preset by our java activation mechanism
-			if (this.handle != IntPtr.Zero) {
-				needsActivation = true;
-				handle = this.handle;
-				if (handle_type != 0)
-					return;
-				transfer  = JniHandleOwnership.DoNotTransfer;
-			}
-
 			SetHandle (handle, transfer);
 		}
 
@@ -92,31 +51,27 @@ namespace Java.Lang {
 			JNIEnv.FinishCreateInstance (Handle, "()V");
 		}
 
-#if JAVA_INTEROP
 		[EditorBrowsable (EditorBrowsableState.Never)]
-		public int JniIdentityHashCode {
-			get {return (int) key_handle;}
-		}
+		public new int JniIdentityHashCode => base.JniIdentityHashCode;
 
 		[DebuggerBrowsable (DebuggerBrowsableState.Never)]
 		[EditorBrowsable (EditorBrowsableState.Never)]
-		public JniObjectReference PeerReference {
-			get {
-				return new JniObjectReference (handle, (JniObjectReferenceType) handle_type);
-			}
-		}
+		public new JniObjectReference PeerReference => base.PeerReference;
 
 		[DebuggerBrowsable (DebuggerBrowsableState.Never)]
 		[EditorBrowsable (EditorBrowsableState.Never)]
-		public virtual JniPeerMembers JniPeerMembers {
+		public override JniPeerMembers JniPeerMembers {
 			get { return _members; }
 		}
-#endif  // JAVA_INTEROP
 
 		[EditorBrowsable (EditorBrowsableState.Never)]
 		public IntPtr Handle {
 			get {
-				return handle;
+				var peerRef = PeerReference;
+				if (!peerRef.IsValid) {
+					return IntPtr.Zero;
+				}
+				return peerRef.Handle;
 			}
 		}
 
@@ -142,115 +97,38 @@ namespace Java.Lang {
 			return ThresholdType;
 		}
 
-#if JAVA_INTEROP
-		JniManagedPeerStates IJavaPeerable.JniManagedPeerState {
-			get {
-				var e = (IJavaObjectEx) this;
-				var s = JniManagedPeerStates.None;
-				if (e.IsProxy)
-					s |= JniManagedPeerStates.Replaceable;
-				if (e.NeedsActivation)
-					s |= JniManagedPeerStates.Activatable;
-				return s;
-			}
-		}
-
-		void IJavaPeerable.DisposeUnlessReferenced ()
-		{
-			var p = PeekObject (handle);
-			if (p == null) {
-				Dispose ();
-			}
-		}
-
 		[EditorBrowsable (EditorBrowsableState.Never)]
-		public void UnregisterFromRuntime ()
-		{
-			JNIEnvInit.AndroidValueManager?.RemovePeer (this, key_handle);
-		}
+		public new void UnregisterFromRuntime () => base.UnregisterFromRuntime ();
 
-		void IJavaPeerable.Disposed ()
-		{
-			Dispose (disposing: true);
-		}
-
-		void IJavaPeerable.Finalized ()
-		{
-			Dispose (disposing: false);
-		}
-
-		void IJavaPeerable.SetJniIdentityHashCode (int value)
-		{
-			key_handle  = (IntPtr) value;
-		}
-
-		void IJavaPeerable.SetJniManagedPeerState (JniManagedPeerStates value)
-		{
-			var e = (IJavaObjectEx) this;
-			if ((value & JniManagedPeerStates.Replaceable) == JniManagedPeerStates.Replaceable)
-				e.IsProxy = true;
-			if ((value & JniManagedPeerStates.Activatable) == JniManagedPeerStates.Activatable)
-				e.NeedsActivation = true;
-		}
-
-		void IJavaPeerable.SetPeerReference (JniObjectReference reference)
-		{
-			this.handle         = reference.Handle;
-			this.handle_type    = (JObjectRefType) reference.Type;
-		}
-#endif  // JAVA_INTEROP
-
-
-		public void Dispose ()
-		{
-			JNIEnvInit.AndroidValueManager?.DisposePeer (this);
-		}
-
-		protected virtual void Dispose (bool disposing)
+		protected override void Dispose (bool disposing)
 		{
 		}
 
-		internal static void Dispose (IJavaPeerable instance, ref IntPtr handle, IntPtr key_handle, JObjectRefType handle_type)
-		{
-			if (handle == IntPtr.Zero)
-				return;
-
-			if (Logger.LogGlobalRef) {
-				RuntimeNativeMethods._monodroid_gref_log (
-						FormattableString.Invariant ($"Disposing handle 0x{handle:x}\n"));
-			}
-
-			JNIEnvInit.AndroidValueManager?.RemovePeer (instance, key_handle);
-
-			switch (handle_type) {
-				case JObjectRefType.Global:
-					lock (instance) {
-						JNIEnv.DeleteGlobalRef (handle);
-						handle = IntPtr.Zero;
-					}
-					break;
-				case JObjectRefType.WeakGlobal:
-					lock (instance) {
-						JNIEnv.DeleteWeakGlobalRef (handle);
-						handle = IntPtr.Zero;
-					}
-					break;
-				default:
-					throw new InvalidOperationException ("Trying to dispose handle of type '" +
-							handle_type + "' which is not supported.");
-			}
-		}
+		public new void Dispose () => base.Dispose ();
 
 		[EditorBrowsable (EditorBrowsableState.Never)]
 		protected void SetHandle (IntPtr value, JniHandleOwnership transfer)
 		{
-			JNIEnvInit.AndroidValueManager?.AddPeer (this, value, transfer, out handle);
-			handle_type = JObjectRefType.Global;
+			var reference = new JniObjectReference (value);
+			var options   = FromJniHandleOwnership (transfer);
+			JniEnvironment.Runtime.ValueManager.ConstructPeer (
+					this,
+					ref reference,
+					value == IntPtr.Zero ? JniObjectReferenceOptions.None : options);
+			JNIEnv.DeleteRef (value, transfer);
+		}
+
+		static JniObjectReferenceOptions FromJniHandleOwnership (JniHandleOwnership transfer)
+		{
+			var options = JniObjectReferenceOptions.Copy;
+			if (transfer.HasFlag (JniHandleOwnership.DoNotRegister))
+				options |= JniObjectReferenceOptions.CopyAndDoNotRegister;
+			return options;
 		}
 
 		internal static IJavaPeerable? PeekObject (IntPtr handle, Type? requiredType = null)
 		{
-			var peeked  = JNIEnvInit.AndroidValueManager?.PeekPeer (new JniObjectReference (handle));
+			var peeked  = JniEnvironment.Runtime.ValueManager.PeekPeer (new JniObjectReference (handle));
 			if (peeked == null)
 				return null;
 			if (requiredType != null && !requiredType.IsAssignableFrom (peeked.GetType ()))
@@ -263,20 +141,23 @@ namespace Java.Lang {
 			return (T?)PeekObject (handle, typeof (T));
 		}
 
-		public static T? GetObject<T> (IntPtr jnienv, IntPtr handle, JniHandleOwnership transfer)
+		public static T? GetObject<[DynamicallyAccessedMembers (Constructors)] T> (
+			IntPtr jnienv, IntPtr handle, JniHandleOwnership transfer)
 			where T : class, IJavaObject
 		{
 			JNIEnv.CheckHandle (jnienv);
 			return GetObject<T> (handle, transfer);
 		}
 
-		public static T? GetObject<T> (IntPtr handle, JniHandleOwnership transfer)
+		public static T? GetObject<[DynamicallyAccessedMembers (Constructors)] T> (
+			IntPtr handle, JniHandleOwnership transfer)
 			where T : class, IJavaObject
 		{
 			return _GetObject<T>(handle, transfer);
 		}
 
-		internal static T? _GetObject<T> (IntPtr handle, JniHandleOwnership transfer)
+		internal static T? _GetObject<[DynamicallyAccessedMembers (Constructors)] T> (
+			IntPtr handle, JniHandleOwnership transfer)
 		{
 			if (handle == IntPtr.Zero)
 				return default (T);
@@ -284,18 +165,18 @@ namespace Java.Lang {
 			return (T?) GetObject (handle, transfer, typeof (T));
 		}
 
-		internal static IJavaPeerable? GetObject (IntPtr handle, JniHandleOwnership transfer, Type? type = null)
+		internal static IJavaPeerable? GetObject (
+				IntPtr handle,
+				JniHandleOwnership transfer,
+				[DynamicallyAccessedMembers (Constructors)]
+				Type? type = null)
 		{
 			if (handle == IntPtr.Zero)
 				return null;
 
-			var r = PeekObject (handle, type);
-			if (r != null) {
-				JNIEnv.DeleteRef (handle, transfer);
-				return r;
-			}
-
-			return Java.Interop.TypeManager.CreateInstance (handle, transfer, type);
+			var r = JniEnvironment.Runtime.ValueManager.GetPeer (new JniObjectReference (handle), type);
+			JNIEnv.DeleteRef (handle, transfer);
+			return r;
 		}
 
 		[EditorBrowsable (EditorBrowsableState.Never)]

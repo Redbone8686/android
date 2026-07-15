@@ -33,6 +33,9 @@ namespace Xamarin.Android.Tools.BootstrapTasks
 			{ "v13.0", "v12.1" },
 			{ "v14.0", "v13.0" },
 			{ "v15.0", "v14.0" },
+			{ "v16.0", "v15.0" },
+			{ "v16.1", "v16.0" },
+			{ "v17.0", "v16.1" },
 		};
 
 		static readonly string assemblyToValidate = "Mono.Android.dll";
@@ -65,6 +68,9 @@ namespace Xamarin.Android.Tools.BootstrapTasks
 
 		// In case API diffs vary between e.g. Classic MonoAndroid & .NET 6+
 		public string TargetFramework { get; set; }
+
+		// What's missing from acceptableIssuesFile?
+		public string LinesToAdd { get; set; }
 
 		// This Build tasks validates that changes are not breaking Api
 		public override bool Execute ()
@@ -259,8 +265,9 @@ namespace Xamarin.Android.Tools.BootstrapTasks
 					}
 
 					LogError ($"CheckApiCompatibility found nonacceptable Api breakages for ApiLevel: {ApiLevel}.{Environment.NewLine}{string.Join (Environment.NewLine, lines)}");
+					ReportMissingLines (acceptableIssuesFile.FullName, lines);
 
-					var missingItems = CodeGenDiff.GenerateMissingItems (CodeGenPath, contractAssembly.FullName, implementationAssembly.FullName);
+					var missingItems = CodeGenDiff.GenerateMissingItems (CodeGenPath, contractAssembly.FullName, implementationAssembly.FullName, JdkInfo.CreateTaskLogger (this));
 					if (missingItems.Any ()) {
 						Log.LogMessage (MessageImportance.High, $"{Environment.NewLine}*** CodeGen missing items***{Environment.NewLine}");
 						var indent = 0;
@@ -281,6 +288,21 @@ namespace Xamarin.Android.Tools.BootstrapTasks
 
 					return;
 				}
+			}
+		}
+
+		void ReportMissingLines (string acceptableIssuesFile, List<string> lines)
+		{
+			if (string.IsNullOrWhiteSpace (LinesToAdd)) {
+				return;
+			}
+			var known = new HashSet<string> (File.ReadAllLines (acceptableIssuesFile), StringComparer.Ordinal);
+			using var writer = File.CreateText (LinesToAdd);
+			foreach (var line in lines) {
+				if (known.Contains (line)) {
+					continue;
+				}
+				writer.WriteLine (line);
 			}
 		}
 

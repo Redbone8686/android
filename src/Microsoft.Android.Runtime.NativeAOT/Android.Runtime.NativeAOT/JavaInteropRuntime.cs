@@ -1,0 +1,88 @@
+using Android.Runtime;
+using Java.Interop;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+namespace Microsoft.Android.Runtime;
+
+static partial class JavaInteropRuntime
+{
+	static JniRuntime? runtime;
+
+	[LibraryImport ("xa-internal-api")]
+	[UnmanagedCallConv (CallConvs = new[] { typeof (CallConvCdecl) })]
+	private static partial int XA_Host_NativeAOT_JNI_OnLoad (IntPtr vm, IntPtr reserved);
+
+	[UnmanagedCallersOnly (EntryPoint="JNI_OnLoad")]
+	static int JNI_OnLoad (IntPtr vm, IntPtr reserved)
+	{
+		try {
+			AndroidLog.Print (AndroidLogLevel.Info, "JavaInteropRuntime", "JNI_OnLoad()");
+			XA_Host_NativeAOT_JNI_OnLoad (vm, reserved);
+			// This must be called before anything else, otherwise we'll see several spurious GC invocations and log messages
+			// similar to:
+			//
+			//  09-15 14:51:01.311 11071 11071 D monodroid-gc: 1 outstanding GREFs. Performing a full GC!
+			//
+			JNIEnvInit.NativeAotInitializeMaxGrefGet ();
+
+			LogcatTextWriter.Init ();
+			return (int) JniVersion.v1_6;
+		}
+		catch (Exception e) {
+			AndroidLog.Print (AndroidLogLevel.Error, "JavaInteropRuntime", $"JNI_OnLoad() failed: {e}");
+			return 0;
+		}
+	}
+
+	[UnmanagedCallersOnly (EntryPoint="JNI_OnUnload")]
+	static void JNI_OnUnload (IntPtr vm, IntPtr reserved)
+	{
+		AndroidLog.Print(AndroidLogLevel.Info, "JavaInteropRuntime", "JNI_OnUnload");
+		runtime?.Dispose ();
+	}
+
+	[LibraryImport ("xa-internal-api")]
+	[UnmanagedCallConv (CallConvs = new[] { typeof (CallConvCdecl) })]
+	private static partial void XA_Host_NativeAOT_OnInit (IntPtr language, IntPtr filesDir, IntPtr cacheDir, ref JNIEnvInit.JnienvInitializeArgs initArgs);
+
+	// symbol name from `$(IntermediateOutputPath)obj/Release/osx-arm64/h-classes/net_dot_jni_hello_JavaInteropRuntime.h`
+	[UnmanagedCallersOnly (EntryPoint="Java_net_dot_jni_nativeaot_JavaInteropRuntime_init")]
+	static void init (IntPtr jnienv, IntPtr klass, IntPtr classLoader, IntPtr language, IntPtr filesDir, IntPtr cacheDir)
+	{
+		JniTransition   transition  = default;
+		try {
+			var initArgs = new JNIEnvInit.JnienvInitializeArgs ();
+
+			// This needs to be called first, since it sets up locations, environment variables, logging etc
+			XA_Host_NativeAOT_OnInit (language, filesDir, cacheDir, ref initArgs);
+			JNIEnvInit.InitializeBeforeRuntimeCreation (initArgs);
+
+			var settings    = new DiagnosticSettings ();
+			settings.AddDebugDotnetLog ();
+
+			var options = new NativeAotRuntimeOptions {
+				EnvironmentPointer          = jnienv,
+				ClassLoader                 = new JniObjectReference (classLoader, JniObjectReferenceType.Global),
+				TypeManager                 = JNIEnvInit.CreateTypeManager (initArgs),
+				ValueManager                = JNIEnvInit.CreateValueManager (),
+				JniGlobalReferenceLogWriter = settings.GrefLog,
+				JniLocalReferenceLogWriter  = settings.LrefLog,
+			};
+			runtime = options.CreateJreVM ();
+
+			// Entry point into Mono.Android.dll for NativeAOT-specific JNI runtime initialization.
+			JNIEnvInit.InitializeNativeAotRuntime (runtime, initArgs);
+
+			transition  = new JniTransition (jnienv);
+
+			var handler = Java.Lang.Thread.DefaultUncaughtExceptionHandler;
+			Java.Lang.Thread.DefaultUncaughtExceptionHandler = new UncaughtExceptionMarshaler (handler);
+		}
+		catch (Exception e) {
+			AndroidLog.Print (AndroidLogLevel.Error, "JavaInteropRuntime", $"JavaInteropRuntime.init: error: {e}");
+			transition.SetPendingException (e);
+		}
+		transition.Dispose ();
+	}
+}

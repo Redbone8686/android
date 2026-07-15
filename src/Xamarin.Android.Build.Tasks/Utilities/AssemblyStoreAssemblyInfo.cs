@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.IO;
 
@@ -16,8 +17,9 @@ class AssemblyStoreAssemblyInfo
 	public byte[] AssemblyNameNoExtBytes { get; }
 	public FileInfo? SymbolsFile         { get; set; }
 	public FileInfo? ConfigFile          { get; set; }
+	public bool Ignored                  { get; }
 
-	public AssemblyStoreAssemblyInfo (string sourceFilePath, ITaskItem assembly)
+	public AssemblyStoreAssemblyInfo (string sourceFilePath, ITaskItem assembly, bool assemblyIsIgnored = false)
 	{
 		Arch = MonoAndroidHelper.GetTargetArch (assembly);
 		if (Arch == AndroidTargetArch.None) {
@@ -25,19 +27,20 @@ class AssemblyStoreAssemblyInfo
 		}
 
 		SourceFile = new FileInfo (sourceFilePath);
+		Ignored = assemblyIsIgnored;
 
 		string? name = Path.GetFileName (SourceFile.Name);
 		if (name == null) {
 			throw new InvalidOperationException ("Internal error: info without assembly name");
 		}
 
-		if (name.EndsWith (".lz4", StringComparison.OrdinalIgnoreCase)) {
+		if (name.EndsWith (".zst", StringComparison.OrdinalIgnoreCase)) {
 			name = Path.GetFileNameWithoutExtension (name);
 		}
 
 		string nameNoExt = Path.GetFileNameWithoutExtension (name);
 		string? culture = assembly.GetMetadata ("Culture");
-		if (!String.IsNullOrEmpty (culture)) {
+		if (!culture.IsNullOrEmpty ()) {
 			name = $"{culture}/{name}";
 			nameNoExt = $"{culture}/{nameNoExt}";
 		}

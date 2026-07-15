@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,13 +14,13 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "GCANSF";
 
 		[Required]
-		public ITaskItem[] ResolvedAssemblies { get; set; }
+		public ITaskItem[] ResolvedAssemblies { get; set; } = [];
 
 		[Required]
-		public string [] SupportedAbis { get; set; }
+		public string [] SupportedAbis { get; set; } = [];
 
 		[Required]
-		public string EnvironmentOutputDirectory { get; set; }
+		public string EnvironmentOutputDirectory { get; set; } = "";
 
 		[Required]
 		public bool Debug { get; set; }
@@ -28,7 +29,7 @@ namespace Xamarin.Android.Tasks
 		public bool EnableCompression { get; set; }
 
 		[Required]
-		public string ProjectFullPath { get; set; }
+		public string ProjectFullPath { get; set; } = "";
 
 		public override bool RunTask ()
 		{
@@ -72,7 +73,7 @@ namespace Xamarin.Android.Tasks
 
 					var fi = new FileInfo (assembly.ItemSpec);
 					if (!fi.Exists) {
-						Log.LogError ($"Assembly {assembly.ItemSpec} does not exist");
+						Log.LogCodedError ("XA2025", Properties.Resources.XA2025, assembly.ItemSpec);
 						continue;
 					}
 
@@ -90,7 +91,7 @@ namespace Xamarin.Android.Tasks
 			BuildEngine4.RegisterTaskObjectAssemblyLocal (key, archAssemblies, RegisteredTaskObjectLifetime.Build);
 			Generate (archAssemblies);
 
-			void Generate (Dictionary<AndroidTargetArch, Dictionary<string, CompressedAssemblyInfo>> dict)
+			void Generate (Dictionary<AndroidTargetArch, Dictionary<string, CompressedAssemblyInfo>>? dict)
 			{
 				var composer = new CompressedAssembliesNativeAssemblyGenerator (Log, dict);
 				LLVMIR.LlvmIrModule compressedAssemblies = composer.Construct ();
@@ -101,7 +102,7 @@ namespace Xamarin.Android.Tasks
 
 					using (var sw = MemoryStreamPool.Shared.CreateStreamWriter ()) {
 						try {
-							composer.Generate (compressedAssemblies, GeneratePackageManagerJava.GetAndroidTargetArchForAbi (abi), sw, llvmIrFilePath);
+							composer.Generate (compressedAssemblies, GenerateNativeApplicationConfigSources.GetAndroidTargetArchForAbi (abi), sw, llvmIrFilePath);
 						} catch {
 							throw;
 						} finally {

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -34,6 +35,8 @@ class DSOWrapperGenerator
 {
 	internal const string RegisteredConfigKey = ".:!DSOWrapperGeneratorConfig!:.";
 
+	public const string StubFileName = "libarchive-dso-stub.so";
+
 	internal class Config
 	{
 		public Dictionary<AndroidTargetArch, string> DSOStubPaths    { get; }
@@ -53,33 +56,42 @@ class DSOWrapperGenerator
 	//
 	const ulong PayloadSectionAlignment = 0x4000;
 
-	public static Config GetConfig (TaskLoggingHelper log, string androidBinUtilsDirectory, string baseOutputDirectory)
+	public static Config GetConfig (TaskLoggingHelper log, string androidBinUtilsDirectory, ITaskItem[] runtimePackLibraryDirs, string baseOutputDirectory)
 	{
 		var stubPaths = new Dictionary<AndroidTargetArch, string> ();
-		string archiveDSOStubsRootDir = MonoAndroidHelper.GetDSOStubsRootDirectoryPath (androidBinUtilsDirectory);
 
-		foreach (string dir in Directory.EnumerateDirectories (archiveDSOStubsRootDir, "android-*")) {
-			string rid = Path.GetFileName (dir);
-			AndroidTargetArch arch = MonoAndroidHelper.RidToArchMaybe (rid);
-			if (arch == AndroidTargetArch.None) {
-				log.LogDebugMessage ($"Unable to extract a supported RID name from directory path '{dir}'");
+		foreach (ITaskItem packLibDir in runtimePackLibraryDirs) {
+			string ?packRID = packLibDir.GetMetadata ("RuntimeIdentifier");
+			if (packRID.IsNullOrEmpty ()) {
 				continue;
 			}
 
-			string stubPath = Path.Combine (dir, "libarchive-dso-stub.so");
+			string stubPath = Path.Combine (packLibDir.ItemSpec, StubFileName);
 			if (!File.Exists (stubPath)) {
-				throw new InvalidOperationException ($"Internal error: archive DSO stub file '{stubPath}' does not exist");
+				log.LogDebugMessage ($"Archive DSO stub file '{stubPath}' not found in runtime pack directory, skipping");
+				continue;
 			}
 
+			AndroidTargetArch arch = MonoAndroidHelper.RidToArch (packRID);
 			stubPaths.Add (arch, stubPath);
 		}
 
 		return new Config (stubPaths, androidBinUtilsDirectory, baseOutputDirectory);
 	}
 
-	static string GetArchOutputPath (AndroidTargetArch targetArch, Config config)
+	// Per-RID subdirectory names that hold the generated wrapper shared libraries: `wrapped` for the
+	// MonoVM layout produced by this class, `wrapped-dlopen` for the CoreCLR layout produced by
+	// DlopenAssemblyStoreGenerator. Both live under `BaseOutputDirectory/<RID>/` and MUST be cleaned up
+	// after packaging (see CleanUp/GetDirectoriesToCleanUp) so we never package a "stale" wrapper — they
+	// aren't part of any dependency chain, so their up-to-date state can't be checked reliably.
+	internal const string WrappedSubDirectory = "wrapped";
+	internal const string WrappedDlopenSubDirectory = "wrapped-dlopen";
+
+	static readonly string[] WrapperSubDirectories = [ WrappedSubDirectory, WrappedDlopenSubDirectory ];
+
+	static string GetArchOutputPath (AndroidTargetArch targetArch, Config config, string subDirectory = WrappedSubDirectory)
 	{
-		return Path.Combine (config.BaseOutputDirectory, MonoAndroidHelper.ArchToRid (targetArch), "wrapped");
+		return Path.Combine (config.BaseOutputDirectory, MonoAndroidHelper.ArchToRid (targetArch), subDirectory);
 	}
 
 	/// <summary>
@@ -132,12 +144,32 @@ class DSOWrapperGenerator
 	public static void CleanUp (Config config)
 	{
 		foreach (var kvp in config.DSOStubPaths) {
-			string outputDir = GetArchOutputPath (kvp.Key, config);
-			if (!Directory.Exists (outputDir)) {
-				continue;
-			}
+			foreach (string subDirectory in WrapperSubDirectories) {
+				string outputDir = GetArchOutputPath (kvp.Key, config, subDirectory);
+				if (!Directory.Exists (outputDir)) {
+					continue;
+				}
 
-			Directory.Delete (outputDir, recursive: true);
+				Directory.Delete (outputDir, recursive: true);
+			}
 		}
+	}
+
+	public static string [] GetDirectoriesToCleanUp (Config config)
+	{
+		var dirs = new List<string> ();
+
+		foreach (var kvp in config.DSOStubPaths) {
+			foreach (string subDirectory in WrapperSubDirectories) {
+				string outputDir = GetArchOutputPath (kvp.Key, config, subDirectory);
+				if (!Directory.Exists (outputDir)) {
+					continue;
+				}
+
+				dirs.Add (outputDir);
+			}
+		}
+
+		return dirs.ToArray ();
 	}
 }

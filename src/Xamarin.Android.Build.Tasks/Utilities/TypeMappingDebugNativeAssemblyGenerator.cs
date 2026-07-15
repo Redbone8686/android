@@ -1,3 +1,5 @@
+#nullable disable
+
 using System;
 using System.Collections.Generic;
 
@@ -11,7 +13,7 @@ namespace Xamarin.Android.Tasks
 	{
 		const string JavaToManagedSymbol = "map_java_to_managed";
 		const string ManagedToJavaSymbol = "map_managed_to_java";
-		const string TypeMapSymbol = "type_map"; // MUST match src/monodroid/xamarin-app.hh
+		const string TypeMapSymbol = "type_map"; // MUST match src/native/mono/xamarin-app-stub/xamarin-app.hh
 
 		sealed class TypeMapContextDataProvider : NativeAssemblerStructContextDataProvider
 		{
@@ -19,11 +21,11 @@ namespace Xamarin.Android.Tasks
 			{
 				var map_module = EnsureType<TypeMap> (data);
 
-				if (String.Compare ("assembly_name", fieldName, StringComparison.Ordinal) == 0) {
+				if (MonoAndroidHelper.StringEquals ("assembly_name", fieldName)) {
 					return "assembly_name (unused in this mode)";
 				}
 
-				if (String.Compare ("data", fieldName, StringComparison.Ordinal) == 0) {
+				if (MonoAndroidHelper.StringEquals ("data", fieldName)) {
 					return "data (unused in this mode)";
 				}
 
@@ -33,8 +35,8 @@ namespace Xamarin.Android.Tasks
 			public override ulong GetBufferSize (object data, string fieldName)
 			{
 				var map_module = EnsureType<TypeMap> (data);
-				if (String.Compare ("java_to_managed", fieldName, StringComparison.Ordinal) == 0 ||
-				    String.Compare ("managed_to_java", fieldName, StringComparison.Ordinal) == 0) {
+				if (MonoAndroidHelper.StringEquals ("java_to_managed", fieldName) ||
+				    MonoAndroidHelper.StringEquals ("managed_to_java", fieldName)) {
 					return map_module.entry_count;
 				}
 
@@ -45,11 +47,11 @@ namespace Xamarin.Android.Tasks
 			{
 				var map_module = EnsureType<TypeMap> (data);
 
-				if (String.Compare ("java_to_managed", fieldName, StringComparison.Ordinal) == 0) {
+				if (MonoAndroidHelper.StringEquals ("java_to_managed", fieldName)) {
 					return map_module.JavaToManagedCount == 0 ? null : JavaToManagedSymbol;
 				}
 
-				if (String.Compare ("managed_to_java", fieldName, StringComparison.Ordinal) == 0) {
+				if (MonoAndroidHelper.StringEquals ("managed_to_java", fieldName)) {
 					return map_module.ManagedToJavaCount == 0 ? null : ManagedToJavaSymbol;
 				}
 
@@ -63,12 +65,12 @@ namespace Xamarin.Android.Tasks
 			{
 				var entry = EnsureType<TypeMapEntry> (data);
 
-				if (String.Compare ("from", fieldName, StringComparison.Ordinal) == 0) {
-					return $"from: entry.from";
+				if (MonoAndroidHelper.StringEquals ("from", fieldName)) {
+					return $" from: {entry.from}";
 				}
 
-				if (String.Compare ("to", fieldName, StringComparison.Ordinal) == 0) {
-					return $"to: entry.to";
+				if (MonoAndroidHelper.StringEquals ("to", fieldName)) {
+					return $" to: {entry.to}";
 				}
 
 				return String.Empty;
@@ -76,7 +78,7 @@ namespace Xamarin.Android.Tasks
 		}
 
 		// Order of fields and their type must correspond *exactly* to that in
-		// src/monodroid/jni/xamarin-app.hh TypeMapEntry structure
+		// src/native/mono/xamarin-app-stub/xamarin-app.hh TypeMapEntry structure
 		[NativeAssemblerStructContextDataProvider (typeof (TypeMapEntryContextDataProvider))]
 		sealed class TypeMapEntry
 		{
@@ -85,7 +87,7 @@ namespace Xamarin.Android.Tasks
 		};
 
 		// Order of fields and their type must correspond *exactly* to that in
-		// src/monodroid/jni/xamarin-app.hh TypeMap structure
+		// src/native/mono/xamarin-app-stub/xamarin-app.hh TypeMap structure
 		[NativeAssemblerStructContextDataProvider (typeof (TypeMapContextDataProvider))]
 		sealed class TypeMap
 		{
@@ -129,6 +131,8 @@ namespace Xamarin.Android.Tasks
 
 		protected override void Construct (LlvmIrModule module)
 		{
+			module.DefaultStringGroup = "tmd";
+
 			MapStructures (module);
 
 			if (data.ManagedToJavaMap != null && data.ManagedToJavaMap.Count > 0) {

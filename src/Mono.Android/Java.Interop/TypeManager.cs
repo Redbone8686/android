@@ -8,6 +8,8 @@ using System.Runtime.InteropServices;
 using Java.Interop.Tools.TypeNameMappings;
 
 using Android.Runtime;
+using Microsoft.Android.Runtime;
+using RuntimeFeature = Microsoft.Android.Runtime.RuntimeFeature;
 
 namespace Java.Interop {
 
@@ -58,7 +60,7 @@ namespace Java.Interop {
 		}
 
 		class TypeNameComparer : IComparer<string> {
-			public int Compare (string x, string y)
+			public int Compare (string? x, string? y)
 			{
 				if (object.ReferenceEquals (x, y))
 					return 0;
@@ -98,9 +100,7 @@ namespace Java.Interop {
 		static _JniMarshal_PPLLLL_V? cb_activate;
 		internal static Delegate GetActivateHandler ()
 		{
-			if (cb_activate == null)
-				cb_activate = (_JniMarshal_PPLLLL_V) JNINativeWrapper.CreateDelegate ((_JniMarshal_PPLLLL_V) n_Activate);
-			return cb_activate;
+			return cb_activate ??= new _JniMarshal_PPLLLL_V (n_Activate);
 		}
 
 #if JAVA_INTEROP
@@ -129,41 +129,53 @@ namespace Java.Interop {
 			return result;
 		}
 
+		[global::System.Diagnostics.DebuggerDisableUserUnhandledExceptions]
 		[UnconditionalSuppressMessage ("Trimming", "IL2057", Justification = "Type.GetType() can never statically know the string value from parameter 'typename_ptr'.")]
 		static void n_Activate (IntPtr jnienv, IntPtr jclass, IntPtr typename_ptr, IntPtr signature_ptr, IntPtr jobject, IntPtr parameters_ptr)
 		{
-			var o   = Java.Lang.Object.PeekObject (jobject);
-			var ex  = o as IJavaObjectEx;
-			if (ex != null) {
-				if (!ex.NeedsActivation && !ex.IsProxy)
-					return;
-			}
-			if (!ActivationEnabled) {
-				if (Logger.LogGlobalRef) {
-					Logger.Log (LogLevel.Info, "monodroid-gref",
-						FormattableString.Invariant ($"warning: Skipping managed constructor invocation for handle 0x{jobject:x} (key_handle 0x{JNIEnv.IdentityHash (jobject):x}). Please use JNIEnv.StartCreateInstance() + JNIEnv.FinishCreateInstance() instead of JNIEnv.NewObject() and/or JNIEnv.CreateInstance()."));
+			if (!global::Java.Interop.JniEnvironment.BeginMarshalMethod (jnienv, out var __envp, out var __r))
+				return;
+
+			try {
+				var o   = Java.Lang.Object.PeekObject (jobject);
+				var ex  = o as IJavaPeerable;
+				if (ex != null) {
+					var state = ex.JniManagedPeerState;
+					if (!state.HasFlag (JniManagedPeerStates.Activatable) && !state.HasFlag (JniManagedPeerStates.Replaceable))
+						return;
 				}
-				return;
-			}
+				if (!ActivationEnabled) {
+					if (Logger.LogGlobalRef) {
+						Logger.Log (LogLevel.Info, "monodroid-gref",
+							FormattableString.Invariant ($"warning: Skipping managed constructor invocation for handle 0x{jobject:x} (key_handle 0x{JNIEnv.IdentityHash (jobject):x}). Please use JNIEnv.StartCreateInstance() + JNIEnv.FinishCreateInstance() instead of JNIEnv.NewObject() and/or JNIEnv.CreateInstance()."));
+					}
+					return;
+				}
 
-			Type type = Type.GetType (JNIEnv.GetString (typename_ptr, JniHandleOwnership.DoNotTransfer)!, throwOnError:true)!;
-			if (type.IsGenericTypeDefinition) {
-				throw new NotSupportedException (
-						"Constructing instances of generic types from Java is not supported, as the type parameters cannot be determined.",
-						CreateJavaLocationException ());
-			}
-			Type[] ptypes = GetParameterTypes (JNIEnv.GetString (signature_ptr, JniHandleOwnership.DoNotTransfer));
-			var parms = JNIEnv.GetObjectArray (parameters_ptr, ptypes);
-			var cinfo = type.GetConstructor (ptypes);
-			if (cinfo == null) {
-				throw CreateMissingConstructorException (type, ptypes);
-			}
-			if (o != null) {
-				cinfo.Invoke (o, parms);
-				return;
-			}
+				Type type = Type.GetType (JNIEnv.GetString (typename_ptr, JniHandleOwnership.DoNotTransfer)!, throwOnError:true)!;
+				if (type.IsGenericTypeDefinition) {
+					throw new NotSupportedException (
+							"Constructing instances of generic types from Java is not supported, as the type parameters cannot be determined.",
+							CreateJavaLocationException ());
+				}
+				Type[] ptypes = GetParameterTypes (JNIEnv.GetString (signature_ptr, JniHandleOwnership.DoNotTransfer));
+				var parms = JNIEnv.GetObjectArray (parameters_ptr, ptypes);
+				var cinfo = type.GetConstructor (ptypes);
+				if (cinfo == null) {
+					throw CreateMissingConstructorException (type, ptypes);
+				}
+				if (o != null) {
+					cinfo.Invoke (o, parms);
+					return;
+				}
 
-			Activate (jobject, cinfo, parms);
+				Activate (jobject, cinfo, parms);
+			} catch (global::System.Exception __e) {
+				__r.OnUserUnhandledException (ref __envp, __e);
+				return;
+			} finally {
+				global::Java.Interop.JniEnvironment.EndMarshalMethod (ref __envp);
+			}
 		}
 
 		[UnconditionalSuppressMessage ("Trimming", "IL2072", Justification = "RuntimeHelpers.GetUninitializedObject() does not statically know the return value from ConstructorInfo.DeclaringType.")]
@@ -171,10 +183,8 @@ namespace Java.Interop {
 		{
 			try {
 				var newobj = RuntimeHelpers.GetUninitializedObject (cinfo.DeclaringType!);
-				if (newobj is Java.Lang.Object o) {
-					o.handle = jobject;
-				} else if (newobj is Java.Lang.Throwable throwable) {
-					throwable.handle = jobject;
+				if (newobj is IJavaPeerable peer) {
+					peer.SetPeerReference (new JniObjectReference (jobject));
 				} else {
 					throw new InvalidOperationException ($"Unsupported type: '{newobj}'");
 				}
@@ -216,41 +226,98 @@ namespace Java.Interop {
 		[MethodImplAttribute(MethodImplOptions.InternalCall)]
 		static extern Type monodroid_typemap_java_to_managed (string java_type_name);
 
-		internal static Type? GetJavaToManagedType (string class_name)
+		static Type monovm_typemap_java_to_managed (string java_type_name)
 		{
-			Type? type = monodroid_typemap_java_to_managed (class_name);
-			if (type != null)
-				return type;
+			return monodroid_typemap_java_to_managed (java_type_name);
+		}
 
-			if (!JNIEnvInit.IsRunningOnDesktop) {
-				// Miss message is logged in the native runtime
-				if (JNIEnvInit.LogAssemblyCategory)
-					JNIEnv.LogTypemapTrace (new System.Diagnostics.StackTrace (true));
+		[UnconditionalSuppressMessage ("Trimming", "IL2026", Justification = "Value of java_type_name isn't statically known.")]
+		static Type? clr_typemap_java_to_managed (string java_type_name)
+		{
+			bool result = RuntimeNativeMethods.clr_typemap_java_to_managed (java_type_name, out IntPtr managedAssemblyNamePointer, out uint managedTypeTokenId);
+			if (!result || managedAssemblyNamePointer == IntPtr.Zero) {
 				return null;
 			}
 
+			string? managedAssemblyName = Marshal.PtrToStringAnsi (managedAssemblyNamePointer);
+			if (managedAssemblyName is null) {
+				return null;
+			}
+
+			Assembly assembly = Assembly.Load (managedAssemblyName);
+			Type? ret = null;
+			foreach (Module module in assembly.Modules) {
+				ret = module.ResolveType ((int)managedTypeTokenId);
+				if (ret != null) {
+					break;
+				}
+			}
+
+			if (Logger.LogAssembly) {
+				Logger.Log (LogLevel.Info, "monodroid", $"Loaded type: {ret}");
+			}
+
+			return ret;
+		}
+
+		internal static Type? GetJavaToManagedType (string class_name)
+		{
+			lock (TypeManagerMapDictionaries.AccessLock) {
+				return GetJavaToManagedTypeCore (class_name);
+			}
+		}
+
+		static Type? GetJavaToManagedTypeCore (string class_name)
+		{
+			if (TypeManagerMapDictionaries.JniToManaged.TryGetValue (class_name, out Type? type)) {
+				return type;
+			}
+
+			if (RuntimeFeature.TrimmableTypeMap) {
+				throw new System.Diagnostics.UnreachableException (
+					$"{nameof (TypeManager)}.{nameof (GetJavaToManagedTypeCore)} should not be used when " +
+					$"{nameof (RuntimeFeature.TrimmableTypeMap)} is enabled. The trimmable path should resolve " +
+					$"types through {nameof (TrimmableTypeMapTypeManager)}.");
+			} else if (RuntimeFeature.IsMonoRuntime) {
+				type = monovm_typemap_java_to_managed (class_name);
+			} else if (RuntimeFeature.IsCoreClrRuntime) {
+				type = clr_typemap_java_to_managed (class_name);
+			} else {
+				throw new NotSupportedException ("Internal error: unknown runtime not supported");
+			}
+
+			if (type != null) {
+				TypeManagerMapDictionaries.JniToManaged.Add (class_name, type);
+				return type;
+			}
+
+			// Miss message is logged in the native runtime
+			if (Logger.LogAssembly)
+				JNIEnv.LogTypemapTrace (new System.Diagnostics.StackTrace (true));
 			return null;
 		}
 
-		internal static IJavaPeerable CreateInstance (IntPtr handle, JniHandleOwnership transfer)
+		[RequiresDynamicCode ("Legacy type manager peer creation can construct generic invoker types.")]
+		[RequiresUnreferencedCode ("Legacy type manager peer creation uses reflection over preserved Java peer types.")]
+		internal static IJavaPeerable? CreateInstance (IntPtr handle, JniHandleOwnership transfer)
 		{
 			return CreateInstance (handle, transfer, null);
 		}
 
-		[UnconditionalSuppressMessage ("Trimming", "IL2067", Justification = "TypeManager.CreateProxy() does not statically know the value of the 'type' local variable.")]
-		[UnconditionalSuppressMessage ("Trimming", "IL2072", Justification = "TypeManager.CreateProxy() does not statically know the value of the 'type' local variable.")]
+		[RequiresDynamicCode ("Legacy type manager peer creation can construct generic invoker types.")]
+		[RequiresUnreferencedCode ("Legacy type manager peer creation uses reflection over preserved Java peer types.")]
 		internal static IJavaPeerable? CreateInstance (IntPtr handle, JniHandleOwnership transfer, Type? targetType)
 		{
 			Type? type = null;
 			IntPtr class_ptr = JNIEnv.GetObjectClass (handle);
 			string? class_name = GetClassName (class_ptr);
 			lock (TypeManagerMapDictionaries.AccessLock) {
-				while (class_ptr != IntPtr.Zero && !TypeManagerMapDictionaries.JniToManaged.TryGetValue (class_name, out type)) {
-
-					type = GetJavaToManagedType (class_name);
-					if (type != null) {
-						TypeManagerMapDictionaries.JniToManaged.Add (class_name, type);
-						break;
+				while (class_ptr != IntPtr.Zero) {
+					if (!string.IsNullOrEmpty (class_name)) {
+						type = GetJavaToManagedTypeCore (class_name);
+						if (type != null) {
+							break;
+						}
 					}
 
 					IntPtr super_class_ptr = JNIEnv.GetSuperclass (class_ptr);
@@ -308,7 +375,13 @@ namespace Java.Interop {
 
 				handleClass = JniEnvironment.Types.GetObjectClass (new JniObjectReference (handle));
 				if (!JniEnvironment.Types.IsAssignableFrom (handleClass, typeClass)) {
-					return null;
+					if (Logger.LogAssembly) {
+						var message = $"Handle 0x{handle:x} is of type '{JNIEnv.GetClassNameFromInstance (handle)}' which is not assignable to '{typeSig.SimpleReference}'";
+						Logger.Log (LogLevel.Debug, "monodroid-assembly", message);
+					}
+					if (RuntimeFeature.IsAssignableFromCheck) {
+						return null;
+					}
 				}
 			} finally {
 				JniObjectReference.Dispose (ref handleClass);
@@ -320,7 +393,7 @@ namespace Java.Interop {
 			try {
 				result = (IJavaPeerable) CreateProxy (type, handle, transfer);
 				if (Runtime.IsGCUserPeer (result.PeerReference.Handle)) {
-					result.SetJniManagedPeerState (JniManagedPeerStates.Replaceable);
+					result.SetJniManagedPeerState (JniManagedPeerStates.Replaceable | JniManagedPeerStates.Activatable);
 				}
 			} catch (MissingMethodException e) {
 				var key_handle  = JNIEnv.IdentityHash (handle);
@@ -342,23 +415,34 @@ namespace Java.Interop {
 		{
 			// Skip Activator.CreateInstance() as that requires public constructors,
 			// and we want to hide some constructors for sanity reasons.
+			var peer = GetUninitializedObject (type);
 			BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 			var c = type.GetConstructor (flags, null, XAConstructorSignature, null);
 			if (c != null) {
-				return c.Invoke (new object [] { handle, transfer });
+				c.Invoke (peer, new object[] { handle, transfer });
+				return peer;
 			}
 			c = type.GetConstructor (flags, null, JIConstructorSignature, null);
 			if (c != null) {
 				JniObjectReference          r = new JniObjectReference (handle);
 				JniObjectReferenceOptions   o = JniObjectReferenceOptions.Copy;
-				var peer = (IJavaPeerable) c.Invoke (new object [] { r, o });
+				c.Invoke (peer, new object [] { r, o });
 				JNIEnv.DeleteRef (handle, transfer);
-				peer.SetJniManagedPeerState (peer.JniManagedPeerState | JniManagedPeerStates.Replaceable);
 				return peer;
 			}
+			GC.SuppressFinalize (peer);
 			throw new MissingMethodException (
 					"No constructor found for " + type.FullName + "::.ctor(System.IntPtr, Android.Runtime.JniHandleOwnership)",
 					CreateJavaLocationException ());
+
+			static IJavaPeerable GetUninitializedObject (
+					[DynamicallyAccessedMembers (DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)]
+					Type type)
+			{
+				var v   = (IJavaPeerable) System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject (type);
+				v.SetJniManagedPeerState (JniManagedPeerStates.Replaceable | JniManagedPeerStates.Activatable);
+				return v;
+			}
 		}
 
 		public static void RegisterType (string java_class, Type t)
@@ -370,7 +454,7 @@ namespace Java.Interop {
 					if (String.Compare (jniFromType, java_class, StringComparison.OrdinalIgnoreCase) != 0) {
 						TypeManagerMapDictionaries.ManagedToJni.Add (t, java_class);
 					}
-				} else if (!JNIEnvInit.IsRunningOnDesktop || t != typeof (Java.Interop.TypeManager)) {
+				} else if (t != typeof (Java.Interop.TypeManager)) {
 					// skip the registration and output a warning
 					Logger.Log (LogLevel.Warn, "monodroid", FormattableString.Invariant ($"Type Registration Skipped for {java_class} to {t} "));
 				}
@@ -378,47 +462,23 @@ namespace Java.Interop {
 			}
 		}
 
-		static Dictionary<string, List<Converter<string, Type?>>>? packageLookup;
+		const string TypeRegistrationNotSupported =
+			"Java package type registration is no longer supported. Java-to-managed type resolution now goes through the native and trimmable type maps.";
 
-		[MemberNotNull (nameof (packageLookup))]
-		static void LazyInitPackageLookup ()
-		{
-			if (packageLookup == null)
-				packageLookup = new Dictionary<string, List<Converter<string, Type?>>> (StringComparer.Ordinal);
-		}
-
+		// The package-based Java-to-managed type registration fallback was removed
+		// (https://github.com/dotnet/android/issues/11663); type resolution now goes
+		// through the native / trimmable type map, and the generator no longer emits
+		// the `Java.Interop.__TypeRegistrations` class that called these methods. These
+		// shipped public APIs are retained for binary compatibility but now throw, as
+		// they can no longer register anything.
 		public static void RegisterPackage (string package, Converter<string, Type> lookup)
 		{
-			LazyInitPackageLookup ();
-
-			lock (packageLookup!) {
-				if (!packageLookup.TryGetValue (package, out var lookups))
-					packageLookup.Add (package, lookups = new List<Converter<string, Type?>> ());
-				lookups.Add (lookup);
-			}
+			throw new NotSupportedException (TypeRegistrationNotSupported);
 		}
 
 		public static void RegisterPackages (string[] packages, Converter<string, Type?>[] lookups)
 		{
-			LazyInitPackageLookup ();
-
-			if (packages == null)
-				throw new ArgumentNullException ("packages");
-			if (lookups == null)
-				throw new ArgumentNullException ("lookups");
-			if (packages.Length != lookups.Length)
-				throw new ArgumentException ("`packages` and `lookups` arrays must have same number of elements.");
-
-			lock (packageLookup!) {
-				for (int i = 0; i < packages.Length; ++i) {
-					string package                  = packages [i];
-					var lookup			= lookups [i];
-
-					if (!packageLookup.TryGetValue (package, out var _lookups))
-						packageLookup.Add (package, _lookups = new List<Converter<string, Type?>> ());
-					_lookups.Add (lookup);
-				}
-			}
+			throw new NotSupportedException (TypeRegistrationNotSupported);
 		}
 
 		[Register ("mono/android/TypeManager", DoNotGenerateAcw = true)]

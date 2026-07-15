@@ -17,9 +17,9 @@
     <DefineConstants>$(DefineConstants);TRACE;HAVE_CECIL;MSBUILD;XABT_MANIFEST_EXTENSIONS</DefineConstants>
     <AndroidGeneratedClassDirectory Condition=" '$(AndroidGeneratedClassDirectory)' == '' ">..\..\src\Mono.Android\obj\$(Configuration)\$(DotNetTargetFramework)\android-$(AndroidLatestStablePlatformId)\mcw</AndroidGeneratedClassDirectory>
     <NoWarn>8632</NoWarn>
-    <SignAssembly>false</SignAssembly>
+    <SignAssembly>true</SignAssembly>
     <AssemblyOriginatorKeyFile>..\..\product.snk</AssemblyOriginatorKeyFile>
-    <Nullable>annotations</Nullable>
+    <Nullable>enable</Nullable>
     <!-- Causes issues with linker files imported from Mono -->
     <NoWarn>$(NoWarn);CA1310;CA1305</NoWarn>
     <WarningsAsErrors>Nullable</WarningsAsErrors>
@@ -28,11 +28,9 @@
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="$(MonoCecilVersion)" GeneratePathProperty="true" />
     <PackageReference Include="Irony" />
-    <PackageReference Include="NuGet.ProjectModel" Version="6.11.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="$(NewtonsoftJsonPackageVersion)" />
+    <PackageReference Include="NuGet.ProjectModel" Version="6.14.3" />
     <PackageReference Include="System.CodeDom" />
     <PackageReference Include="System.IO.Hashing" Version="$(SystemIOHashingPackageVersion)" />
-    <PackageReference Include="System.Reflection.Metadata" Version="8.0.0" />
     <PackageReference Include="System.Runtime" Version="4.3.1" />
     <PackageReference Include="System.Runtime.InteropServices" Version="4.3.0" />
     <PackageReference Include="ELFSharp" Version="$(ELFSharpVersion)" />
@@ -44,41 +42,40 @@
     <Compile Remove="Tests\**" />
     <EmbeddedResource Remove="Tests\**" />
     <None Remove="Tests\**" />
-    <Compile Include="$(IntermediateOutputPath)Profile.g.cs" />
-    <Compile Include="..\..\bin\Build$(Configuration)\XABuildConfig.cs" />
 
-    <!-- Include only the linker sources required for LinkAssembliesNoShrink - AddKeepAlivesStep, FixAbstractMethodsStep, FixLegacyResourceDesignerStep -->
+    <!-- Include only the linker sources required for the build tasks (LinkAssembliesNoShrink and PostTrimmingPipeline) -->
+    <!-- These include: AddKeepAlivesStep, AddKeepAlivesHelper, CheckForObsoletePreserveAttributeStep, StripEmbeddedLibrariesStep, PostTrimmingAddKeepAlivesStep, FixAbstractMethodsStep, FixLegacyResourceDesignerStep, LinkDesignerBase -->
     <Compile Remove="Linker\**" />
+    <Compile Include="Linker\MonoDroid.Tuner\FindTypeMapObjectsStep.cs" />
+    <Compile Include="Linker\MonoDroid.Tuner\FindJavaObjectsStep.cs" />
     <Compile Include="Linker\MonoDroid.Tuner\AddKeepAlivesStep.cs" />
+    <Compile Include="Linker\MonoDroid.Tuner\AddKeepAlivesHelper.cs" />
+    <Compile Include="Linker\MonoDroid.Tuner\CheckForObsoletePreserveAttributeStep.cs" />
+    <Compile Include="Linker\MonoDroid.Tuner\StripEmbeddedLibrariesStep.cs" />
+    <Compile Include="Linker\MonoDroid.Tuner\PostTrimmingAddKeepAlivesStep.cs" />
+    <Compile Include="Linker\MonoDroid.Tuner\RemoveResourceDesignerStep.cs" />
     <Compile Include="Linker\MonoDroid.Tuner\AndroidLinkConfiguration.cs" />
-    <Compile Include="Linker\MonoDroid.Tuner\Extensions.cs"/>
+    <Compile Include="Linker\MonoDroid.Tuner\Extensions.cs" />
     <Compile Include="Linker\MonoDroid.Tuner\FixAbstractMethodsStep.cs" />
+    <Compile Include="Linker\MonoDroid.Tuner\PostTrimmingFixAbstractMethodsStep.cs" />
     <Compile Include="Linker\MonoDroid.Tuner\FixLegacyResourceDesignerStep.cs" />
     <Compile Include="Linker\MonoDroid.Tuner\LinkDesignerBase.cs" />
-    <Compile Include="Linker\MonoDroid.Tuner\RemoveResourceDesignerStep.cs" />
-    <Compile Include="Linker\MonoDroid.Tuner\MonoDroidProfile.cs" />
-    <Compile Include="Linker\Mobile.Tuner\MobileProfile.cs" />
     <Compile Include="Linker\External\Linker\Annotations.cs" />
     <Compile Include="Linker\External\Linker\AssemblyAction.cs" />
     <Compile Include="Linker\External\Linker\AssemblyResolver.cs" />
+    <Compile Include="Linker\External\Linker\BaseMarkHandler.cs" />
     <Compile Include="Linker\External\Linker\LinkContext.cs" />
     <Compile Include="Linker\External\Linker\MethodAction.cs" />
     <Compile Include="Linker\External\Linker\OverrideInformation.cs" />
-    <Compile Include="Linker\External\Linker\Pipeline.cs" />
     <Compile Include="Linker\External\Linker\TypePreserve.cs" />
     <Compile Include="Linker\External\Linker.Steps\BaseStep.cs" />
+    <Compile Include="Linker\External\Linker.Steps\IMarkHandler.cs" />
     <Compile Include="Linker\External\Linker.Steps\IStep.cs" />
+    <Compile Include="Linker\External\Linker.Steps\MarkContext.cs" />
     <Compile Include="Linker\External\Linker\IDependencyRecorder.cs" />
-    <Compile Include="Linker\External\Linker\IReflectionPatternRecorder.cs" />
-    <Compile Include="Linker\External\Linker\LoggingReflectionPatternRecorder.cs" />
-    <Compile Include="Linker\External\Linker\ConsoleLogger.cs" />
-    <Compile Include="Linker\External\Linker\ILogger.cs" />
     <Compile Include="Linker\External\Linker\Tracer.cs" />
-    <Compile Include="Linker\External\Linker\MarkingHelpers.cs" />
-    <Compile Include="Linker\External\Linker\KnownMembers.cs" />
     <Compile Include="Linker\External\Mono.Tuner\CecilRocks.cs" />
     <Compile Include="Linker\External\Mono.Tuner\Extensions.cs" />
-    <Compile Include="Linker\External\Mono.Tuner\Profile.cs" />
 
     <Compile Include="..\Mono.Android\\Android.App\IntentFilterAttribute.cs">
       <Link>Mono.Android\IntentFilterAttribute.cs</Link>
@@ -212,26 +209,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\machine.config">
-      <LogicalName>machine.config</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Resources\MonoRuntimeProvider.Bundled.java">
-      <LogicalName>MonoRuntimeProvider.Bundled.java</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Resources\proguard_xamarin.cfg">
-      <LogicalName>proguard_xamarin.cfg</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Resources\ApplicationRegistration.java">
-      <LogicalName>ApplicationRegistration.java</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Resources\net.android.init.gradle.kts">
-      <LogicalName>net.android.init.gradle.kts</LogicalName>
-    </EmbeddedResource>
     <EmbeddedResource Include="..\Mono.Android\java\mono\android\TypeManager.java">
       <LogicalName>JavaInteropTypeManager.java</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Resources\Resource.Designer.snk">
-      <LogicalName>Resource.Designer.snk</LogicalName>
+    <EmbeddedResource Include="Resources\*" Exclude="Resources\LayoutBinding.cs">
+      <LogicalName>%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
@@ -252,6 +234,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Xamarin.Android.Tools.Aidl\Xamarin.Android.Tools.Aidl.csproj" />
+    <ProjectReference Include="..\Microsoft.Android.Sdk.TrimmableTypeMap\Microsoft.Android.Sdk.TrimmableTypeMap.csproj" />
+    <ProjectReference Include="..\..\external\Java.Interop\src\Java.Interop\Java.Interop.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
     <ProjectReference Include="..\..\external\Java.Interop\src\Java.Interop.Tools.Diagnostics\Java.Interop.Tools.Diagnostics.csproj" />
     <ProjectReference Include="..\..\external\Java.Interop\src\Java.Interop.Tools.Cecil\Java.Interop.Tools.Cecil.csproj" />
     <ProjectReference Include="..\..\external\Java.Interop\src\Java.Interop.Tools.JavaCallableWrappers\Java.Interop.Tools.JavaCallableWrappers.csproj" />
@@ -264,7 +248,7 @@
     <!--
       Xamarin.Android.Tools.BootstrapTasks needs to be built first because
       Xamarin.Android.Build.Tasks.targets uses several tasks located in
-      Xamarin.Android.Tools.BootstrapTasks, such as <GenerateProfile/>
+      Xamarin.Android.Tools.BootstrapTasks, such as <GenerateSupportedPlatforms/>
       -->
     <ProjectReference Include="..\r8\r8.csproj">
       <ReferenceOutputAssembly>False</ReferenceOutputAssembly>
@@ -275,8 +259,12 @@
     <ProjectReference Include="..\bundletool\bundletool.csproj">
       <ReferenceOutputAssembly>False</ReferenceOutputAssembly>
     </ProjectReference>
+    <ProjectReference Include="..\binutils\binutils.csproj">
+      <ReferenceOutputAssembly>False</ReferenceOutputAssembly>
+    </ProjectReference>
     <ProjectReference Include="..\..\external\xamarin-android-tools\src\Microsoft.Android.Build.BaseTasks\Microsoft.Android.Build.BaseTasks.csproj" />
     <ProjectReference Include="..\..\external\xamarin-android-tools\src\Xamarin.Android.Tools.AndroidSdk\Xamarin.Android.Tools.AndroidSdk.csproj" />
+    <ProjectReference Include="..\AndroidBuildConfig\AndroidBuildConfig.csproj" />
   </ItemGroup>
 
   <!-- Import Microsoft.NET.Sdk targets before our targets so we can override behavior -->

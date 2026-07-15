@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Xamarin.ProjectTools
 {
@@ -48,7 +48,18 @@ namespace Xamarin.ProjectTools
 			{
 			}
 		}
-		public class AndroidLintConfig : BuildItem 
+		public class AndroidMavenLibrary : BuildItem
+		{
+			public AndroidMavenLibrary (string include)
+				: this (() => include)
+			{
+			}
+			public AndroidMavenLibrary (Func<string> include)
+				: base (AndroidBuildActions.AndroidMavenLibrary, include)
+			{
+			}
+		}
+		public class AndroidLintConfig : BuildItem
 		{
 			public AndroidLintConfig (string include)
 				: this (() => include)
@@ -142,6 +153,16 @@ namespace Xamarin.ProjectTools
 			}
 			public AndroidNativeLibrary (Func<string> include)
 				: base (AndroidBuildActions.AndroidNativeLibrary, include)
+			{
+			}
+		}
+		public class AndroidNativeLibraryNoJniPreload : BuildItem {
+			public AndroidNativeLibraryNoJniPreload (string include)
+				: this (() => include)
+			{
+			}
+			public AndroidNativeLibraryNoJniPreload (Func<string> include)
+				: base (AndroidBuildActions.AndroidNativeLibraryNoJniPreload, include)
 			{
 			}
 		}

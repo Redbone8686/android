@@ -1,6 +1,8 @@
 // Author: Jonathan Pobst <jpobst@xamarin.com>
 // Copyright (C) 2011 Xamarin, Inc. All rights reserved.
 
+#nullable enable
+
 using System.IO;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
@@ -16,10 +18,10 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "CPR";
 
 		[Required]
-		public string ResourceName { get; set; }
+		public string ResourceName { get; set; } = "";
 
 		[Required]
-		public string OutputPath { get; set; }
+		public string OutputPath { get; set; } = "";
 
 		static readonly Assembly ExecutingAssembly = Assembly.GetExecutingAssembly ();
 

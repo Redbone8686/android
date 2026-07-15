@@ -2,6 +2,7 @@ using NUnit.Framework;
 using System.IO;
 using Xamarin.ProjectTools;
 using Microsoft.Build.Framework;
+using Xamarin.Android.Tasks;
 
 namespace Xamarin.Android.Build.Tests
 {
@@ -9,13 +10,19 @@ namespace Xamarin.Android.Build.Tests
 	public class DeferredBuildTest : BaseTest
 	{
 		[Test]
-		public void SelectivelyRunUpdateAndroidResources ()
+		public void SelectivelyRunUpdateAndroidResources ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
 			var path = Path.Combine ("temp", TestName);
 			var app = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
 				ProjectName = "MyApp",
 			};
 
+			app.SetRuntime (runtime);
 			app.SetProperty ("AndroidUseManagedDesignTimeResourceGenerator", "True");
 			app.SetProperty ("AndroidUseIntermediateDesignerFile", "True");
 
@@ -29,7 +36,7 @@ namespace Xamarin.Android.Build.Tests
 					"ProvideCommandLineArgs=true",
 				}), "first app build should have succeeded.");
 
-				Assert.IsTrue (appBuilder.Output.IsTargetSkipped ("UpdateAndroidResources"), $"`UpdateAndroidResources` should be skipped for DTB when deferred build is supported!");
+				Assert.IsTrue (appBuilder.Output.IsTargetSkipped ("UpdateAndroidResources", defaultIfNotUsed: true), $"`UpdateAndroidResources` should be skipped for DTB when deferred build is supported!");
 
 				// The background build would run our UpdateAndroidResources in its DeferredBuildDependsOn
 				Assert.IsTrue (appBuilder.RunTarget (app, "UpdateAndroidResources", parameters: new string[]{
@@ -42,7 +49,7 @@ namespace Xamarin.Android.Build.Tests
 					"ProvideCommandLineArgs=true",
 				}), "background build should have succeeded.");
 
-				Assert.IsFalse (appBuilder.Output.IsTargetSkipped ("UpdateAndroidResources"), $"`UpdateAndroidResources` should *not* be skipped in the deferred build!");
+				Assert.IsFalse (appBuilder.Output.IsTargetSkipped ("UpdateAndroidResources", defaultIfNotUsed: false), $"`UpdateAndroidResources` should *not* be skipped in the deferred build!");
 
 				// Run the real build now
 				Assert.IsTrue (appBuilder.Build(app, parameters: new string[]{
@@ -54,13 +61,20 @@ namespace Xamarin.Android.Build.Tests
 		}
 
 		[Test]
-		public void RunUpdateAndroidResourcesIfBackgroundBuildNotSupported ()
+		public void RunUpdateAndroidResourcesIfBackgroundBuildNotSupported ([Values (AndroidRuntime.CoreCLR, AndroidRuntime.NativeAOT)] AndroidRuntime runtime)
 		{
+			bool isRelease = runtime == AndroidRuntime.NativeAOT;
+			if (IgnoreUnsupportedConfiguration (runtime, release: isRelease)) {
+				return;
+			}
+
 			var path = Path.Combine ("temp", TestName);
 			var app = new XamarinAndroidApplicationProject {
+				IsRelease = isRelease,
 				ProjectName = "MyApp",
 			};
 
+			app.SetRuntime (runtime);
 			app.SetProperty ("AndroidUseManagedDesignTimeResourceGenerator", "True");
 			app.SetProperty ("AndroidUseIntermediateDesignerFile", "True");
 

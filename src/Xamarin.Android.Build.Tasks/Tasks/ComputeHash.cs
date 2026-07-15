@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Collections.Generic;
 using Microsoft.Build.Utilities;
 using Microsoft.Build.Framework;
@@ -11,12 +13,12 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "CPT";
 
 		[Required]
-		public ITaskItem [] Source { get; set; }
+		public ITaskItem [] Source { get; set; } = [];
 
 		public bool CopyMetaData { get; set; } = true;
 
 		[Output]
-		public ITaskItem [] Output { get; set; }
+		public ITaskItem []? Output { get; set; }
 
 		public override bool RunTask ()
 		{

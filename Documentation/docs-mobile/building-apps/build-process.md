@@ -50,8 +50,12 @@ Only the updated assemblies are resynchronized to the target device.
 > [!WARNING]
 > Fast deployment is known to fail on devices which block `run-as`, which often includes devices older than Android 5.0.
 
-Fast deployment is enabled by default, and may be disabled in Debug builds
+Fast deployment is supported for both `.apk` and `.aab` package formats.
+It is enabled by default, and may be disabled in Debug builds
 by setting the `$(EmbedAssembliesIntoApk)` property to `True`.
+Note that using `.aab` with fast deployment will be slower than `.apk`
+because the `.aab` file must be processed through `bundletool` for
+packaging and installation.
 
 The [Enhanced Fast Deployment](build-properties.md#androidfastdeploymenttype) mode can
 be used in conjunction with this feature to speed up deployments even further.
@@ -182,29 +186,3 @@ performance, especially if they run on every build. It is
 highly recommended that you read the MSBuild [documentation](/visualstudio/msbuild/msbuild)
 before implementing such extensions.
 
-## Target definitions
-
-The .NET for Android-specific parts of the build process are defined in
-`$(MSBuildExtensionsPath)\Xamarin\Android\Xamarin.Android.CSharp.targets`,
-but normal language-specific targets such as *Microsoft.CSharp.targets*
-are also required to build the assembly.
-
-The following build properties must be set before importing any language
-targets:
-
-```xml
-<PropertyGroup>
-  <TargetFrameworkIdentifier>MonoDroid</TargetFrameworkIdentifier>
-  <MonoDroidVersion>v1.0</MonoDroidVersion>
-  <TargetFrameworkVersion>v2.2</TargetFrameworkVersion>
-</PropertyGroup>
-```
-
-All of these targets and properties can be included for C# by
-importing *Xamarin.Android.CSharp.targets*:
-
-```xml
-<Import Project="$(MSBuildExtensionsPath)\Xamarin\Android\Xamarin.Android.CSharp.targets" />
-```
-
-This file can easily be adapted for other languages.

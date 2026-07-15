@@ -1,4 +1,5 @@
-﻿using Microsoft.Build.Framework;
+#nullable enable
+using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 using System;
 
@@ -7,7 +8,7 @@ namespace Xamarin.Android.Tasks
 	public abstract class BundleTool : JavaToolTask
 	{
 		[Required]
-		public string JarPath { get; set; }
+		public string JarPath { get; set; } = "";
 
 		protected override string GenerateCommandLineCommands ()
 		{
@@ -18,7 +19,7 @@ namespace Xamarin.Android.Tasks
 		{
 			var cmd = new CommandLineBuilder ();
 
-			if (!string.IsNullOrEmpty (JavaOptions)) {
+			if (!JavaOptions.IsNullOrEmpty ()) {
 				cmd.AppendSwitch (JavaOptions);
 			}
 			cmd.AppendSwitchIfNotNull ("-Xmx", JavaMaximumHeapSize);

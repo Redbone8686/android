@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Xml.Linq;
@@ -28,19 +29,18 @@ namespace Xamarin.Android.Build.Tests
 		public string Root => Path.GetFullPath (XABuildPaths.TestOutputDirectory);
 
 		/// <summary>
-		/// Checks if a commercial .NET for Android is available
-		/// * Defaults to Assert.Ignore ()
+		/// Retrieves the value of an <see cref="AssemblyMetadataAttribute"/> embedded in the test assembly.
 		/// </summary>
-		public void AssertCommercialBuild (bool fail = false)
+		protected string GetAssemblyMetadataValue (string key)
 		{
-			if (!TestEnvironment.CommercialBuildAvailable) {
-				var message = $"'{TestName}' requires a commercial build of .NET for Android.";
-				if (fail) {
-					Assert.Fail (message);
-				} else {
-					Assert.Ignore (message);
-				}
+			var assembly = GetType ().Assembly;
+			var value = assembly
+				.GetCustomAttributes<AssemblyMetadataAttribute> ()
+				.FirstOrDefault (a => a.Key == key)?.Value;
+			if (value == null) {
+				throw new InvalidOperationException ($"AssemblyMetadata '{key}' not found in {assembly.GetName ().Name}");
 			}
+			return value;
 		}
 
 		char [] invalidChars = { '{', '}', '(', ')', '$', ':', ';', '\"', '\'', ',', '=', '|' };
@@ -124,6 +124,7 @@ namespace Xamarin.Android.Build.Tests
 				$"\ncontext: https://github.com/xamarin/xamarin-android/blob/main/Documentation/project-docs/ApkSizeRegressionChecks.md" +
 				$"\nstdOut:\n{result.stdOutput}\nstdErr:\n{result.stdError}";
 			File.WriteAllText (logFilePath, logContent);
+			TestContext.AddTestAttachment (logFilePath, Path.GetFileName (logFilePath));
 			return result;
 		}
 
@@ -464,6 +465,38 @@ namespace Xamarin.Android.Build.Tests
 			return GetPathToLatestBuildTools (exe);
 		}
 
+		/// <summary>
+		/// Verifies that an APK is signed using `apksigner verify`.
+		/// With min SDK 24+, APKs may use v2/v3 signing only (no v1 JAR signatures),
+		/// so checking for META-INF/MANIFEST.MF is not reliable.
+		/// </summary>
+		protected void AssertApkIsSigned (string apkPath)
+		{
+			var ext = IsWindows ? ".bat" : "";
+			var apksignerExe = Path.Combine (GetPathToLatestBuildTools ("apksigner" + ext), "apksigner" + ext);
+			if (!File.Exists (apksignerExe)) {
+				// Fall back to META-INF check if apksigner is not available
+				using (var zip = ZipHelper.OpenZip (apkPath)) {
+					Assert.IsTrue (zip.Any (e => e.FullName == "META-INF/MANIFEST.MF"), $"APK file `{apkPath}` is not signed! It is missing `META-INF/MANIFEST.MF`.");
+				}
+				return;
+			}
+
+			var psi = new ProcessStartInfo {
+				FileName = apksignerExe,
+				Arguments = $"verify \"{apkPath}\"",
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+			};
+			using var proc = Process.Start (psi) ?? throw new InvalidOperationException ($"Failed to start '{apksignerExe}'.");
+			string stdout = proc.StandardOutput.ReadToEnd ();
+			string stderr = proc.StandardError.ReadToEnd ();
+			proc.WaitForExit ();
+			Assert.AreEqual (0, proc.ExitCode, $"APK file `{apkPath}` is not signed! apksigner verify failed:\n{stderr}\n{stdout}");
+		}
+
 		protected string GetResourceDesignerPath (ProjectBuilder builder, XamarinAndroidProject project)
 		{
 			string path = Path.Combine (Root, builder.ProjectDirectory, project.IntermediateOutputPath);
@@ -566,6 +599,32 @@ namespace Xamarin.Android.Build.Tests
 
 				return true;
 			}
+		}
+
+		protected bool IgnoreUnsupportedConfiguration (AndroidRuntime runtime, bool aot = false, bool release = false)
+		{
+			if (runtime == AndroidRuntime.NativeAOT) {
+				// NativeAOT is release-only, AOT is always implied
+				if (release) {
+					return false;
+				}
+
+				Assert.Ignore ($"NativeAOT: unsupported configuration (release == {release})");
+				return true;
+			}
+
+			if (runtime == AndroidRuntime.CoreCLR) {
+				// CoreCLR doesn't support AOT
+				if (!aot) {
+					return false;
+				}
+
+				Assert.Ignore ($"CoreCLR: unsupported configuration (aot == {aot})");
+				return true;
+			}
+
+			// MonoVM supports all the combinations
+			return false;
 		}
 
 		[SetUp]

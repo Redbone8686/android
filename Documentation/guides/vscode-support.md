@@ -16,7 +16,6 @@ Select **Build All .NET for Android**. You will then be presented with a
 list of options:
 
 * `Prepare` - Installs the required Dependencies.
-* `PrepareExternal` - Installs the required Commercial Dependencies (Xamarin Team Members Only)
 * `Build` - Build .NET for Android.
 * `Pack` - Create the NuGet Packages.
 * `Everything` - Calls Prepare, Build and Pack.
@@ -24,10 +23,6 @@ list of options:
 The normal order is `Prepare`, `Build` then `Pack`. This will result in
 a usable copy of .NET for Android. You can now use it to build apps
 and run the unit tests.
-
-Note: `PrepareExternal` is for internal Xamarin Team members only, this sets up
-the commercial parts of the repository. Trying to use this command when you
-do not have access to the required repositories will result in a failure.
 
 ## Running/Debugging Unit Tests
 
@@ -116,10 +111,9 @@ in `.vscode/tasks.json`.
     // in vscode.
     "id": "project",
     "type": "pickString",
-    "default": "samples/HelloWorld/HelloWorld/HelloWorld.csproj",
+    "default": "samples/HelloWorld/HelloWorld/HelloWorld.DotNet.csproj",
     "description": "Pick the Project you want to build.",
     "options": [
-        "samples/HelloWorld/HelloWorld/HelloWorld.csproj",
         "samples/HelloWorld/HelloWorld/HelloWorld.DotNet.csproj",
         "samples/VSAndroidApp/VSAndroidApp.csproj"
     ]
@@ -128,6 +122,5 @@ in `.vscode/tasks.json`.
 
 you can add your own projects here and they will run with the .NET for Android
 you have built locally.
-
 
 

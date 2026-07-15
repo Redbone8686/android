@@ -104,6 +104,116 @@ namespace Xamarin.Android.Net
 			}
 		}
 
+		sealed class CancellationAwareResponseStream : Stream
+		{
+			readonly Stream stream;
+			readonly HttpURLConnection httpConnection;
+			int streamDisposed;
+
+			public CancellationAwareResponseStream (Stream stream, HttpURLConnection httpConnection)
+			{
+				this.stream = stream ?? throw new ArgumentNullException (nameof (stream));
+				this.httpConnection = httpConnection ?? throw new ArgumentNullException (nameof (httpConnection));
+			}
+
+			public override bool CanRead => stream.CanRead;
+			public override bool CanSeek => stream.CanSeek;
+			public override bool CanWrite => stream.CanWrite;
+			public override long Length => stream.Length;
+
+			public override long Position {
+				get => stream.Position;
+				set => stream.Position = value;
+			}
+
+			protected override void Dispose (bool disposing)
+			{
+				if (disposing) {
+					DisposeStream ();
+				}
+
+				base.Dispose (disposing);
+			}
+
+			public override void Flush () => stream.Flush ();
+
+			public override async Task CopyToAsync (Stream destination, int bufferSize, CancellationToken cancellationToken)
+			{
+				cancellationToken.ThrowIfCancellationRequested ();
+
+				using (cancellationToken.Register (QueueAbortRead, useSynchronizationContext: false)) {
+					try {
+						await stream.CopyToAsync (destination, bufferSize, cancellationToken).ConfigureAwait (false);
+					} catch (Exception ex) when (ShouldMapToCancellation (ex, cancellationToken)) {
+						throw new System.OperationCanceledException ("Response body read was canceled.", ex, cancellationToken);
+					}
+				}
+			}
+
+			public override int Read (byte[] buffer, int offset, int count) => stream.Read (buffer, offset, count);
+
+			public override Task<int> ReadAsync (byte[] buffer, int offset, int count, CancellationToken cancellationToken) => ReadAsync (buffer.AsMemory (offset, count), cancellationToken).AsTask ();
+
+			// StreamContent uses this overload on modern runtimes, so the wrapper must handle its ValueTask-based contract.
+			public override async ValueTask<int> ReadAsync (Memory<byte> buffer, CancellationToken cancellationToken = default)
+			{
+				cancellationToken.ThrowIfCancellationRequested ();
+
+				using (cancellationToken.Register (QueueAbortRead, useSynchronizationContext: false)) {
+					try {
+						return await stream.ReadAsync (buffer, cancellationToken).ConfigureAwait (false);
+					} catch (Exception ex) when (ShouldMapToCancellation (ex, cancellationToken)) {
+						throw new System.OperationCanceledException ("Response body read was canceled.", ex, cancellationToken);
+					}
+				}
+			}
+
+			public override long Seek (long offset, SeekOrigin origin) => stream.Seek (offset, origin);
+
+			public override void SetLength (long value) => stream.SetLength (value);
+
+			public override void Write (byte[] buffer, int offset, int count) => stream.Write (buffer, offset, count);
+
+			void QueueAbortRead () =>
+				Task.Run (AbortRead).ContinueWith (
+					task => Logger.Log (LogLevel.Info, LOG_APP, $"Response body cancellation exception: {task.Exception}"),
+					CancellationToken.None,
+					TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+					TaskScheduler.Default);
+
+			void AbortRead ()
+			{
+				try {
+					httpConnection.Disconnect ();
+				} catch (Exception ex) {
+					Logger.Log (LogLevel.Info, LOG_APP, $"Disconnection exception: {ex}");
+				}
+
+				try {
+					DisposeStream ();
+				} catch (Exception ex) {
+					Logger.Log (LogLevel.Info, LOG_APP, $"Response stream close exception: {ex}");
+				}
+			}
+
+			void DisposeStream ()
+			{
+				if (Interlocked.Exchange (ref streamDisposed, 1) == 0)
+					stream.Dispose ();
+			}
+
+		}
+
+		static bool ShouldMapToCancellation (Exception ex, CancellationToken cancellationToken)
+		{
+			return cancellationToken.IsCancellationRequested &&
+				ex is global::System.IO.IOException
+					or Java.IO.IOException
+					or InvalidDataException
+					or ObjectDisposedException
+					or WebException;
+		}
+
 		internal const string LOG_APP = "monodroid-net";
 
 		const string GZIP_ENCODING = "gzip";
@@ -149,10 +259,34 @@ namespace Xamarin.Android.Net
 		bool decompress_here => _acceptEncoding is not null && _acceptEncoding != IDENTITY_ENCODING;
 		string? _acceptEncoding;
 
+		/// <summary>
+		/// Gets a value indicating whether the handler supports automatic response content decompression.
+		/// Always returns <see langword="true"/> for <see cref="AndroidMessageHandler"/>.
+		/// </summary>
 		public bool SupportsAutomaticDecompression => true;
+
+		/// <summary>
+		/// Gets a value indicating whether the handler supports proxy settings.
+		/// Always returns <see langword="true"/> for <see cref="AndroidMessageHandler"/>.
+		/// </summary>
 		public bool SupportsProxy => true;
+
+		/// <summary>
+		/// Gets a value indicating whether the handler supports configuration settings for the
+		/// <see cref="AllowAutoRedirect"/> and <see cref="MaxAutomaticRedirections"/> properties.
+		/// Always returns <see langword="true"/> for <see cref="AndroidMessageHandler"/>.
+		/// </summary>
 		public bool SupportsRedirectConfiguration => true;
 
+		/// <summary>
+		/// Gets or sets the type of decompression method used by the handler for automatic
+		/// decompression of the HTTP content response.
+		/// </summary>
+		/// <remarks>
+		/// Supported methods are <see cref="DecompressionMethods.GZip"/>,
+		/// <see cref="DecompressionMethods.Deflate"/>, and <see cref="DecompressionMethods.Brotli"/>.
+		/// Set to <see cref="DecompressionMethods.None"/> to disable automatic decompression.
+		/// </remarks>
 		public DecompressionMethods AutomaticDecompression
 		{
 			get => _decompressionMethods;
@@ -181,6 +315,10 @@ namespace Xamarin.Android.Net
 			}
 		}
 
+		/// <summary>
+		/// Gets or sets the cookie container used to store server cookies.
+		/// </summary>
+		/// <exception cref="ArgumentNullException">The value specified is <see langword="null"/>.</exception>
 		public CookieContainer CookieContainer
 		{
 			get => _cookieContainer ?? (_cookieContainer = new CookieContainer ());
@@ -196,21 +334,55 @@ namespace Xamarin.Android.Net
 		// NOTE: defaults here are based on:
 		// https://github.com/dotnet/runtime/blob/f3b77e64b87895aa7e697f321eb6d4151a4333df/src/libraries/Common/src/System/Net/Http/HttpHandlerDefaults.cs
 
+		/// <summary>
+		/// Gets or sets a value that indicates whether the handler uses the <see cref="CookieContainer"/>
+		/// property to store server cookies and uses these cookies when sending requests. The default value
+		/// is <see langword="true"/>.
+		/// </summary>
 		public bool UseCookies { get; set; } = true;
 
+		/// <summary>
+		/// Gets or sets a value that indicates whether the handler sends an Authorization header with the
+		/// request. The default value is <see langword="false"/>.
+		/// </summary>
 		public bool PreAuthenticate { get; set; } = false;
 
+		/// <summary>
+		/// Gets or sets a value that indicates whether the handler uses a proxy for requests. The default
+		/// value is <see langword="true"/>.
+		/// </summary>
 		public bool UseProxy { get; set; } = true;
 
+		/// <summary>
+		/// Gets or sets the proxy information used by the handler.
+		/// </summary>
 		public IWebProxy? Proxy { get; set; }
 
+		/// <summary>
+		/// Gets or sets authentication information used by this handler.
+		/// </summary>
 		public ICredentials? Credentials { get; set; }
 
+		/// <summary>
+		/// Gets or sets a value that indicates whether the handler should follow redirection responses.
+		/// The default value is <see langword="true"/>.
+		/// </summary>
 		public bool AllowAutoRedirect { get; set; } = true;
 
+		/// <summary>
+		/// Gets or sets a value that indicates how client certificates are provided. The default value is
+		/// <see cref="ClientCertificateOption.Manual"/>.
+		/// </summary>
 		public ClientCertificateOption ClientCertificateOptions { get; set; } = ClientCertificateOption.Manual;
 
 		private X509CertificateCollection? _clientCertificates;
+
+		/// <summary>
+		/// Gets or sets the collection of client certificates used by the handler to authenticate the client.
+		/// </summary>
+		/// <exception cref="InvalidOperationException">
+		/// <see cref="ClientCertificateOptions"/> is not set to <see cref="ClientCertificateOption.Manual"/>.
+		/// </exception>
 		public X509CertificateCollection? ClientCertificates
 		{
 			get
@@ -225,16 +397,35 @@ namespace Xamarin.Android.Net
 			set => _clientCertificates = value;
 		}
 
+		/// <summary>
+		/// Gets or sets the credentials to use when authenticating with the proxy.
+		/// </summary>
 		public ICredentials? DefaultProxyCredentials { get; set; }
 
+		/// <summary>
+		/// Gets or sets the maximum number of concurrent connections allowed per server. The default value
+		/// is <see cref="int.MaxValue"/>.
+		/// </summary>
 		public int MaxConnectionsPerServer { get; set; } = int.MaxValue;
 
+		/// <summary>
+		/// Gets or sets the maximum length, in kilobytes (1024 bytes), of the response headers. The default
+		/// value is 64 KB.
+		/// </summary>
 		public int MaxResponseHeadersLength { get; set; } = 64; // Units in K (1024) bytes.
 
+		/// <summary>
+		/// Gets or sets a value that indicates whether the certificate revocation list is checked during
+		/// validation. The default value is <see langword="false"/>.
+		/// </summary>
 		public bool CheckCertificateRevocationList { get; set; } = false;
 
 		ServerCertificateCustomValidator? _serverCertificateCustomValidator = null;
 
+		/// <summary>
+		/// Gets or sets a callback to validate the server certificate. When set, the callback is invoked
+		/// during the TLS handshake to perform custom certificate validation.
+		/// </summary>
 		public Func<HttpRequestMessage, X509Certificate2?, X509Chain?, SslPolicyErrors, bool>? ServerCertificateCustomValidationCallback
 		{
 			get => _serverCertificateCustomValidator?.Callback;
@@ -249,15 +440,34 @@ namespace Xamarin.Android.Net
 			}
 		}
 
+		/// <summary>
+		/// Gets or sets the TLS/SSL protocols used by the handler. The default value is
+		/// <see cref="SslProtocols.Tls13"/> | <see cref="SslProtocols.Tls12"/> on Android API 29+,
+		/// or <see cref="SslProtocols.Tls12"/> on earlier versions.
+		/// </summary>
+		/// <remarks>
+		/// See the <see href="https://developer.android.com/reference/javax/net/ssl/SSLSocket#protocols">
+		/// Android SSLSocket documentation</see> for details on supported protocols by API level.
+		/// </remarks>
 		// See: https://developer.android.com/reference/javax/net/ssl/SSLSocket#protocols
 		public SslProtocols SslProtocols { get; set; } =
 			(int)Build.VERSION.SdkInt >= 29 ?
 				SslProtocols.Tls13 | SslProtocols.Tls12 : SslProtocols.Tls12;
 
+		/// <summary>
+		/// Gets or sets a custom property collection for the handler. This can be used to pass
+		/// additional metadata or configuration to the underlying transport.
+		/// </summary>
 		public IDictionary<string, object?>? Properties { get; set; }
 
 		int maxAutomaticRedirections = 50;
 
+		/// <summary>
+		/// Gets or sets the maximum number of allowed HTTP redirects. The default value is 50.
+		/// </summary>
+		/// <exception cref="ArgumentOutOfRangeException">
+		/// The specified value is less than or equal to 0.
+		/// </exception>
 		public int MaxAutomaticRedirections
 		{
 			get => maxAutomaticRedirections;
@@ -366,7 +576,7 @@ namespace Xamarin.Android.Net
 		/// native Java client defaults are used.
 		/// </para>
 		/// <para>
-		/// The default value is <c>120</c> seconds.
+		/// The default value is <c>24</c> hours, same as <see cref="ReadTimeout"/>.
 		/// </para>
 		/// </summary>
 		public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromHours (24);
@@ -420,9 +630,6 @@ namespace Xamarin.Android.Net
 		{
 			return _serverCertificateCustomValidator?.HostnameVerifier;
 		}
-
-		internal IHostnameVerifier? GetSSLHostnameVerifierInternal (HttpsURLConnection connection)
-			=> GetSSLHostnameVerifier (connection);
 
 		/// <summary>
 		/// Creates, configures and processes an asynchronous request to the indicated resource.
@@ -503,19 +710,16 @@ namespace Xamarin.Android.Net
 					request.Method = redirectState.Method;
 					request.RequestUri = redirectState.NewUrl;
 				} catch (Java.Net.SocketTimeoutException ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
-					throw new WebException (ex.Message, ex, WebExceptionStatus.Timeout, null);
+					throw CreateHttpRequestException (ex.Message, ex, WebExceptionStatus.Timeout);
 				} catch (Java.Net.UnknownServiceException ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
-					throw new WebException (ex.Message, ex, WebExceptionStatus.ProtocolError, null);
+					throw CreateHttpRequestException (ex.Message, ex, WebExceptionStatus.ProtocolError);
 				} catch (Java.Lang.SecurityException ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
-					throw new WebException (ex.Message, ex, WebExceptionStatus.SecureChannelFailure, null);
+					throw CreateHttpRequestException (ex.Message, ex, WebExceptionStatus.SecureChannelFailure);
 				} catch (Java.IO.IOException ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
-					throw new WebException (ex.Message, ex, WebExceptionStatus.UnknownError, null);
+					throw CreateHttpRequestException (ex.Message, ex, WebExceptionStatus.UnknownError);
 				}
 			}
 		}
-
-		internal Task <HttpResponseMessage> SendAsyncInternal (HttpRequestMessage request, CancellationToken cancellationToken)
-			=> SendAsync (request, cancellationToken);
 
 		protected virtual async Task <Java.Net.Proxy?> GetJavaProxy (Uri destination, CancellationToken cancellationToken)
 		{
@@ -538,9 +742,6 @@ namespace Xamarin.Android.Net
 
 			return proxy;
 		}
-
-		internal Task <Java.Net.Proxy?> GetJavaProxyInternal (Uri destination, CancellationToken cancellationToken)
-			=> GetJavaProxy (destination, cancellationToken);
 
 		Task <HttpResponseMessage?> ProcessRequest (HttpRequestMessage request, URL javaUrl, HttpURLConnection httpConnection, CancellationToken cancellationToken, RequestRedirectionState redirectState)
 		{
@@ -579,38 +780,53 @@ namespace Xamarin.Android.Net
 			}, ct);
 		}
 
+		// As documented for HttpClient.SendAsync (see https://github.com/dotnet/android/issues/5761), transport
+		// failures must be surfaced as HttpRequestException rather than the legacy WebException. To avoid breaking
+		// existing code that migrated from classic Xamarin.Android and still inspects WebException (and its
+		// WebExceptionStatus), we keep the original WebException as the inner exception.
+		static HttpRequestException CreateHttpRequestException (string? message, Exception? innerException, WebExceptionStatus status)
+			=> new HttpRequestException (message, new WebException (message, innerException, status, null));
+
 		protected virtual async Task WriteRequestContentToOutput (HttpRequestMessage request, HttpURLConnection httpConnection, CancellationToken cancellationToken)
 		{
 			if (request.Content is null)
 				return;
 
 			var stream = await request.Content.ReadAsStreamAsync ().ConfigureAwait (false);
-			await stream.CopyToAsync(httpConnection.OutputStream!, 4096, cancellationToken).ConfigureAwait(false);
-
-			//
-			// Rewind the stream to beginning in case the HttpContent implementation
-			// will be accessed again (e.g. after redirect) and it keeps its stream
-			// open behind the scenes instead of recreating it on the next call to
-			// ReadAsStreamAsync. If we don't rewind it, the ReadAsStreamAsync
-			// call above will throw an exception as we'd be attempting to read an
-			// already "closed" stream (that is one whose Position is set to its
-			// end).
-			//
-			// This is not a perfect solution since the HttpContent may do weird
-			// things in its implementation, but it's better than copying the
-			// content into a buffer since we have no way of knowing how the data is
-			// read or generated and also we don't want to keep potentially large
-			// amounts of data in memory (which would happen if we read the content
-			// into a byte[] buffer and kept it cached for re-use on redirect).
-			//
-			// See https://bugzilla.xamarin.com/show_bug.cgi?id=55477
-			//
-			if (stream.CanSeek)
-				stream.Seek (0, SeekOrigin.Begin);
+			try {
+				await stream.CopyToAsync(httpConnection.OutputStream!, 4096, cancellationToken).ConfigureAwait(false);
+			} catch (Exception ex) when (ShouldMapToCancellation (ex, cancellationToken)) {
+				// When the caller cancels the request while the body is being uploaded, the connection
+				// is disconnected which surfaces as a transport exception (e.g. "Socket closed"). Map it
+				// to an OperationCanceledException so callers observe cancellation instead of a WebException.
+				throw new System.OperationCanceledException ("Request body upload was canceled.", ex, cancellationToken);
+			} finally {
+				//
+				// Rewind the stream to beginning in case the HttpContent implementation
+				// will be accessed again (e.g. after redirect or retry) and it keeps its stream
+				// open behind the scenes instead of recreating it on the next call to
+				// ReadAsStreamAsync. If we don't rewind it, the ReadAsStreamAsync
+				// call above will throw an exception as we'd be attempting to read an
+				// already "closed" stream (that is one whose Position is set to its
+				// end).
+				//
+				// This is not a perfect solution since the HttpContent may do weird
+				// things in its implementation, but it's better than copying the
+				// content into a buffer since we have no way of knowing how the data is
+				// read or generated and also we don't want to keep potentially large
+				// amounts of data in memory (which would happen if we read the content
+				// into a byte[] buffer and kept it cached for re-use on redirect).
+				//
+				// We use try-finally to ensure the stream is rewound even if an exception
+				// occurs during the copy operation (e.g., cancellation, timeout, or network error),
+				// allowing the HttpContent to be safely reused in retry scenarios.
+				//
+				// See https://bugzilla.xamarin.com/show_bug.cgi?id=55477
+				//
+				if (stream.CanSeek)
+					stream.Seek (0, SeekOrigin.Begin);
+			}
 		}
-
-		internal Task WriteRequestContentToOutputInternal (HttpRequestMessage request, HttpURLConnection httpConnection, CancellationToken cancellationToken)
-			=> WriteRequestContentToOutput (request, httpConnection, cancellationToken);
 
 		async Task <HttpResponseMessage?> DoProcessRequest (HttpRequestMessage request, URL javaUrl, HttpURLConnection httpConnection, CancellationToken cancellationToken, RequestRedirectionState redirectState)
 		{
@@ -631,11 +847,13 @@ namespace Xamarin.Android.Net
 				await ConnectAsync (httpConnection, cancellationToken).ConfigureAwait (continueOnCapturedContext: false);
 				if (Logger.LogNet)
 					Logger.Log (LogLevel.Info, LOG_APP, $"  connected");
-			} catch (Java.Net.ConnectException ex) {
+			} catch (HttpRequestException ex) when (ex.InnerException is Java.Net.ConnectException connectException) {
 				if (Logger.LogNet)
 					Logger.Log (LogLevel.Info, LOG_APP, $"Connection exception {ex}");
-				// Wrap it nicely in a "standard" exception so that it's compatible with HttpClientHandler
-				throw new WebException (ex.Message, ex, WebExceptionStatus.ConnectFailure, null);
+				// `ConnectAsync` wraps all connection failures in HttpRequestException, so we unwrap the original
+				// `Java.Net.ConnectException` here and re-wrap it to preserve the legacy WebException (with its
+				// WebExceptionStatus) as the inner exception for back-compat with classic Xamarin.Android.
+				throw CreateHttpRequestException (connectException.Message, connectException, WebExceptionStatus.ConnectFailure);
 			}
 
 			if (cancellationToken.IsCancellationRequested) {
@@ -809,10 +1027,10 @@ namespace Xamarin.Android.Net
 			return ret ?? inputStream;
 		}
 
-		HttpContent GetContent (URLConnection httpConnection, Stream contentStream, ContentState contentState)
+		HttpContent GetContent (HttpURLConnection httpConnection, Stream contentStream, ContentState contentState)
 		{
 			Stream inputStream = GetDecompressionWrapper (httpConnection, new BufferedStream (contentStream), contentState);
-			return new StreamContent (inputStream);
+			return new StreamContent (new CancellationAwareResponseStream (inputStream, httpConnection));
 		}
 
 		bool HandleRedirect (HttpStatusCode redirectCode, HttpURLConnection httpConnection, RequestRedirectionState redirectState, out bool disposeRet)
@@ -882,7 +1100,7 @@ namespace Xamarin.Android.Net
 
 			redirectState.RedirectCounter++;
 			if (redirectState.RedirectCounter >= MaxAutomaticRedirections)
-				throw new WebException ($"Maximum automatic redirections exceeded (allowed {MaxAutomaticRedirections}, redirected {redirectState.RedirectCounter} times)");
+				throw CreateHttpRequestException ($"Maximum automatic redirections exceeded (allowed {MaxAutomaticRedirections}, redirected {redirectState.RedirectCounter} times)", null, WebExceptionStatus.UnknownError);
 
 			Uri redirectUrl;
 			try {
@@ -906,14 +1124,20 @@ namespace Xamarin.Android.Net
 					// meant. The fix doesn't belong here, but rather in the Uri class. So we'll throw...
 
 					redirectUrl = new Uri (location!, UriKind.RelativeOrAbsolute);
-					if (!redirectUrl.IsAbsoluteUri)
+					if (!redirectUrl.IsAbsoluteUri) {
 						redirectUrl = new Uri (baseUrl, location);
+					} else if (string.Equals (baseUrl.Scheme, "https", StringComparison.OrdinalIgnoreCase)
+           				&& !string.Equals (redirectUrl.Scheme, "https", StringComparison.OrdinalIgnoreCase)) {
+
+						disposeRet = false; // let the client decide what to do next
+						return true;
+					}
 				}
 
 				if (Logger.LogNet)
 					Logger.Log (LogLevel.Debug, LOG_APP, $"Cooked redirect location: {redirectUrl}");
 			} catch (Exception ex) {
-				throw new WebException ($"Invalid redirect URI received: {location}", ex);
+				throw CreateHttpRequestException ($"Invalid redirect URI received: {location}", ex, WebExceptionStatus.UnknownError);
 			}
 
 			UriBuilder? builder = null;
@@ -1040,9 +1264,6 @@ namespace Xamarin.Android.Net
 			return Task.CompletedTask;
 		}
 
-		internal Task SetupRequestInternal (HttpRequestMessage request, HttpURLConnection conn)
-			=> SetupRequest (request, conn);
-
 		/// <summary>
 		/// Configures the key store. The <paramref name="keyStore"/> parameter is set to instance of <see cref="KeyStore"/>
 		/// created using the <see cref="KeyStore.DefaultType"/> type and with populated with certificates provided in the <see cref="TrustedCerts"/>
@@ -1056,9 +1277,6 @@ namespace Xamarin.Android.Net
 
 			return keyStore;
 		}
-
-		internal KeyStore? ConfigureKeyStoreInternal (KeyStore? keyStore)
-			=> ConfigureKeyStore (keyStore);
 
 		/// <summary>
 		/// Create and configure an instance of <see cref="KeyManagerFactory"/>. The <paramref name="keyStore"/> parameter is set to the
@@ -1075,9 +1293,6 @@ namespace Xamarin.Android.Net
 
 			return null;
 		}
-
-		internal KeyManagerFactory? ConfigureKeyManagerFactoryInternal (KeyStore? keyStore)
-			=> ConfigureKeyManagerFactoryInternal (keyStore);
 
 		/// <summary>
 		/// Create and configure an instance of <see cref="TrustManagerFactory"/>. The <paramref name="keyStore"/> parameter is set to the
@@ -1096,9 +1311,6 @@ namespace Xamarin.Android.Net
 			return null;
 		}
 
-		internal TrustManagerFactory? ConfigureTrustManagerFactoryInternal (KeyStore? keyStore)
-			=> ConfigureTrustManagerFactory (keyStore);
-
 		async Task <HttpURLConnection> SetupRequestInternal (HttpRequestMessage request, URLConnection conn)
 		{
 			if (conn == null)
@@ -1110,7 +1322,7 @@ namespace Xamarin.Android.Net
 			try {
 				httpConnection.RequestMethod = request.Method.ToString ();
 			} catch (Java.Net.ProtocolException ex) when (JNIEnv.ShouldWrapJavaException (ex)) {
-				throw new WebException (ex.Message, ex, WebExceptionStatus.ProtocolError, null);
+				throw CreateHttpRequestException (ex.Message, ex, WebExceptionStatus.ProtocolError);
 			}
 
 			// SSL context must be set up as soon as possible, before adding any content or
@@ -1151,9 +1363,6 @@ namespace Xamarin.Android.Net
 		{
 			return null;
 		}
-
-		internal SSLSocketFactory? ConfigureCustomSSLSocketFactoryInternal (HttpsURLConnection connection)
-			=> ConfigureCustomSSLSocketFactoryInternal (connection);
 
 		void SetupSSL (HttpsURLConnection? httpsConnection, HttpRequestMessage requestMessage)
 		{

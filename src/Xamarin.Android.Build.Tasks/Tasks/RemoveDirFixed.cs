@@ -25,6 +25,8 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -40,8 +42,15 @@ namespace Xamarin.Android.Tasks
 	{
 		public override string TaskPrefix => "RDF";
 
-		const int ERROR_ACCESS_DENIED = -2147024891;
-		const int ERROR_SHARING_VIOLATION = -2147024864;
+		const int ERROR_ACCESS_DENIED      = -2147024891; // 0x80070005
+		const int ERROR_SHARING_VIOLATION  = -2147024864; // 0x80070020
+		// On Unix, .NET maps `ENOTEMPTY` from `rmdir(2)` to this Win32 HResult,
+		// so the same constant covers both Windows and Unix sources of
+		// "Directory not empty". This is observed on NTFS volumes mounted via
+		// the Linux `ntfs3` driver, where directory metadata can momentarily
+		// report children that have just been unlinked, but is not specific
+		// to that filesystem.
+		const int ERROR_DIR_NOT_EMPTY      = -2147024751; // 0x80070091
 
 		public override bool RunTask ()
 		{
@@ -54,8 +63,8 @@ namespace Xamarin.Android.Tasks
 					continue;
 				}
 				int retryCount = 0;
-				int attempts = Files.GetFileWriteRetryAttempts ();
-				int delay = Files.GetFileWriteRetryDelay ();
+				int attempts = RetryAttempts >= 0 ? RetryAttempts : Files.GetFileWriteRetryAttempts ();
+				int delay = RetryDelayMs >= 0 ? RetryDelayMs : Files.GetFileWriteRetryDelay ();
 				try {
 					while (retryCount <= attempts) {
 						try {
@@ -78,7 +87,7 @@ namespace Xamarin.Android.Tasks
 								case UnauthorizedAccessException:
 								case IOException:
 									int code = Marshal.GetHRForException(e);
-									if ((code != ERROR_ACCESS_DENIED && code != ERROR_SHARING_VIOLATION) || retryCount >= attempts) {
+									if ((code != ERROR_ACCESS_DENIED && code != ERROR_SHARING_VIOLATION && code != ERROR_DIR_NOT_EMPTY) || retryCount >= attempts) {
 										throw;
 									};
 									break;
@@ -101,9 +110,21 @@ namespace Xamarin.Android.Tasks
 		}
 
 		[Required]
-		public ITaskItem [] Directories { get; set; }
+		public ITaskItem [] Directories { get; set; } = [];
+
+		/// <summary>
+		/// Number of retry attempts when directory deletion fails.
+		/// Defaults to Files.GetFileWriteRetryAttempts() if not specified.
+		/// </summary>
+		public int RetryAttempts { get; set; } = -1;
+
+		/// <summary>
+		/// Delay in milliseconds between retry attempts.
+		/// Defaults to Files.GetFileWriteRetryDelay() if not specified.
+		/// </summary>
+		public int RetryDelayMs { get; set; } = -1;
 
 		[Output]
-		public ITaskItem [] RemovedDirectories { get; set; }
+		public ITaskItem []? RemovedDirectories { get; set; }
 	}
 }

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,7 +12,6 @@ namespace Xamarin.Android.Tasks
 	class EnvironmentFilesParser
 	{
 		public bool BrokenExceptionTransitions       { get; set; }
-		public bool HaveHttpMessageHandler           { get; private set; }
 		public bool HaveLogLevel                     { get; private set; }
 		public bool HaveMonoDebug                    { get; private set; }
 		public bool HaveMonoGCParams                 { get; private set; }
@@ -21,7 +21,7 @@ namespace Xamarin.Android.Tasks
 
 		public bool AreBrokenExceptionTransitionsEnabled (ITaskItem[] environments)
 		{
-			foreach (ITaskItem env in environments ?? Array.Empty<ITaskItem> ()) {
+			foreach (ITaskItem env in environments ?? []) {
 				foreach (string line in File.ReadLines (env.ItemSpec)) {
 					if (IsBrokenExceptionTransitionsLine (line.Trim ())) {
 						return true;
@@ -32,9 +32,9 @@ namespace Xamarin.Android.Tasks
 			return false;
 		}
 
-		public void Parse (ITaskItem[] environments, SequencePointsMode sequencePointsMode, TaskLoggingHelper log)
+		public void Parse (ITaskItem[]? environments, SequencePointsMode sequencePointsMode, TaskLoggingHelper log)
 		{
-			foreach (ITaskItem env in environments ?? Array.Empty<ITaskItem> ()) {
+			foreach (ITaskItem env in environments ?? []) {
 				foreach (string line in File.ReadLines (env.ItemSpec)) {
 					var lineToWrite = line.Trim ();
 					if (lineToWrite.StartsWith ("MONO_LOG_LEVEL=", StringComparison.Ordinal))
@@ -50,8 +50,6 @@ namespace Xamarin.Android.Tasks
 						if (sequencePointsMode != SequencePointsMode.None && !lineToWrite.Contains ("gen-compact-seq-points"))
 							lineToWrite = line  + ",gen-compact-seq-points";
 					}
-					if (lineToWrite.StartsWith ("XA_HTTP_CLIENT_HANDLER_TYPE=", StringComparison.Ordinal))
-						HaveHttpMessageHandler = true;
 
 					if (lineToWrite.StartsWith ("mono.enable_assembly_preload=", StringComparison.Ordinal)) {
 						int idx = lineToWrite.IndexOf ('=');

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 using Microsoft.Build.Framework;
@@ -14,19 +16,19 @@ namespace Xamarin.Android.Tasks
 	{
 		public override string TaskPrefix => "SNL";
 
-		public ITaskItem [] SourceFiles { get; set; }
+		public ITaskItem []? SourceFiles { get; set; }
 
-		public ITaskItem [] DestinationFiles { get; set; }
+		public ITaskItem []? DestinationFiles { get; set; }
 
-		string triple;
-		ITaskItem source;
-		ITaskItem destination;
+		string? triple;
+		ITaskItem? source;
+		ITaskItem? destination;
 
 		public override bool RunTask ()
 		{
-			if (SourceFiles.Length != DestinationFiles.Length)
+			if (SourceFiles == null || DestinationFiles == null || SourceFiles.Length != DestinationFiles.Length)
 				throw new ArgumentException ("source and destination count mismatch");
-			if (SourceFiles == null || SourceFiles.Length == 0)
+			if (SourceFiles.Length == 0)
 				return true;
 
 			for (int i = 0; i < SourceFiles.Length; i++) {
@@ -34,9 +36,9 @@ namespace Xamarin.Android.Tasks
 				destination = DestinationFiles [i];
 
 				var abi = AndroidRidAbiHelper.GetNativeLibraryAbi (source);
-				if (string.IsNullOrEmpty (abi)) {
+				if (abi.IsNullOrEmpty ()) {
 					var packageId = source.GetMetadata ("NuGetPackageId");
-					if (!string.IsNullOrEmpty (packageId)) {
+					if (!packageId.IsNullOrEmpty ()) {
 						Log.LogCodedWarning ("XA4301", source.ItemSpec, 0, Properties.Resources.XA4301_ABI_NuGet, source.ItemSpec, packageId);
 					} else {
 						Log.LogCodedWarning ("XA4301", source.ItemSpec, 0, Properties.Resources.XA4301_ABI, source.ItemSpec);
@@ -65,8 +67,8 @@ namespace Xamarin.Android.Tasks
 		protected override string GenerateCommandLineCommands ()
 		{
 			var cmd = new CommandLineBuilder ();
-			cmd.AppendSwitchIfNotNull ("--strip-debug ", source.ItemSpec);
-			cmd.AppendSwitchIfNotNull ("-o ", destination.ItemSpec);
+			cmd.AppendSwitchIfNotNull ("--strip-debug ", source?.ItemSpec);
+			cmd.AppendSwitchIfNotNull ("-o ", destination?.ItemSpec);
 			return cmd.ToString ();
 		}
 

@@ -14,7 +14,7 @@ variables:
 - name: WindowsToolchainPdbArtifactName
   value: windows-toolchain-pdb
 - name: ApkDiffToolVersion
-  value: 0.0.15
+  value: 0.0.17
 - name: TestSlicerToolVersion
   value: 0.1.0-alpha7
 - name: BootsToolVersion
@@ -22,21 +22,23 @@ variables:
 - name: NUnitConsoleVersion
   value: 3.16.3
 - name: NUnit.NumberOfTestWorkers
-  value: 4
+  value: -1
 - name: DotNetSdkVersion
-  value: 9.0
+  value: 10.0
 - name: DotNetSdkQuality
   value: GA
 - name: GitHub.Token
   value: $(github--pat--vs-mobiletools-engineering-service2)
 - name: HostedMacImage
-  value: macOS-14
+  value: macOS-15
+- name: HostedMacImageWithEmulator
+  value: macOS-15
 - name: SharedMacPool
   value: VSEng-VSMac-Xamarin-Shared
 - name: SharedMacName
-  value: Sonoma
+  value: Sequoia
 - name: SharedMacArch
-  value: arm64
+  value: x64
 - name: HostedWinImage
   value: windows-2022
 - name: WindowsPoolImage1ESPT
@@ -46,19 +48,37 @@ variables:
 - name: VSEngMicroBuildPool
   value: VSEngSS-MicroBuild2022-1ES
 - name: TeamName
-  value: XamarinAndroid
+  value: .NET MAUI
 - name: DotNetTargetFramework
-  value: net9.0
+  value: net11.0
 - name: DotNetStableTargetFramework
-  value: net9.0
+  value: net10.0
 # Workaround: https://devdiv.visualstudio.com/DevDiv/_workitems/edit/1585820
 - name: _WriteTelemetryProperties
   value: false
 - name: IsRelOrTargetingRel
   value: $[or(startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'), startsWith(variables['System.PullRequest.TargetBranch'], 'release/'))]
 - name: DefaultTestSdkPlatforms  # Comma-separated SDK Platform(s) to install on test agents (no spaces)
-  value: 35
+  value: 35,36,36.1,37.0
+- name: DefaultJavaSdkMajorVersion
+  value: 17
+- name: LatestJavaSdkMajorVersion
+  value: 21
 - name: ExcludedNightlyNUnitCategories
   value: 'cat != SystemApplication & cat != TimeZoneInfo & cat != Localization'
 - name: RunMAUITestJob
   value: true
+- name: DOTNET_SYSTEM_NET_SECURITY_NOREVOCATIONCHECKBYDEFAULT
+  value: true
+- name: DOTNET_CLI_TELEMETRY_OPTOUT
+  value: true
+- name: DOTNET_NOLOGO
+  value: true
+- name: DOTNET_GENERATE_ASPNET_CERTIFICATE
+  value: false
+# Fix network isolation requirements
+# See https://devdiv.visualstudio.com/DevDiv/_git/Xamarin.yaml-templates/pullrequest/750402
+- name: DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE
+  value: 'true'
+- name: DOTNET_SDK_VULNERABILITY_CHECK_DISABLE
+  value: 'true'

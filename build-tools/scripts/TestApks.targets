@@ -1,31 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.Adb" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.ApkDiffCheckRegression" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.BundleTool" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.CheckAdbTarget" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.CreateAndroidEmulator" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.RenameTestCases" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.RunAndroidEmulatorCheckBootTimes" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.RunInstrumentationTests" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.RunUITests" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.StartAndroidEmulator" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.KillProcess" />
-  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.WaitForAndroidEmulator" />
-  <UsingTask AssemblyFile="$(PrepTasksAssembly)" TaskName="Xamarin.Android.BuildTools.PrepTasks.XASleepInternal" />
-  <UsingTask AssemblyFile="$(PrepTasksAssembly)" TaskName="Xamarin.Android.BuildTools.PrepTasks.ProcessLogcatTiming" />
-  <UsingTask AssemblyFile="$(PrepTasksAssembly)" TaskName="Xamarin.Android.BuildTools.PrepTasks.ProcessApkSizes" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.Adb" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.ApkDiffCheckRegression" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.BundleTool" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.CheckAdbTarget" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.CreateAndroidEmulator" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.RenameTestCases" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.RunAndroidEmulatorCheckBootTimes" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.RunInstrumentationTests" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.RunUITests" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.StartAndroidEmulator" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.KillProcess" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(BootstrapTasksAssembly)" TaskName="Xamarin.Android.Tools.BootstrapTasks.WaitForAndroidEmulator" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(PrepTasksAssembly)" TaskName="Xamarin.Android.BuildTools.PrepTasks.XASleepInternal" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(PrepTasksAssembly)" TaskName="Xamarin.Android.BuildTools.PrepTasks.ProcessLogcatTiming" TaskFactory="TaskHostFactory" Runtime="NET" />
+  <UsingTask AssemblyFile="$(PrepTasksAssembly)" TaskName="Xamarin.Android.BuildTools.PrepTasks.ProcessApkSizes" TaskFactory="TaskHostFactory" Runtime="NET" />
 
   <PropertyGroup>
     <!-- APK tests might run on 32-bit emulators -->
-    <RuntimeIdentifiers Condition=" '$(RuntimeIdentifier)' == '' ">android-arm64;android-x86;android-x64;</RuntimeIdentifiers>
+    <RuntimeIdentifiers Condition=" '$(RuntimeIdentifier)' == '' and '$(PublishAot)' != 'true' and '$(UseMonoRuntime)' == 'true' ">android-arm64;android-x86;android-x64;</RuntimeIdentifiers>
     <TestAvdApiLevel Condition=" '$(TestAvdApiLevel)' == '' ">29</TestAvdApiLevel>
     <TestAvdAbi Condition=" '$(TestAvdAbi)' == '' and '$(HostOS)' == 'Darwin' and  '$(HostOSArchitecture)' == 'Arm64' ">arm64-v8a</TestAvdAbi>
     <TestAvdAbi Condition=" '$(TestAvdAbi)' == '' ">x86_64</TestAvdAbi>
     <TestAvdType Condition=" '$(TestAvdType)' == '' ">default</TestAvdType>
     <TestAvdForceCreation Condition=" '$(TestAvdForceCreation)' == '' ">true</TestAvdForceCreation>
     <TestAvdShowWindow Condition=" '$(TestAvdShowWindow)' == '' and '$(RunningOnCI)' == 'true' ">false</TestAvdShowWindow>
-    <TestAvdExtraBootArgs Condition=" '$(TestAvdShowWindow)' == 'false' ">-no-window -no-boot-anim $(TestAvdExtraBootArgs)</TestAvdExtraBootArgs>
+    <TestAvdExtraBootArgs Condition=" '$(TestAvdShowWindow)' == 'false' ">-no-window -no-boot-anim -gpu swiftshader $(TestAvdExtraBootArgs)</TestAvdExtraBootArgs>
     <TestDeviceName Condition=" '$(TestDeviceName)' == '' ">pixel_4</TestDeviceName>
     <SdkManagerImageName Condition=" '$(SdkManagerImageName)' == '' ">system-images;android-$(TestAvdApiLevel);$(TestAvdType);$(TestAvdAbi)</SdkManagerImageName>
     <TestAvdName>XamarinAndroidTestRunner$(TestAvdApiLevel)-$(TestAvdAbi)</TestAvdName>
@@ -79,7 +79,7 @@
         AvdManagerHome="$(AvdManagerHome)"
         Arguments="$(TestAvdExtraBootArgs)"
         ImageName="$(TestAvdName)"
-        LogcatFile="$(_LogcatFilenameBase)-full.txt"
+        LogcatFile="$(_LogcatFilenameBase)-start-emu.txt"
         Port="$(_AdbEmulatorPort)"
         ToolExe="$(EmulatorToolExe)"
         ToolPath="$(EmulatorToolPath)">
@@ -211,14 +211,21 @@
   <Target Name="DeployTestAabs"
       Condition=" '@(TestAab)' != '' ">
     <PropertyGroup>
-      <_KeyStore>$(XamarinAndroidSourcePath)\src\Xamarin.Android.Build.Tasks\Tests\Xamarin.ProjectTools\Resources\Base\test.keystore</_KeyStore>
+      <_KeyStore>$([System.IO.Path]::Combine ('$(IntermediateOutputPath)', 'test.keystore'))</_KeyStore>
       <_KeyAlias>mykey</_KeyAlias>
       <_KeyPass>android</_KeyPass>
       <_StorePass>android</_StorePass>
+      <_KeytoolExe Condition=" '$(HostOS)' == 'Windows' ">keytool.exe</_KeytoolExe>
+      <_KeytoolExe Condition=" '$(HostOS)' != 'Windows' ">keytool</_KeytoolExe>
+      <_KeytoolPath>$(JavaSdkDirectory)\bin\$(_KeytoolExe)</_KeytoolPath>
       <!-- Support for running against a system installation of XA. -->
       <BundleToolJarPath Condition=" !Exists('$(BundleToolJarPath)') ">$(AndroidBundleToolJarPath)</BundleToolJarPath>
       <JavaPath Condition=" '$(JavaPath)' == '' ">$(JavaSdkDirectory)\bin\java</JavaPath>
     </PropertyGroup>
+    <Exec
+        Condition=" !Exists('$(_KeyStore)') "
+        Command="&quot;$(_KeytoolPath)&quot; -genkeypair -v -storetype pkcs12 -keystore &quot;$(_KeyStore)&quot; -alias $(_KeyAlias) -keyalg RSA -keysize 2048 -validity 10000 -storepass $(_StorePass) -keypass $(_KeyPass) -dname &quot;CN=Test, OU=Test, O=Test, L=Test, ST=Test, C=US&quot;"
+    />
     <Xamarin.Android.Tools.BootstrapTasks.BundleTool
         Arguments="build-apks --connected-device --overwrite --mode default --bundle &quot;%(TestAab.Identity)&quot; --output &quot;%(TestAab.Identity).apks&quot;"
         ContinueOnError="ErrorAndContinue"
@@ -267,6 +274,8 @@
     <PropertyGroup>
       <_IncludeCategories Condition=" '$(IncludeCategories)' != '' ">include=$(IncludeCategories)</_IncludeCategories>
       <_ExcludeCategories Condition=" '$(ExcludeCategories)' != '' ">exclude=$(ExcludeCategories)</_ExcludeCategories>
+      <_DryRunTests Condition=" '$(DryRunTests)' == 'true' ">dryrun=true</_DryRunTests>
+      <_NoTestExclusions Condition=" '$(NoTestExclusions)' == 'true' ">noexclusions=true</_NoTestExclusions>
       <PlotDataLabelSuffix Condition=" '$(PlotDataLabelSuffix)' == '' ">$(TestsFlavor)</PlotDataLabelSuffix>
     </PropertyGroup>
     <RunInstrumentationTests
@@ -280,7 +289,7 @@
         Component="%(TestApkInstrumentation.Package)/%(TestApkInstrumentation.Identity)"
         NUnit2TestResultsFile="%(TestApkInstrumentation.ResultsPath)"
         LogcatFilename="$(_LogcatFilenameBase)-%(TestApkInstrumentation.Package)%(TestApkInstrumentation.LogcatFilenameDistincion).txt"
-        InstrumentationArguments="$(_IncludeCategories);$(_ExcludeCategories)"
+        InstrumentationArguments="$(_IncludeCategories);$(_ExcludeCategories);$(_DryRunTests);$(_NoTestExclusions)"
         TestFixture="$(TestFixture)"
         ToolExe="$(AdbToolExe)"
         ToolPath="$(AdbToolPath)"
@@ -380,6 +389,7 @@
     <!-- SDK component installation can be frail, try a few times. -->
     <Exec
         Command="&quot;$(CommandLineToolsBinPath)\sdkmanager&quot; &quot;$(SdkManagerImageName)&quot;"
+        EnvironmentVariables="JAVA_HOME=$(JavaSdkDirectory)"
         ContinueOnError="true">
       <Output TaskParameter="ExitCode" PropertyName="_SdkManagerExitCode" />
     </Exec>
@@ -389,6 +399,7 @@
     />
     <Exec
         Command="&quot;$(CommandLineToolsBinPath)\sdkmanager&quot; &quot;$(SdkManagerImageName)&quot;"
+        EnvironmentVariables="JAVA_HOME=$(JavaSdkDirectory)"
         ContinueOnError="true"
         Condition=" '$(_SdkManagerExitCode)' != '0' ">
       <Output TaskParameter="ExitCode" PropertyName="_SdkManagerExitCode" />
@@ -399,6 +410,7 @@
     />
     <Exec
         Command="&quot;$(CommandLineToolsBinPath)\sdkmanager&quot; &quot;$(SdkManagerImageName)&quot;"
+        EnvironmentVariables="JAVA_HOME=$(JavaSdkDirectory)"
         ContinueOnError="true"
         Condition=" '$(_SdkManagerExitCode)' != '0' ">
       <Output TaskParameter="ExitCode" PropertyName="_SdkManagerExitCode" />

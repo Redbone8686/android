@@ -1,4 +1,5 @@
 #nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -24,7 +25,7 @@ namespace Xamarin.Android.Tasks
 		public override string TaskPrefix => "PRAS";
 
 		[Required]
-		public string [] RuntimeIdentifiers { get; set; } = Array.Empty<string>();
+		public string [] RuntimeIdentifiers { get; set; } = [];
 
 		public bool DesignTimeBuild { get; set; }
 
@@ -32,9 +33,12 @@ namespace Xamarin.Android.Tasks
 
 		public bool PublishTrimmed { get; set; }
 
-		public ITaskItem [] InputAssemblies { get; set; } = Array.Empty<ITaskItem> ();
+		public ITaskItem [] InputAssemblies { get; set; } = [];
 
-		public ITaskItem [] InputJavaLibraries { get; set; } = Array.Empty<ITaskItem> ();
+		public ITaskItem [] InputJavaLibraries { get; set; } = [];
+
+		public string AndroidRuntime { get; set; } = "";
+		public string LocalClrDirectory { get; set; } = "";
 
 		[Output]
 		public ITaskItem []? OutputAssemblies { get; set; }
@@ -64,7 +68,7 @@ namespace Xamarin.Android.Tasks
 			ResolvedSymbols = symbols.Values.ToArray ();
 
 			// Set ShrunkAssemblies for _RemoveRegisterAttribute and <BuildApk/>
-			// This should match the Condition on the _RemoveRegisterAttribute target
+			// This should match the Condition on the _RemoveRegisterAttribute target.
 			if (PublishTrimmed) {
 				if (!AndroidIncludeDebugSymbols) {
 					var shrunkAssemblies = new List<ITaskItem> (OutputAssemblies.Length);
@@ -84,7 +88,7 @@ namespace Xamarin.Android.Tasks
 			if (InputJavaLibraries != null) {
 				var javaLibraries = new Dictionary<string, ITaskItem> (StringComparer.OrdinalIgnoreCase);
 				foreach (var item in InputJavaLibraries) {
-					if (!IsFromAKnownRuntimePack (item))
+					if (!MonoAndroidHelper.IsFromAKnownRuntimePack (item))
 						continue;
 					var name = Path.GetFileNameWithoutExtension(item.ItemSpec);
 					if (!javaLibraries.ContainsKey (name)) {
@@ -100,7 +104,8 @@ namespace Xamarin.Android.Tasks
 		void SetAssemblyAbiMetadata (string abi, ITaskItem assembly, ITaskItem? symbol)
 		{
 			if (String.IsNullOrEmpty (abi)) {
-				throw new ArgumentException ("must not be null or empty", nameof (abi));
+				string rid = assembly.GetMetadata ("RuntimeIdentifier") ?? "unknown";
+				throw new ArgumentException ($"must not be null or empty for assembly item '{assembly}' (RID '{rid}')", nameof (abi));
 			}
 
 			assembly.SetMetadata ("Abi", abi);
@@ -110,6 +115,13 @@ namespace Xamarin.Android.Tasks
 		void SetAssemblyAbiMetadata (ITaskItem assembly, ITaskItem? symbol)
 		{
 			string rid = assembly.GetMetadata ("RuntimeIdentifier");
+			if (String.IsNullOrEmpty (rid)) {
+				throw new InvalidOperationException ($"Assembly '{assembly}' item doesn't have the required RuntimeIdentifier metadata");
+			}
+
+			if (!MonoAndroidHelper.IsValidRID (rid)) {
+				throw new InvalidOperationException ($"Assembly '{assembly}' item targets unsupported RuntimeIdentifier '{rid}'");
+			}
 
 			SetAssemblyAbiMetadata (AndroidRidAbiHelper.RuntimeIdentifierToAbi (rid), assembly, symbol);
 		}
@@ -126,7 +138,7 @@ namespace Xamarin.Android.Tasks
 				ITaskItem? symbol = GetOrCreateSymbolItem (symbols, assembly);
 				SetAssemblyAbiMetadata (assembly, symbol);
 				SetDestinationSubDirectory (assembly, symbol);
-				assembly.SetMetadata ("FrameworkAssembly", IsFromAKnownRuntimePack (assembly).ToString ());
+				assembly.SetMetadata ("FrameworkAssembly", MonoAndroidHelper.IsFrameworkAssembly (assembly).ToString ());
 
 				if (!DesignTimeBuild) {
 					// Designer builds don't produce assemblies, the HasMonoAndroidReference call would throw an exception in that case
@@ -136,17 +148,10 @@ namespace Xamarin.Android.Tasks
 			}
 		}
 
-		static bool IsFromAKnownRuntimePack (ITaskItem assembly)
-		{
-			string packageId = assembly.GetMetadata ("NuGetPackageId") ?? "";
-			return packageId.StartsWith ("Microsoft.NETCore.App.Runtime.", StringComparison.Ordinal) ||
-				packageId.StartsWith ("Microsoft.Android.Runtime.", StringComparison.Ordinal);
-		}
-
 		static ITaskItem? GetOrCreateSymbolItem (Dictionary<string, ITaskItem> symbols, ITaskItem assembly)
 		{
 			var symbolPath = Path.ChangeExtension (assembly.ItemSpec, ".pdb");
-			if (!symbols.TryGetValue (symbolPath, out var symbol) || !string.IsNullOrEmpty (symbol.GetMetadata ("DestinationSubDirectory"))) {
+			if (!symbols.TryGetValue (symbolPath, out var symbol) || !symbol.GetMetadata ("DestinationSubDirectory").IsNullOrEmpty ()) {
 				// Sometimes .pdb files are not included in @(ResolvedFileToPublish), so add them if they exist
 				if (File.Exists (symbolPath)) {
 					symbols [symbolPath] = symbol = new TaskItem (symbolPath);
@@ -172,11 +177,11 @@ namespace Xamarin.Android.Tasks
 		{
 			string? rid = assembly.GetMetadata ("RuntimeIdentifier");
 			if (String.IsNullOrEmpty (rid)) {
-				throw new InvalidOperationException ($"Assembly '{assembly}' item is missing required ");
+				throw new InvalidOperationException ($"Assembly '{assembly}' item is missing required RuntimeIdentifier data");
 			}
 
 			string? abi = AndroidRidAbiHelper.RuntimeIdentifierToAbi (rid);
-			if (string.IsNullOrEmpty (abi)) {
+			if (abi.IsNullOrEmpty ()) {
 				throw new InvalidOperationException ($"Unable to convert a runtime identifier '{rid}' to Android ABI for: {assembly.ItemSpec}");
 			}
 

@@ -10,7 +10,7 @@ project(
   android-native-bits
   VERSION ${XA_VERSION}
   DESCRIPTION ".NET for Android native runtime"
-  HOMEPAGE_URL "https://github.com/xamarin/xamarin-android"
+  HOMEPAGE_URL "https://github.com/dotnet/android"
   LANGUAGES CXX C ASM
 )
 
@@ -29,6 +29,8 @@ ensure_variable_set(CMAKE_BUILD_TYPE)
 ensure_variable_set(OUTPUT_PATH)
 ensure_variable_set(XA_BUILD_CONFIGURATION)
 ensure_variable_set(XA_LIB_TOP_DIR)
+ensure_variable_set(RUNTIME_FLAVOR)
+ensure_variable_set(XA_TEST_OUTPUT_DIR)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${OUTPUT_PATH}/${ANDROID_RID}" CACHE PATH "" FORCE)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${OUTPUT_PATH}/${ANDROID_RID}" CACHE PATH "" FORCE)
@@ -43,6 +45,26 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 include("${CMAKE_ANDROID_NDK}/build/cmake/abis.cmake")
 include("${CMAKE_SOURCE_DIR}/cmake/ArchiveDSOStub.cmake")
+
+string(TOLOWER "${RUNTIME_FLAVOR}" RUNTIME_FLAVOR_LOWER)
+if (RUNTIME_FLAVOR_LOWER STREQUAL monovm)
+  set(IS_MONO_RUNTIME True)
+  set(IS_CLR_RUNTIME False)
+  set(IS_NAOT_RUNTIME False)
+  set(SOURCES_PREFIX "mono")
+elseif(RUNTIME_FLAVOR_LOWER STREQUAL coreclr)
+  set(IS_MONO_RUNTIME False)
+  set(IS_CLR_RUNTIME True)
+  set(IS_NAOT_RUNTIME False)
+  set(SOURCES_PREFIX "clr")
+elseif(RUNTIME_FLAVOR_LOWER STREQUAL nativeaot)
+  set(IS_MONO_RUNTIME False)
+  set(IS_CLR_RUNTIME False)
+  set(IS_NAOT_RUNTIME True)
+  set(SOURCES_PREFIX "nativeot")
+else()
+  message(FATAL_ERROR "Unknown runtime flavor ${RUNTIME_FLAVOR}")
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL Debug)
   set(DEBUG_BUILD True)
@@ -70,8 +92,8 @@ if(ENABLE_CLANG_ASAN AND ENABLE_CLANG_UBSAN)
 endif()
 
 if(ENABLE_CLANG_ASAN OR ENABLE_CLANG_UBSAN)
-  if(BUILD_ARCHIVE_DSO_STUB)
-    message(FATAL_ERROR "ASAN/UBSAN builds aren't supported by the archive DSO target")
+  if(BUILD_ARCHIVE_DSO_STUB OR BUILD_TEST_JNI_LIBRARY)
+    message(FATAL_ERROR "ASAN/UBSAN builds aren't supported by the archive DSO / test JNI library targets")
   endif()
 
   set(STRIP_DEBUG_DEFAULT OFF)
@@ -120,13 +142,8 @@ else()
   set(USES_LIBSTDCPP True)
 endif()
 
-if(ANALYZERS_ENABLED)
-  message(STATUS "Analyzers enabled")
-  set(SHARED_LIB_NAME xa::shared-no-abi)
-else()
-  message(STATUS "NO analyzers enabled")
-  set(SHARED_LIB_NAME xa::shared)
-endif()
+set(SHARED_LIB_NAME xa::shared)
+
 #
 # Needed modules
 #
@@ -145,17 +162,59 @@ include("${XA_BUILD_DIR}/xa_build_configuration.cmake")
 #
 # Paths
 #
+macro(temp_configure_mono_runtime_dir)
+  # TEMPORARY: for now JI needs to build with MonoVM embedding APIs
+  set(TEMP_NETCORE_RUNTIME_DIR_ARM64  "${NETCORE_APP_RUNTIME_DIR_ARM64}")
+  set(TEMP_NETCORE_RUNTIME_DIR_ARM    "${NETCORE_APP_RUNTIME_DIR_ARM}")
+  set(TEMP_NETCORE_RUNTIME_DIR_X86_64 "${NETCORE_APP_RUNTIME_DIR_X86_64}")
+  set(TEMP_NETCORE_RUNTIME_DIR_X86    "${NETCORE_APP_RUNTIME_DIR_X86}")
+endmacro()
+
+if(IS_CLR_RUNTIME)
+  if(LOCAL_CORECLR_PATH)
+    set(CLR_PACKAGE_NAME_STEM "microsoft.netcore.app.runtime.android")
+    if(NOT LOCAL_CORECLR_CONFIG)
+      set(LOCAL_CORECLR_CONFIG Release)
+    endif()
+
+    set(RUNTIME_DIR_ARM    "${LOCAL_CORECLR_PATH}/${CLR_PACKAGE_NAME_STEM}-arm/${LOCAL_CORECLR_CONFIG}/runtimes/android-arm")
+    set(RUNTIME_DIR_ARM64  "${LOCAL_CORECLR_PATH}/${CLR_PACKAGE_NAME_STEM}-arm64/${LOCAL_CORECLR_CONFIG}/runtimes/android-arm64")
+    set(RUNTIME_DIR_X86_64 "${LOCAL_CORECLR_PATH}/${CLR_PACKAGE_NAME_STEM}-x64/${LOCAL_CORECLR_CONFIG}/runtimes/android-x64")
+  else()
+    set(RUNTIME_DIR_ARM    "${CORECLR_APP_RUNTIME_DIR_ARM}")
+    set(RUNTIME_DIR_ARM64  "${CORECLR_APP_RUNTIME_DIR_ARM64}")
+    set(RUNTIME_DIR_X86_64 "${CORECLR_APP_RUNTIME_DIR_X86_64}")
+  endif()
+
+  temp_configure_mono_runtime_dir()
+elseif(IS_NAOT_RUNTIME)
+  temp_configure_mono_runtime_dir()
+elseif(IS_MONO_RUNTIME)
+  set(RUNTIME_DIR_ARM64  "${NETCORE_APP_RUNTIME_DIR_ARM64}")
+  set(RUNTIME_DIR_ARM    "${NETCORE_APP_RUNTIME_DIR_ARM}")
+  set(RUNTIME_DIR_X86_64 "${NETCORE_APP_RUNTIME_DIR_X86_64}")
+  set(RUNTIME_DIR_X86    "${NETCORE_APP_RUNTIME_DIR_X86}")
+endif()
+
 if(ANDROID_ABI MATCHES "^arm64-v8a")
-  set(NET_RUNTIME_DIR "${NETCORE_APP_RUNTIME_DIR_ARM64}")
+  set(NET_RUNTIME_DIR "${RUNTIME_DIR_ARM64}")
+  # TEMPORARY: for now JI needs to build with MonoVM embedding APIs
+  set(TEMP_NETCORE_NET_RUNTIME_DIR "${TEMP_NETCORE_RUNTIME_DIR_ARM64}")
   set(TOOLCHAIN_TRIPLE "${NDK_ABI_arm64-v8a_TRIPLE}")
 elseif(ANDROID_ABI MATCHES "^armeabi-v7a")
-  set(NET_RUNTIME_DIR "${NETCORE_APP_RUNTIME_DIR_ARM}")
+  set(NET_RUNTIME_DIR "${RUNTIME_DIR_ARM}")
+  # TEMPORARY: for now JI needs to build with MonoVM embedding APIs
+  set(TEMP_NETCORE_NET_RUNTIME_DIR "${TEMP_NETCORE_RUNTIME_DIR_ARM}")
   set(TOOLCHAIN_TRIPLE "${NDK_ABI_armeabi-v7a_TRIPLE}")
 elseif(ANDROID_ABI MATCHES "^x86_64")
-  set(NET_RUNTIME_DIR "${NETCORE_APP_RUNTIME_DIR_X86_64}")
+  set(NET_RUNTIME_DIR "${RUNTIME_DIR_X86_64}")
+  # TEMPORARY: for now JI needs to build with MonoVM embedding APIs
+  set(TEMP_NETCORE_NET_RUNTIME_DIR "${TEMP_NETCORE_RUNTIME_DIR_X86_64}")
   set(TOOLCHAIN_TRIPLE "${NDK_ABI_x86_64_TRIPLE}")
 elseif(ANDROID_ABI MATCHES "^x86")
-  set(NET_RUNTIME_DIR "${NETCORE_APP_RUNTIME_DIR_X86}")
+  set(NET_RUNTIME_DIR "${RUNTIME_DIR_X86}")
+  # TEMPORARY: for now JI needs to build with MonoVM embedding APIs
+  set(TEMP_NETCORE_NET_RUNTIME_DIR "${TEMP_NETCORE_RUNTIME_DIR_X86}")
   set(TOOLCHAIN_TRIPLE "${NDK_ABI_x86_TRIPLE}")
 else()
   message(FATAL "${ANDROID_ABI} is not supported for .NET 6+ builds")
@@ -166,14 +225,73 @@ file(REAL_PATH "../../" REPO_ROOT_DIR)
 set(EXTERNAL_DIR "${REPO_ROOT_DIR}/external")
 set(JAVA_INTEROP_SRC_PATH "${EXTERNAL_DIR}/Java.Interop/src/java-interop")
 set(LIBUNWIND_SOURCE_DIR "${EXTERNAL_DIR}/libunwind")
-set(ROBIN_MAP_DIR "${EXTERNAL_DIR}/robin-map")
+
+if(IS_MONO_RUNTIME)
+  set(ROBIN_MAP_DIR "${EXTERNAL_DIR}/robin-map")
+endif()
 
 #
 # Include directories
 #
 set(SYSROOT_CXX_INCLUDE_DIR ${CMAKE_SYSROOT}/usr/include/c++/v1)
-set(MONO_RUNTIME_INCLUDE_DIR ${NET_RUNTIME_DIR}/native/include/mono-2.0)
+
+if(IS_MONO_RUNTIME)
+  set(RUNTIME_INCLUDE_DIR ${NET_RUNTIME_DIR}/native/include/mono-2.0)
+else()
+  # TEMPORARY: for now JI needs to build with MonoVM embedding APIs
+  set(TEMP_MONO_RUNTIME_INCLUDE_DIR ${TEMP_NETCORE_NET_RUNTIME_DIR}/native/include/mono-2.0)
+
+  if(LOCAL_CORECLR_PATH)
+    set(CLR_REPO_ROOT_PATH "${LOCAL_CORECLR_PATH}/../..")
+    set(RUNTIME_INCLUDE_DIR "${CLR_REPO_ROOT_PATH}/src/native/corehost;${CLR_REPO_ROOT_PATH}/src/coreclr/hosts/inc")
+  else()
+    set(RUNTIME_INCLUDE_DIR ${REPO_ROOT_DIR}/src-ThirdParty/dotnet/runtime)
+  endif()
+endif()
+
 set(JAVA_INTEROP_INCLUDE_DIR ${JAVA_INTEROP_SRC_PATH})
+set(CONSTEXPR_XXH3_DIR "${EXTERNAL_DIR}/constexpr-xxh3")
+set(XXHASH_DIR "${EXTERNAL_DIR}/xxHash")
+
+include_directories(common/include)
+
+if(IS_CLR_RUNTIME)
+  set(XA_RUNTIME_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/clr/include)
+
+  macro(xa_add_include_directories TARGET)
+     target_include_directories(
+        ${TARGET}
+        PRIVATE
+        ${XA_RUNTIME_INCLUDE_DIR}
+        ${EXTERNAL_DIR}
+        ${CONSTEXPR_XXH3_DIR}
+        ${RUNTIME_INCLUDE_DIR}
+     )
+  endmacro()
+elseif(IS_NAOT_RUNTIME)
+  set(XA_RUNTIME_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/nativeaot/include)
+  set(CLR_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/clr/include)
+
+  macro(xa_add_include_directories TARGET)
+     target_include_directories(
+        ${TARGET}
+        PRIVATE
+        ${XA_RUNTIME_INCLUDE_DIR}
+        ${RUNTIME_INCLUDE_DIR}
+        ${CONSTEXPR_XXH3_DIR}
+        ${CLR_INCLUDE_DIR}
+     )
+  endmacro()
+else()
+  macro(xa_add_include_directories TARGET)
+     target_include_directories(
+        ${TARGET}
+        PRIVATE
+        ${RUNTIME_INCLUDE_DIR}
+     )
+  endmacro()
+  include_directories(mono)
+endif()
 
 #
 # Compiler defines
@@ -194,9 +312,31 @@ macro(xa_add_compile_definitions TARGET)
       ANDROID64
     )
   endif()
+
+  if(IS_CLR_RUNTIME)
+    target_compile_definitions(
+      ${TARGET}
+      PRIVATE
+      TARGET_ANDROID
+      XA_HOST_CLR
+    )
+  elseif(IS_NAOT_RUNTIME)
+    target_compile_definitions(
+      ${TARGET}
+      PRIVATE
+      TARGET_ANDROID
+      XA_HOST_NATIVEAOT
+    )
+  else()
+    target_compile_definitions(
+      ${TARGET}
+      PRIVATE
+      XA_HOST_MONOVM
+    )
+  endif()
 endmacro()
 
-if(NOT BUILD_ARCHIVE_DSO_STUB)
+if(NOT BUILD_ARCHIVE_DSO_STUB AND NOT BUILD_TEST_JNI_LIBRARY)
   if(DEBUG_BUILD AND NOT DISABLE_DEBUG)
     add_compile_definitions(DEBUG)
   endif()
@@ -330,16 +470,23 @@ set(POTENTIAL_COMMON_COMPILER_ARGS
   -fno-strict-aliasing
   -fno-function-sections
   -fno-data-sections
+  -fno-dwarf-exceptions
+  -fno-asynchronous-unwind-tables
   -funswitch-loops
   -Wa,-noexecstack
   -fPIC
   -O2
 )
 
-if(NOT BUILD_ARCHIVE_DSO_STUB)
-  list(APPEND POTENTIAL_COMMON_COMPILER_ARGS
-    -g
-  )
+set(POTENTIAL_COMMON_CXX_COMPILER_ARGS
+  ${POTENTIAL_COMMON_COMPILER_ARGS}
+  -fno-cxx-exceptions
+)
+
+if(NOT BUILD_ARCHIVE_DSO_STUB AND NOT BUILD_TEST_JNI_LIBRARY)
+ list(APPEND POTENTIAL_COMMON_COMPILER_ARGS
+   -g
+ )
 endif()
 
 set(POTENTIAL_COMMON_LINKER_ARGS
@@ -350,6 +497,7 @@ set(POTENTIAL_COMMON_LINKER_ARGS
   LINKER:-z,noexecstack
   LINKER:--no-undefined
   LINKER:--export-dynamic
+  LINKER:--no-eh-frame-hdr
 )
 
 # Add some options to increase security. They may mildly affect performance but they won't be big, because the features are
@@ -414,6 +562,10 @@ set(POTENTIAL_XA_COMMON_COMPILER_ARGS
   -fstrict-flex-arrays=3
 )
 
+set(POTENTIAL_XA_CXX_COMPILER_ARGS
+  ${POTENTIAL_XA_COMMON_COMPILER_ARGS}
+)
+
 if (ENABLE_CLANG_ASAN OR ENABLE_CLANG_UBSAN)
   list(APPEND POTENTIAL_XA_COMMON_COMPILER_ARGS
     -fno-omit-frame-pointer
@@ -448,7 +600,7 @@ endif()
 message(STATUS)
 message(STATUS "Checking support for common compiler and linker args")
 message(STATUS)
-xa_check_cxx_args(COMMON_CXX_ARGS "${POTENTIAL_COMMON_COMPILER_ARGS}")
+xa_check_cxx_args(COMMON_CXX_ARGS "${POTENTIAL_COMMON_CXX_COMPILER_ARGS}")
 xa_check_c_args(COMMON_C_ARGS "${POTENTIAL_COMMON_COMPILER_ARGS}")
 xa_check_cxx_linker_args(COMMON_CXX_LINKER_ARGS "${POTENTIAL_COMMON_LINKER_ARGS}")
 xa_check_c_linker_args(COMMON_C_LINKER_ARGS "${POTENTIAL_COMMON_LINKER_ARGS}")
@@ -456,14 +608,14 @@ xa_check_c_linker_args(COMMON_C_LINKER_ARGS "${POTENTIAL_COMMON_LINKER_ARGS}")
 message(STATUS)
 message(STATUS "Checking support for XA common compiler and linker args")
 message(STATUS)
-xa_check_cxx_args(XA_COMMON_CXX_ARGS "${POTENTIAL_XA_COMMON_COMPILER_ARGS}")
+xa_check_cxx_args(XA_COMMON_CXX_ARGS "${POTENTIAL_XA_CXX_COMPILER_ARGS}")
 xa_check_c_args(XA_COMMON_C_ARGS "${POTENTIAL_XA_COMMON_COMPILER_ARGS}")
 xa_check_cxx_linker_args(XA_COMMON_CXX_LINKER_ARGS "${POTENTIAL_XA_COMMON_LINKER_ARGS}")
 xa_check_c_linker_args(XA_COMMON_C_LINKER_ARGS "${POTENTIAL_XA_COMMON_LINKER_ARGS}")
 xa_check_c_linker_args(XA_C_DSO_LINKER_ARGS "${POTENTIAL_XA_DSO_LINKER_ARGS}")
 xa_check_cxx_linker_args(XA_CXX_DSO_LINKER_ARGS "${POTENTIAL_XA_DSO_LINKER_ARGS}")
 
-if(NOT BUILD_ARCHIVE_DSO_STUB)
+if(NOT BUILD_ARCHIVE_DSO_STUB AND NOT BUILD_TEST_JNI_LIBRARY)
   add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_ARGS}>")
   add_compile_options("$<$<COMPILE_LANGUAGE:C>:${COMMON_C_ARGS}>")
 
@@ -484,29 +636,55 @@ macro(set_static_library_suffix TARGET_NAME)
   endif()
 endmacro()
 
-if(BUILD_ARCHIVE_DSO_STUB)
-  add_subdirectory(archive-dso-stub)
-else()
-  add_subdirectory(libunwind)
-  add_subdirectory(lz4)
-  add_subdirectory(libstub)
-  add_subdirectory(shared)
-  add_subdirectory(java-interop)
-  add_subdirectory(xamarin-app-stub)
-  add_subdirectory(runtime-base)
-  add_subdirectory(tracing)
-  add_subdirectory(pinvoke-override)
+macro(strip_unneeded_elf_sections LIB_NAME)
+  # Strip sections used for stack unwinding when C++ exceptions are thrown. We don't use exceptions, so it's just ballast for us
+  add_custom_command(
+    TARGET ${LIB_NAME}
+    POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} --remove-section=".eh_frame" --remove-section=".gcc_except_table" "$<TARGET_FILE:${LIB_NAME}>"
+  )
+endmacro()
 
-  if(DEBUG_BUILD)
-    add_subdirectory(xamarin-debug-app-helper)
+if(BUILD_ARCHIVE_DSO_STUB)
+  add_subdirectory(common/archive-dso-stub)
+elseif(BUILD_TEST_JNI_LIBRARY)
+  add_subdirectory(common/test-jni-library)
+else()
+  add_subdirectory(common/java-interop)
+
+  if (IS_MONO_RUNTIME OR IS_CLR_RUNTIME)
+    add_subdirectory(common/libunwind)
+    add_subdirectory(common/runtime-base)
+
+    add_subdirectory(${SOURCES_PREFIX}/runtime-base)
+    add_subdirectory(${SOURCES_PREFIX}/shared)
+    add_subdirectory(${SOURCES_PREFIX}/xamarin-app-stub)
   endif()
 
-  add_subdirectory(monodroid)
+  if (IS_MONO_RUNTIME)
+    add_subdirectory(mono/tracing)
+    add_subdirectory(mono/pinvoke-override)
 
-  add_custom_target(run_static_analysis
-    COMMAND ${ANDROID_TOOLCHAIN_ROOT}/bin/clang-check -analyze -p="${CMAKE_CURRENT_BINARY_DIR}" ${CLANG_CHECK_SOURCES} > ${CMAKE_SOURCE_DIR}/static-analysis.${ANDROID_ABI}.${CMAKE_BUILD_TYPE}.txt 2>&1
-    COMMAND_EXPAND_LISTS
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    USES_TERMINAL
-  )
+    if(DEBUG_BUILD)
+      add_subdirectory(mono/xamarin-debug-app-helper)
+    endif()
+
+    add_subdirectory(mono/monodroid)
+
+    add_custom_target(run_static_analysis
+      COMMAND ${ANDROID_TOOLCHAIN_ROOT}/bin/clang-check -analyze -p="${CMAKE_CURRENT_BINARY_DIR}" ${CLANG_CHECK_SOURCES} > ${CMAKE_SOURCE_DIR}/static-analysis.${ANDROID_ABI}.${CMAKE_BUILD_TYPE}.txt 2>&1
+      COMMAND_EXPAND_LISTS
+      WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+      USES_TERMINAL
+    )
+  endif()
+
+  if (IS_CLR_RUNTIME)
+    add_subdirectory(clr/pinvoke-override)
+    add_subdirectory(clr/host)
+  endif()
+
+  if (IS_NAOT_RUNTIME)
+    add_subdirectory(nativeaot/host)
+  endif()
 endif()

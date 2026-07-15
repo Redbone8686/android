@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -6,6 +8,7 @@ using Microsoft.Android.Build.Tasks;
 using Microsoft.Build.Utilities;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using Java.Interop.Tools.Cecil;
 using Xamarin.Android.Tools;
 
 namespace Xamarin.Android.Tasks
@@ -14,24 +17,26 @@ namespace Xamarin.Android.Tasks
 	{
 		sealed class AssemblyImports
 		{
-			public MethodReference MonoUnhandledExceptionMethod;
-			public TypeReference   SystemException;
-			public MethodReference UnhandledExceptionMethod;
-			public CustomAttribute UnmanagedCallersOnlyAttribute;
-			public MethodReference WaitForBridgeProcessingMethod;
+			public MethodReference? MonoUnhandledExceptionMethod;
+			public TypeReference? SystemException;
+			public MethodReference? UnhandledExceptionMethod;
+			public CustomAttribute? UnmanagedCallersOnlyAttribute;
+			public MethodReference? WaitForBridgeProcessingMethod;
 		}
 
 		readonly TaskLoggingHelper log;
-		readonly MarshalMethodsClassifier classifier;
+		readonly MarshalMethodsCollection classifier;
 		readonly XAAssemblyResolver resolver;
 		readonly AndroidTargetArch targetArch;
+		readonly ManagedMarshalMethodsLookupInfo? managedMarshalMethodsLookupInfo;
 
-		public MarshalMethodsAssemblyRewriter (TaskLoggingHelper log, AndroidTargetArch targetArch, MarshalMethodsClassifier classifier, XAAssemblyResolver resolver)
+		public MarshalMethodsAssemblyRewriter (TaskLoggingHelper log, AndroidTargetArch targetArch, MarshalMethodsCollection classifier, XAAssemblyResolver resolver, ManagedMarshalMethodsLookupInfo? managedMarshalMethodsLookupInfo)
 		{
 			this.log = log ?? throw new ArgumentNullException (nameof (log));
 			this.targetArch = targetArch;
 			this.classifier = classifier ?? throw new ArgumentNullException (nameof (classifier));;
 			this.resolver = resolver ?? throw new ArgumentNullException (nameof (resolver));;
+			this.managedMarshalMethodsLookupInfo = managedMarshalMethodsLookupInfo;
 		}
 
 		// TODO: do away with broken exception transitions, there's no point in supporting them
@@ -42,22 +47,38 @@ namespace Xamarin.Android.Tasks
 				throw new InvalidOperationException ($"[{targetArch}] Internal error: unable to load the Mono.Android.Runtime assembly");
 			}
 
-			TypeDefinition runtime = FindType (monoAndroidRuntime, "Android.Runtime.AndroidRuntimeInternal", required: true)!;
-			MethodDefinition waitForBridgeProcessingMethod = FindMethod (runtime, "WaitForBridgeProcessing", required: true)!;
+			TypeDefinition? runtime = FindType (monoAndroidRuntime, "Android.Runtime.AndroidRuntimeInternal", required: true);
+			if (runtime == null)
+				throw new ArgumentNullException (nameof (runtime));
+			MethodDefinition? waitForBridgeProcessingMethod = FindMethod (runtime, "WaitForBridgeProcessing", required: true);
+			if (waitForBridgeProcessingMethod == null)
+				throw new ArgumentNullException (nameof (waitForBridgeProcessingMethod));
 
-			TypeDefinition androidEnvironment = FindType (monoAndroidRuntime, "Android.Runtime.AndroidEnvironmentInternal", required: true)!;
-			MethodDefinition unhandledExceptionMethod = FindMethod (androidEnvironment, "UnhandledException", required: true)!;
+			TypeDefinition? androidEnvironment = FindType (monoAndroidRuntime, "Android.Runtime.AndroidEnvironmentInternal", required: true);
+			if (androidEnvironment == null)
+				throw new ArgumentNullException (nameof (androidEnvironment));
+			MethodDefinition? unhandledExceptionMethod = FindMethod (androidEnvironment, "UnhandledException", required: true);
+			if (unhandledExceptionMethod == null)
+				throw new ArgumentNullException (nameof (unhandledExceptionMethod));
 
-			TypeDefinition runtimeNativeMethods = FindType (monoAndroidRuntime, "Android.Runtime.RuntimeNativeMethods", required: true);
-			MethodDefinition monoUnhandledExceptionMethod = FindMethod (runtimeNativeMethods, "monodroid_debugger_unhandled_exception", required: true);
+			TypeDefinition? runtimeNativeMethods = FindType (monoAndroidRuntime, "Android.Runtime.RuntimeNativeMethods", required: true);
+			if (runtimeNativeMethods == null)
+				throw new ArgumentNullException (nameof (runtimeNativeMethods));
+			MethodDefinition? monoUnhandledExceptionMethod = FindMethod (runtimeNativeMethods, "monodroid_debugger_unhandled_exception", required: true);
+			if (monoUnhandledExceptionMethod == null)
+				throw new ArgumentNullException (nameof (monoUnhandledExceptionMethod));
 
-			AssemblyDefinition corlib = resolver.Resolve ("System.Private.CoreLib");
-			TypeDefinition systemException = FindType (corlib, "System.Exception", required: true);
+			AssemblyDefinition? corlib = resolver.Resolve ("System.Private.CoreLib");
+			if (corlib == null)
+				throw new ArgumentNullException (nameof (corlib));
+			TypeDefinition? systemException = FindType (corlib, "System.Exception", required: true);
+			if (systemException == null)
+				throw new ArgumentNullException (nameof (systemException));
 
 			MethodDefinition unmanagedCallersOnlyAttributeCtor = GetUnmanagedCallersOnlyAttributeConstructor (resolver);
 
 			var assemblyImports = new Dictionary<AssemblyDefinition, AssemblyImports> ();
-			foreach (AssemblyDefinition asm in classifier.Assemblies) {
+			foreach (AssemblyDefinition asm in classifier.AssembliesWithMarshalMethods) {
 				var imports = new AssemblyImports {
 					MonoUnhandledExceptionMethod  = asm.MainModule.ImportReference (monoUnhandledExceptionMethod),
 					SystemException               = asm.MainModule.ImportReference (systemException),
@@ -77,6 +98,12 @@ namespace Xamarin.Android.Tasks
 					string fullNativeCallbackName = method.NativeCallback.FullName;
 					if (processedMethods.TryGetValue (fullNativeCallbackName, out MethodDefinition nativeCallbackWrapper)) {
 						method.NativeCallbackWrapper = nativeCallbackWrapper;
+						continue;
+					}
+
+					if (HasUnmanagedCallersOnlyAttribute (method.NativeCallback)) {
+						log.LogDebugMessage ($"[{targetArch}] Method '{method.NativeCallback.FullName}' does not need a wrapper, it already has UnmanagedCallersOnlyAttribute");
+						method.NativeCallbackWrapper = method.NativeCallback;
 						continue;
 					}
 
@@ -103,7 +130,18 @@ namespace Xamarin.Android.Tasks
 				}
 			}
 
-			foreach (AssemblyDefinition asm in classifier.Assemblies) {
+			if (managedMarshalMethodsLookupInfo is not null) {
+				// TODO the code should probably go to different assemblies than Mono.Android (to avoid recursive dependencies)
+				var rootAssembly = resolver.Resolve ("Mono.Android") ?? throw new InvalidOperationException ($"[{targetArch}] Internal error: unable to load the Mono.Android assembly");
+				var managedMarshalMethodsLookupTableType = FindType (rootAssembly, "Java.Interop.ManagedMarshalMethodsLookupTable", required: true);
+			if (managedMarshalMethodsLookupTableType == null)
+				throw new ArgumentNullException (nameof (managedMarshalMethodsLookupTableType));
+
+				var managedMarshalMethodLookupGenerator = new ManagedMarshalMethodsLookupGenerator (log, targetArch, managedMarshalMethodsLookupInfo, managedMarshalMethodsLookupTableType);
+				managedMarshalMethodLookupGenerator.Generate (classifier.MarshalMethods.Values);
+			}
+
+			foreach (AssemblyDefinition asm in classifier.AssembliesWithMarshalMethods) {
 				string? path = asm.MainModule.FileName;
 				if (String.IsNullOrEmpty (path)) {
 					throw new InvalidOperationException ($"[{targetArch}] Internal error: assembly '{asm}' does not specify path to its file");
@@ -175,6 +213,17 @@ namespace Xamarin.Android.Tasks
 					log.LogDebugMessage ($"[{targetArch}] {ex.ToString ()}");
 				}
 			}
+
+			static bool HasUnmanagedCallersOnlyAttribute (MethodDefinition method)
+			{
+				foreach (CustomAttribute ca in method.CustomAttributes) {
+					if (ca.Constructor.DeclaringType.FullName == "System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute") {
+						return true;
+					}
+				}
+
+				return false;
+			}
 		}
 
 		MethodDefinition GenerateWrapper (MarshalMethodEntry method, Dictionary<AssemblyDefinition, AssemblyImports> assemblyImports, bool brokenExceptionTransitions)
@@ -183,7 +232,7 @@ namespace Xamarin.Android.Tasks
 			AssemblyImports imports = assemblyImports [callback.Module.Assembly];
 			string wrapperName = $"{callback.Name}_mm_wrapper";
 			TypeReference retType = MapToBlittableTypeIfNecessary (callback.ReturnType, out bool returnTypeMapped);
-			bool hasReturnValue = String.Compare ("System.Void", callback.ReturnType.FullName, StringComparison.Ordinal) != 0;
+			bool hasReturnValue = !MonoAndroidHelper.StringEquals ("System.Void", callback.ReturnType.FullName);
 			var wrapperMethod = new MethodDefinition (wrapperName, callback.Attributes, retType);
 
 			callback.DeclaringType.Methods.Add (wrapperMethod);
@@ -274,7 +323,7 @@ namespace Xamarin.Android.Tasks
 				body.Instructions.Add (Instruction.Create (OpCodes.Call, imports.UnhandledExceptionMethod));
 
 				if (hasReturnValue) {
-					AddSetDefaultValueInstructions (body, retType, retval);
+					AddSetDefaultValueInstructions (body, retType, retval!);
 				}
 			}
 
@@ -322,8 +371,8 @@ namespace Xamarin.Android.Tasks
 
 			bool IsBooleanConversion (TypeReference sourceType, TypeReference targetType)
 			{
-				if (String.Compare ("System.Boolean", sourceType.FullName, StringComparison.Ordinal) == 0) {
-					if (String.Compare ("System.Byte", targetType.FullName, StringComparison.Ordinal) != 0) {
+				if (MonoAndroidHelper.StringEquals ("System.Boolean", sourceType.FullName)) {
+					if (!MonoAndroidHelper.StringEquals ("System.Byte", targetType.FullName)) {
 						throw new InvalidOperationException ($"[{targetArch}] Unexpected conversion from '{sourceType.FullName}' to '{targetType.FullName}'");
 					}
 
@@ -426,12 +475,12 @@ namespace Xamarin.Android.Tasks
 
 		TypeReference MapToBlittableTypeIfNecessary (TypeReference type, out bool typeMapped)
 		{
-			if (type.IsBlittable () || String.Compare ("System.Void", type.FullName, StringComparison.Ordinal) == 0) {
+			if (type.IsBlittable () || MonoAndroidHelper.StringEquals ("System.Void", type.FullName)) {
 				typeMapped = false;
 				return type;
 			}
 
-			if (String.Compare ("System.Boolean", type.FullName, StringComparison.Ordinal) == 0) {
+			if (MonoAndroidHelper.StringEquals ("System.Boolean", type.FullName)) {
 				// Maps to Java JNI's jboolean which is an unsigned 8-bit type
 				typeMapped = true;
 				return ReturnValid (typeof(byte));
@@ -452,15 +501,18 @@ namespace Xamarin.Android.Tasks
 
 		MethodDefinition GetUnmanagedCallersOnlyAttributeConstructor (IAssemblyResolver resolver)
 		{
-			AssemblyDefinition asm = resolver.Resolve ("System.Runtime.InteropServices");
-			TypeDefinition unmanagedCallersOnlyAttribute = null;
+			AssemblyDefinition? asm = resolver.Resolve ("System.Runtime.InteropServices");
+			if (asm == null)
+				throw new ArgumentNullException (nameof (asm));
+			
+			TypeDefinition? unmanagedCallersOnlyAttribute = null;
 			foreach (ModuleDefinition md in asm.Modules) {
 				foreach (ExportedType et in md.ExportedTypes) {
 					if (!et.IsForwarder) {
 						continue;
 					}
 
-					if (String.Compare ("System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute", et.FullName, StringComparison.Ordinal) != 0) {
+					if (!MonoAndroidHelper.StringEquals ("System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute", et.FullName)) {
 						continue;
 					}
 
@@ -494,7 +546,7 @@ namespace Xamarin.Android.Tasks
 			log.LogDebugMessage ($"[{targetArch}] Looking for method '{methodName}' in type {type}");
 			foreach (MethodDefinition method in type.Methods) {
 				log.LogDebugMessage ($"[{targetArch}]   method: {method.Name}");
-				if (String.Compare (methodName, method.Name, StringComparison.Ordinal) == 0) {
+				if (MonoAndroidHelper.StringEquals (methodName, method.Name)) {
 					log.LogDebugMessage ($"[{targetArch}]     match!");
 					return method;
 				}
@@ -512,7 +564,7 @@ namespace Xamarin.Android.Tasks
 			log.LogDebugMessage ($"[{targetArch}] Looking for type '{typeName}' in assembly '{asm}' ({GetAssemblyPathInfo (asm)})");
 			foreach (TypeDefinition t in asm.MainModule.Types) {
 				log.LogDebugMessage ($"[{targetArch}]    checking {t.FullName}");
-				if (String.Compare (typeName, t.FullName, StringComparison.Ordinal) == 0) {
+				if (MonoAndroidHelper.StringEquals (typeName, t.FullName)) {
 					log.LogDebugMessage ($"[{targetArch}]     match!");
 					return t;
 				}
